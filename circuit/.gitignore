@@ -10,6 +10,7 @@ _autosave-*
 *.bak
 *.kicad_sch-bak
 *.kicad_pcb-bak
+.history/
 
 # Generated cache files
 fp-info-cache
