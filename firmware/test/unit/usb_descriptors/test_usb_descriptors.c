@@ -10,9 +10,12 @@
 enum {
     EXPECTED_CONFIGURATION_LENGTH = 98,
     EXPECTED_BOS_LENGTH = 33,
-    EXPECTED_MS_OS_20_LENGTH = 46,
+    EXPECTED_MS_OS_20_LENGTH = 178,
     EXPECTED_MS_VENDOR_CODE = 0x20,
 };
+
+static const char expected_device_interface_guid[] =
+    "{E00ECB98-DD2B-4E70-8471-A7223FADDAF9}";
 
 static bool control_called;
 static uint8_t control_rhport;
@@ -31,6 +34,26 @@ static uint32_t read_u32(const uint8_t *data)
         ((uint32_t) data[1] << 8U) |
         ((uint32_t) data[2] << 16U) |
         ((uint32_t) data[3] << 24U);
+}
+
+static void assert_utf16le_ascii(
+    const uint8_t *data,
+    size_t data_length,
+    const char *expected,
+    size_t trailing_nulls)
+{
+    const size_t expected_length = strlen(expected);
+
+    assert(data_length == (expected_length + trailing_nulls) * 2U);
+    for (size_t index = 0U; index < expected_length; ++index) {
+        assert(data[index * 2U] == (uint8_t) expected[index]);
+        assert(data[index * 2U + 1U] == 0U);
+    }
+    for (size_t index = expected_length * 2U;
+         index < data_length;
+         ++index) {
+        assert(data[index] == 0U);
+    }
 }
 
 bool tud_control_xfer(
@@ -70,7 +93,7 @@ static void test_device_descriptor(void)
     assert(descriptor->bMaxPacketSize0 == 64U);
     assert(descriptor->idVendor == 0x303AU);
     assert(descriptor->idProduct == 0x4021U);
-    assert(descriptor->bcdDevice == 0x0100U);
+    assert(descriptor->bcdDevice == 0x0101U);
     assert(descriptor->iManufacturer == 1U);
     assert(descriptor->iProduct == 2U);
     assert(descriptor->iSerialNumber == 3U);
@@ -212,16 +235,28 @@ static void assert_ms_os_20_descriptor(const uint8_t *descriptor)
     assert(read_u16(descriptor + 10U) == 8U);
     assert(read_u16(descriptor + 12U) == MS_OS_20_SUBSET_HEADER_CONFIGURATION);
     assert(descriptor[14] == 0U);
-    assert(read_u16(descriptor + 16U) == 36U);
+    assert(read_u16(descriptor + 16U) == 168U);
 
     assert(read_u16(descriptor + 18U) == 8U);
     assert(read_u16(descriptor + 20U) == MS_OS_20_SUBSET_HEADER_FUNCTION);
     assert(descriptor[22] == AIRDAP_USB_DAP_INTERFACE);
-    assert(read_u16(descriptor + 24U) == 28U);
+    assert(read_u16(descriptor + 24U) == 160U);
 
     assert(read_u16(descriptor + 26U) == 20U);
     assert(read_u16(descriptor + 28U) == MS_OS_20_FEATURE_COMPATBLE_ID);
     assert(memcmp(descriptor + 30U, "WINUSB\0\0", 8U) == 0);
+
+    assert(read_u16(descriptor + 46U) == 132U);
+    assert(read_u16(descriptor + 48U) == MS_OS_20_FEATURE_REG_PROPERTY);
+    assert(read_u16(descriptor + 50U) == 7U);
+    assert(read_u16(descriptor + 52U) == 42U);
+    assert_utf16le_ascii(descriptor + 54U, 42U, "DeviceInterfaceGUIDs", 1U);
+    assert(read_u16(descriptor + 96U) == 80U);
+    assert_utf16le_ascii(
+        descriptor + 98U,
+        80U,
+        expected_device_interface_guid,
+        2U);
 }
 
 static void test_ms_os_20_control_request(void)
