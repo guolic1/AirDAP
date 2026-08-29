@@ -1,5 +1,5 @@
 idf_component_register(
     SRCS "app_main.c"
-    PRIV_REQUIRES log
+    PRIV_REQUIRES board esp_common log swd_engine usb_device voltage_monitor
     INCLUDE_DIRS ""
 )
