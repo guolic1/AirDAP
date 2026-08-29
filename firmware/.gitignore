@@ -1,3 +1,7 @@
 /build/
+/build-host/
+/managed_components/
+__pycache__/
+*.py[cod]
 /sdkconfig
 /sdkconfig.old
