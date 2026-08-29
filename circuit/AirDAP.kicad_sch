@@ -67,16 +67,6 @@
 	)
 	(wire
 		(pts
-			(xy 134.62 104.14) (xy 140.97 104.14)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "67d0f0c4-164e-419d-a9af-7d6ef9eca43e")
-	)
-	(wire
-		(pts
 			(xy 134.62 83.82) (xy 140.97 83.82)
 		)
 		(stroke
@@ -97,23 +87,13 @@
 	)
 	(wire
 		(pts
-			(xy 134.62 113.03) (xy 140.97 113.03)
+			(xy 134.62 106.68) (xy 140.97 106.68)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
 		(uuid "d317b334-6ef8-4866-9ffc-7bc3cfd932a3")
-	)
-	(wire
-		(pts
-			(xy 134.62 101.6) (xy 140.97 101.6)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "d720567a-f4c8-437a-bfe1-53e2ffdf35c4")
 	)
 	(wire
 		(pts
@@ -127,7 +107,7 @@
 	)
 	(wire
 		(pts
-			(xy 134.62 115.57) (xy 140.97 115.57)
+			(xy 134.62 109.22) (xy 140.97 109.22)
 		)
 		(stroke
 			(width 0)
@@ -137,7 +117,7 @@
 	)
 	(sheet
 		(at 140.97 72.39)
-		(size 43.18 45.72)
+		(size 29.21 39.37)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
@@ -163,7 +143,7 @@
 			)
 		)
 		(property "Sheetfile" "ESP32_Core.kicad_sch"
-			(at 140.97 118.6946 0)
+			(at 140.97 112.3446 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -172,16 +152,6 @@
 					(size 1.27 1.27)
 				)
 				(justify left top)
-			)
-		)
-		(pin "ESP_RX" input
-			(at 140.97 104.14 180)
-			(uuid "21db6462-1764-479e-8546-f704e8801a79")
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
 			)
 		)
 		(pin "TARGET_RX_TDO" input
@@ -205,7 +175,7 @@
 			)
 		)
 		(pin "TARGET_VTREF_ADC" input
-			(at 140.97 113.03 180)
+			(at 140.97 106.68 180)
 			(uuid "73fcdf09-f0b3-4db8-bd5c-9a9cb29a8e35")
 			(effects
 				(font
@@ -245,18 +215,8 @@
 			)
 		)
 		(pin "V_SOURCE_STATUS" input
-			(at 140.97 115.57 180)
+			(at 140.97 109.22 180)
 			(uuid "d1c696cf-d9f1-4f8f-8784-1de7109831db")
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "ESP_TX" output
-			(at 140.97 101.6 180)
-			(uuid "030e69c0-11a7-4bbf-8dd1-5a657163bf69")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -313,7 +273,7 @@
 		)
 	)
 	(sheet
-		(at 115.57 110.49)
+		(at 115.57 104.14)
 		(size 19.05 7.62)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -329,7 +289,7 @@
 		)
 		(uuid "62945a0a-2785-426c-a0f7-5563abcbf14f")
 		(property "Sheetname" "Power"
-			(at 115.57 109.7784 0)
+			(at 115.57 103.4284 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -340,7 +300,7 @@
 			)
 		)
 		(property "Sheetfile" "Power.kicad_sch"
-			(at 115.57 118.6946 0)
+			(at 115.57 112.3446 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -352,7 +312,7 @@
 			)
 		)
 		(pin "Vtarget_sense" output
-			(at 134.62 113.03 0)
+			(at 134.62 106.68 0)
 			(uuid "3b12729b-1196-4903-9d35-79b2e1d6024a")
 			(effects
 				(font
@@ -362,7 +322,7 @@
 			)
 		)
 		(pin "TPS2116_STATUS" output
-			(at 134.62 115.57 0)
+			(at 134.62 109.22 0)
 			(uuid "55b2dda8-24b6-4771-926c-90f89cd879e5")
 			(effects
 				(font
@@ -381,7 +341,7 @@
 	)
 	(sheet
 		(at 115.57 72.39)
-		(size 19.05 34.29)
+		(size 19.05 28.575)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
@@ -407,7 +367,7 @@
 			)
 		)
 		(property "Sheetfile" "Port.kicad_sch"
-			(at 115.57 107.2646 0)
+			(at 115.57 101.5496 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -501,26 +461,6 @@
 		(pin "VBUS_sense" output
 			(at 134.62 74.93 0)
 			(uuid "ebdab18c-badd-4cde-8365-84308ab5594c")
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(pin "ESP_TX" input
-			(at 134.62 101.6 0)
-			(uuid "146ade9f-3693-438b-8a4e-9a5f7426e378")
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(pin "ESP_RX" output
-			(at 134.62 104.14 0)
-			(uuid "7f092681-6831-444f-8c03-962cb074bcf3")
 			(effects
 				(font
 					(size 1.27 1.27)
