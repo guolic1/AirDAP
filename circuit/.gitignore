@@ -3,6 +3,7 @@
 *.kicad_sch.lck
 *.kicad_pcb.lck
 ~*.lck
+fp-lib-table
 
 # Autosave and backup files
 _autosave-*
@@ -15,3 +16,10 @@ _autosave-*
 # Generated cache files
 fp-info-cache
 *.net
+
+# Generated BOM and fabrication outputs
+*.csv
+*.gbr
+*.drl
+*.gbrjob
+*.zip

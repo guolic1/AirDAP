@@ -7,7 +7,7 @@
 	(lib_symbols)
 	(wire
 		(pts
-			(xy 139.7 95.25) (xy 146.05 95.25)
+			(xy 134.62 95.25) (xy 140.97 95.25)
 		)
 		(stroke
 			(width 0)
@@ -17,7 +17,7 @@
 	)
 	(wire
 		(pts
-			(xy 139.7 86.36) (xy 146.05 86.36)
+			(xy 134.62 86.36) (xy 140.97 86.36)
 		)
 		(stroke
 			(width 0)
@@ -27,7 +27,7 @@
 	)
 	(wire
 		(pts
-			(xy 139.7 91.44) (xy 146.05 91.44)
+			(xy 134.62 91.44) (xy 140.97 91.44)
 		)
 		(stroke
 			(width 0)
@@ -37,7 +37,7 @@
 	)
 	(wire
 		(pts
-			(xy 139.7 97.79) (xy 146.05 97.79)
+			(xy 134.62 97.79) (xy 140.97 97.79)
 		)
 		(stroke
 			(width 0)
@@ -47,7 +47,7 @@
 	)
 	(wire
 		(pts
-			(xy 139.7 74.93) (xy 146.05 74.93)
+			(xy 134.62 74.93) (xy 140.97 74.93)
 		)
 		(stroke
 			(width 0)
@@ -57,7 +57,7 @@
 	)
 	(wire
 		(pts
-			(xy 139.7 88.9) (xy 146.05 88.9)
+			(xy 134.62 88.9) (xy 140.97 88.9)
 		)
 		(stroke
 			(width 0)
@@ -67,7 +67,7 @@
 	)
 	(wire
 		(pts
-			(xy 139.7 104.14) (xy 146.05 104.14)
+			(xy 134.62 104.14) (xy 140.97 104.14)
 		)
 		(stroke
 			(width 0)
@@ -77,7 +77,7 @@
 	)
 	(wire
 		(pts
-			(xy 139.7 83.82) (xy 146.05 83.82)
+			(xy 134.62 83.82) (xy 140.97 83.82)
 		)
 		(stroke
 			(width 0)
@@ -87,7 +87,7 @@
 	)
 	(wire
 		(pts
-			(xy 139.7 81.28) (xy 146.05 81.28)
+			(xy 134.62 81.28) (xy 140.97 81.28)
 		)
 		(stroke
 			(width 0)
@@ -97,7 +97,7 @@
 	)
 	(wire
 		(pts
-			(xy 139.7 113.03) (xy 146.05 113.03)
+			(xy 134.62 113.03) (xy 140.97 113.03)
 		)
 		(stroke
 			(width 0)
@@ -107,7 +107,7 @@
 	)
 	(wire
 		(pts
-			(xy 139.7 101.6) (xy 146.05 101.6)
+			(xy 134.62 101.6) (xy 140.97 101.6)
 		)
 		(stroke
 			(width 0)
@@ -117,7 +117,7 @@
 	)
 	(wire
 		(pts
-			(xy 139.7 78.74) (xy 146.05 78.74)
+			(xy 134.62 78.74) (xy 140.97 78.74)
 		)
 		(stroke
 			(width 0)
@@ -127,7 +127,7 @@
 	)
 	(wire
 		(pts
-			(xy 139.7 115.57) (xy 146.05 115.57)
+			(xy 134.62 115.57) (xy 140.97 115.57)
 		)
 		(stroke
 			(width 0)
@@ -136,7 +136,7 @@
 		(uuid "fe4c8351-6c2f-403c-b70f-a4e0305fef70")
 	)
 	(sheet
-		(at 146.05 72.39)
+		(at 140.97 72.39)
 		(size 43.18 45.72)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -152,7 +152,7 @@
 		)
 		(uuid "2c23961c-63e0-4089-bb2d-ebdeac96d622")
 		(property "Sheetname" "ESP32 Core"
-			(at 146.05 71.6784 0)
+			(at 140.97 71.6784 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -163,7 +163,7 @@
 			)
 		)
 		(property "Sheetfile" "ESP32_Core.kicad_sch"
-			(at 146.05 118.6946 0)
+			(at 140.97 118.6946 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -175,7 +175,7 @@
 			)
 		)
 		(pin "ESP_RX" input
-			(at 146.05 104.14 180)
+			(at 140.97 104.14 180)
 			(uuid "21db6462-1764-479e-8546-f704e8801a79")
 			(effects
 				(font
@@ -185,7 +185,7 @@
 			)
 		)
 		(pin "TARGET_RX_TDO" input
-			(at 146.05 78.74 180)
+			(at 140.97 78.74 180)
 			(uuid "723c9249-67ee-4aae-8b9e-8b354cb60af7")
 			(effects
 				(font
@@ -195,7 +195,7 @@
 			)
 		)
 		(pin "TARGET_SWDIO_TMS" bidirectional
-			(at 146.05 83.82 180)
+			(at 140.97 83.82 180)
 			(uuid "9e4bd081-5b25-493b-a697-88161353b11e")
 			(effects
 				(font
@@ -205,7 +205,7 @@
 			)
 		)
 		(pin "TARGET_VTREF_ADC" input
-			(at 146.05 113.03 180)
+			(at 140.97 113.03 180)
 			(uuid "73fcdf09-f0b3-4db8-bd5c-9a9cb29a8e35")
 			(effects
 				(font
@@ -215,7 +215,7 @@
 			)
 		)
 		(pin "USB_D+" bidirectional
-			(at 146.05 95.25 180)
+			(at 140.97 95.25 180)
 			(uuid "2da0d188-b725-4b0e-8302-b39838624f1f")
 			(effects
 				(font
@@ -225,7 +225,7 @@
 			)
 		)
 		(pin "USB_D-" bidirectional
-			(at 146.05 97.79 180)
+			(at 140.97 97.79 180)
 			(uuid "d2c1000b-48ba-427e-92d1-b38629fc0dfd")
 			(effects
 				(font
@@ -235,7 +235,7 @@
 			)
 		)
 		(pin "USB_VBUS_SENSE" input
-			(at 146.05 74.93 180)
+			(at 140.97 74.93 180)
 			(uuid "e9d06d53-2825-4228-a68c-bcb6e1ef44d8")
 			(effects
 				(font
@@ -245,7 +245,7 @@
 			)
 		)
 		(pin "V_SOURCE_STATUS" input
-			(at 146.05 115.57 180)
+			(at 140.97 115.57 180)
 			(uuid "d1c696cf-d9f1-4f8f-8784-1de7109831db")
 			(effects
 				(font
@@ -255,7 +255,7 @@
 			)
 		)
 		(pin "ESP_TX" output
-			(at 146.05 101.6 180)
+			(at 140.97 101.6 180)
 			(uuid "030e69c0-11a7-4bbf-8dd1-5a657163bf69")
 			(effects
 				(font
@@ -265,7 +265,7 @@
 			)
 		)
 		(pin "SWDIO_DIR" output
-			(at 146.05 88.9 180)
+			(at 140.97 88.9 180)
 			(uuid "685cb843-dece-4c48-bddc-3c56099400cb")
 			(effects
 				(font
@@ -275,7 +275,7 @@
 			)
 		)
 		(pin "TARGET_SWCLK_TCK" output
-			(at 146.05 86.36 180)
+			(at 140.97 86.36 180)
 			(uuid "7dbf0b2d-fe9b-43af-b6a6-f79f80c91a9f")
 			(effects
 				(font
@@ -285,7 +285,7 @@
 			)
 		)
 		(pin "TARGET_TX_TDI" output
-			(at 146.05 81.28 180)
+			(at 140.97 81.28 180)
 			(uuid "3a35f2bf-8e4c-42ba-b545-239be3cac760")
 			(effects
 				(font
@@ -295,7 +295,7 @@
 			)
 		)
 		(pin "TARGET_nRST" output
-			(at 146.05 91.44 180)
+			(at 140.97 91.44 180)
 			(uuid "c381c98b-13fb-47f3-a9e6-392f898b6354")
 			(effects
 				(font
@@ -313,7 +313,7 @@
 		)
 	)
 	(sheet
-		(at 120.65 110.49)
+		(at 115.57 110.49)
 		(size 19.05 7.62)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -329,7 +329,7 @@
 		)
 		(uuid "62945a0a-2785-426c-a0f7-5563abcbf14f")
 		(property "Sheetname" "Power"
-			(at 120.65 109.7784 0)
+			(at 115.57 109.7784 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -340,7 +340,7 @@
 			)
 		)
 		(property "Sheetfile" "Power.kicad_sch"
-			(at 120.65 118.6946 0)
+			(at 115.57 118.6946 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -352,7 +352,7 @@
 			)
 		)
 		(pin "Vtarget_sense" output
-			(at 139.7 113.03 0)
+			(at 134.62 113.03 0)
 			(uuid "3b12729b-1196-4903-9d35-79b2e1d6024a")
 			(effects
 				(font
@@ -361,9 +361,9 @@
 				(justify right)
 			)
 		)
-		(pin "TPS2116_status" output
-			(at 139.7 115.57 0)
-			(uuid "9a99826a-563d-47f6-b922-56ec056c26e7")
+		(pin "TPS2116_STATUS" output
+			(at 134.62 115.57 0)
+			(uuid "55b2dda8-24b6-4771-926c-90f89cd879e5")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -380,7 +380,7 @@
 		)
 	)
 	(sheet
-		(at 120.65 72.39)
+		(at 115.57 72.39)
 		(size 19.05 34.29)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -396,7 +396,7 @@
 		)
 		(uuid "ef2d842a-3d5d-4428-98d6-5b11e5571356")
 		(property "Sheetname" "Port"
-			(at 120.65 71.6784 0)
+			(at 115.57 71.6784 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -407,7 +407,7 @@
 			)
 		)
 		(property "Sheetfile" "Port.kicad_sch"
-			(at 120.65 107.2646 0)
+			(at 115.57 107.2646 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -419,7 +419,7 @@
 			)
 		)
 		(pin "RX_TDO" output
-			(at 139.7 78.74 0)
+			(at 134.62 78.74 0)
 			(uuid "c2a39795-a736-4375-bc1b-37a8c8eb7432")
 			(effects
 				(font
@@ -429,7 +429,7 @@
 			)
 		)
 		(pin "SWCLK_TCK" input
-			(at 139.7 86.36 0)
+			(at 134.62 86.36 0)
 			(uuid "b887ae33-f75b-4a6f-b6ae-ceb2b689d5ba")
 			(effects
 				(font
@@ -439,7 +439,7 @@
 			)
 		)
 		(pin "SWDIO_DIR" input
-			(at 139.7 88.9 0)
+			(at 134.62 88.9 0)
 			(uuid "e8711836-4b49-4692-9304-a32d74eb033d")
 			(effects
 				(font
@@ -449,7 +449,7 @@
 			)
 		)
 		(pin "SWDIO_TMS" bidirectional
-			(at 139.7 83.82 0)
+			(at 134.62 83.82 0)
 			(uuid "09d32cfd-ebb3-4950-b200-eb0a02ed4a4e")
 			(effects
 				(font
@@ -459,7 +459,7 @@
 			)
 		)
 		(pin "TX_TDI" input
-			(at 139.7 81.28 0)
+			(at 134.62 81.28 0)
 			(uuid "0f918c9b-8aba-4653-9518-ffac4d3f2ab9")
 			(effects
 				(font
@@ -469,7 +469,7 @@
 			)
 		)
 		(pin "USB_D+" bidirectional
-			(at 139.7 95.25 0)
+			(at 134.62 95.25 0)
 			(uuid "1aa39668-349c-40b2-b7dd-0135beb17599")
 			(effects
 				(font
@@ -479,7 +479,7 @@
 			)
 		)
 		(pin "USB_D-" bidirectional
-			(at 139.7 97.79 0)
+			(at 134.62 97.79 0)
 			(uuid "f027e9fa-2f44-47f8-80a7-cfbc9b0778b5")
 			(effects
 				(font
@@ -489,7 +489,7 @@
 			)
 		)
 		(pin "nRST" input
-			(at 139.7 91.44 0)
+			(at 134.62 91.44 0)
 			(uuid "ea365f1d-7369-41f3-b22a-addc68b48b7c")
 			(effects
 				(font
@@ -499,7 +499,7 @@
 			)
 		)
 		(pin "VBUS_sense" output
-			(at 139.7 74.93 0)
+			(at 134.62 74.93 0)
 			(uuid "ebdab18c-badd-4cde-8365-84308ab5594c")
 			(effects
 				(font
@@ -509,7 +509,7 @@
 			)
 		)
 		(pin "ESP_TX" input
-			(at 139.7 101.6 0)
+			(at 134.62 101.6 0)
 			(uuid "146ade9f-3693-438b-8a4e-9a5f7426e378")
 			(effects
 				(font
@@ -519,7 +519,7 @@
 			)
 		)
 		(pin "ESP_RX" output
-			(at 139.7 104.14 0)
+			(at 134.62 104.14 0)
 			(uuid "7f092681-6831-444f-8c03-962cb074bcf3")
 			(effects
 				(font

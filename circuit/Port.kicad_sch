@@ -3619,7 +3619,7 @@
 	)
 	(wire
 		(pts
-			(xy 87.63 46.99) (xy 92.71 46.99)
+			(xy 87.63 46.99) (xy 96.52 46.99)
 		)
 		(stroke
 			(width 0)
@@ -3849,7 +3849,7 @@
 	)
 	(wire
 		(pts
-			(xy 87.63 44.45) (xy 92.71 44.45)
+			(xy 87.63 44.45) (xy 96.52 44.45)
 		)
 		(stroke
 			(width 0)
@@ -4159,7 +4159,7 @@
 	)
 	(wire
 		(pts
-			(xy 100.33 44.45) (xy 109.22 44.45)
+			(xy 104.14 44.45) (xy 109.22 44.45)
 		)
 		(stroke
 			(width 0)
@@ -4409,7 +4409,7 @@
 	)
 	(wire
 		(pts
-			(xy 100.33 46.99) (xy 109.22 46.99)
+			(xy 104.14 46.99) (xy 109.22 46.99)
 		)
 		(stroke
 			(width 0)
@@ -4586,6 +4586,26 @@
 			(justify right bottom)
 		)
 		(uuid "9ad09ad8-bf58-4f38-9081-d596985c1a32")
+	)
+	(label "D+"
+		(at 87.63 46.99 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "c166ee98-b2ff-4cbd-9414-ea980a5eecdf")
+	)
+	(label "D-"
+		(at 87.63 44.45 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "e43ef97a-afa4-417c-a4a7-35ec10b8ee1e")
 	)
 	(label "TARGET_SWCLK_TCK"
 		(at 36.83 109.22 180)
@@ -6606,7 +6626,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 96.52 44.45 90)
+		(at 100.33 44.45 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -6616,7 +6636,7 @@
 		(dnp no)
 		(uuid "4cb628e8-edb3-46c4-8f37-e4707d21977f")
 		(property "Reference" "R15"
-			(at 91.948 43.434 90)
+			(at 95.758 43.434 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6626,7 +6646,7 @@
 			)
 		)
 		(property "Value" "22R"
-			(at 101.854 43.688 90)
+			(at 105.664 43.688 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6636,7 +6656,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0402_1005Metric"
-			(at 96.52 46.228 90)
+			(at 100.33 46.228 90)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6647,7 +6667,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 96.52 44.45 0)
+			(at 100.33 44.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6658,7 +6678,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 96.52 44.45 0)
+			(at 100.33 44.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7572,7 +7592,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 96.52 46.99 90)
+		(at 100.33 46.99 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -7582,7 +7602,7 @@
 		(dnp no)
 		(uuid "80e4aaf0-92df-489c-8315-24e2f80e1fb5")
 		(property "Reference" "R16"
-			(at 91.948 45.974 90)
+			(at 95.758 45.974 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7592,7 +7612,7 @@
 			)
 		)
 		(property "Value" "22R"
-			(at 101.854 46.228 90)
+			(at 105.664 46.228 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7602,7 +7622,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0402_1005Metric"
-			(at 96.52 48.768 90)
+			(at 100.33 48.768 90)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7613,7 +7633,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 96.52 46.99 0)
+			(at 100.33 46.99 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7624,7 +7644,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 96.52 46.99 0)
+			(at 100.33 46.99 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
