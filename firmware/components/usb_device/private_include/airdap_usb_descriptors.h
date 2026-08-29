@@ -9,7 +9,12 @@ enum {
     AIRDAP_USB_DAP_INTERFACE = 0,
     AIRDAP_USB_CDC_CONTROL_INTERFACE = 1,
     AIRDAP_USB_CDC_DATA_INTERFACE = 2,
+#if CONFIG_AIRDAP_DEBUG_SHELL
+    AIRDAP_USB_DEBUG_INTERFACE = 3,
+    AIRDAP_USB_INTERFACE_COUNT = 4,
+#else
     AIRDAP_USB_INTERFACE_COUNT = 3,
+#endif
 };
 
 void airdap_usb_descriptors_set_serial(const char *serial_number);

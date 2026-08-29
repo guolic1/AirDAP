@@ -12,6 +12,10 @@ enum {
     USB_CDC_NOTIFICATION_ENDPOINT = 0x82,
     USB_CDC_OUT_ENDPOINT = 0x03,
     USB_CDC_IN_ENDPOINT = 0x83,
+#if CONFIG_AIRDAP_DEBUG_SHELL
+    USB_DEBUG_OUT_ENDPOINT = 0x04,
+    USB_DEBUG_IN_ENDPOINT = 0x84,
+#endif
     USB_FULL_SPEED_MAX_PACKET = 64,
     USB_MS_OS_VENDOR_CODE = 0x20,
 
@@ -21,10 +25,23 @@ enum {
     STRING_SERIAL = 3,
     STRING_DAP_INTERFACE = 4,
     STRING_CDC_INTERFACE = 5,
+#if CONFIG_AIRDAP_DEBUG_SHELL
+    STRING_DEBUG_INTERFACE = 6,
+#endif
 
     CONFIGURATION_TOTAL_LENGTH =
-        TUD_CONFIG_DESC_LEN + TUD_VENDOR_DESC_LEN + TUD_CDC_DESC_LEN,
-    MS_OS_20_DESCRIPTOR_LENGTH = 178,
+        TUD_CONFIG_DESC_LEN + TUD_VENDOR_DESC_LEN + TUD_CDC_DESC_LEN
+#if CONFIG_AIRDAP_DEBUG_SHELL
+        + TUD_VENDOR_DESC_LEN
+#endif
+        ,
+    MS_OS_20_DAP_FUNCTION_LENGTH = 160,
+    MS_OS_20_DEBUG_FUNCTION_LENGTH = 28,
+    MS_OS_20_DESCRIPTOR_LENGTH = 178
+#if CONFIG_AIRDAP_DEBUG_SHELL
+        + MS_OS_20_DEBUG_FUNCTION_LENGTH
+#endif
+        ,
     MS_OS_20_REG_PROPERTY_DESCRIPTOR_LENGTH = 132,
     MS_OS_20_PROPERTY_NAME_LENGTH = 42,
     MS_OS_20_PROPERTY_DATA_LENGTH = 80,
@@ -74,6 +91,15 @@ static const uint8_t configuration_descriptor[] = {
         USB_CDC_OUT_ENDPOINT,
         USB_CDC_IN_ENDPOINT,
         USB_FULL_SPEED_MAX_PACKET),
+
+#if CONFIG_AIRDAP_DEBUG_SHELL
+    TUD_VENDOR_DESCRIPTOR(
+        AIRDAP_USB_DEBUG_INTERFACE,
+        STRING_DEBUG_INTERFACE,
+        USB_DEBUG_OUT_ENDPOINT,
+        USB_DEBUG_IN_ENDPOINT,
+        USB_FULL_SPEED_MAX_PACKET),
+#endif
 };
 
 static char usb_serial[17] = "ADP-000000000000";
@@ -84,6 +110,9 @@ static const char *string_descriptors[] = {
     usb_serial,
     "CMSIS-DAP v2",
     "AirDAP Target UART",
+#if CONFIG_AIRDAP_DEBUG_SHELL
+    "AirDAP Debug Shell",
+#endif
 };
 
 static const uint8_t bos_descriptor[] = {
@@ -109,7 +138,7 @@ static const uint8_t ms_os_20_descriptor[] = {
     U16_TO_U8S_LE(MS_OS_20_SUBSET_HEADER_FUNCTION),
     AIRDAP_USB_DAP_INTERFACE,
     0x00,
-    U16_TO_U8S_LE(MS_OS_20_DESCRIPTOR_LENGTH - 0x0A - 0x08),
+    U16_TO_U8S_LE(MS_OS_20_DAP_FUNCTION_LENGTH),
 
     U16_TO_U8S_LE(0x0014),
     U16_TO_U8S_LE(MS_OS_20_FEATURE_COMPATBLE_ID),
@@ -138,6 +167,19 @@ static const uint8_t ms_os_20_descriptor[] = {
     '2', 0x00, '3', 0x00, 'F', 0x00, 'A', 0x00,
     'D', 0x00, 'D', 0x00, 'A', 0x00, 'F', 0x00,
     '9', 0x00, '}', 0x00, 0x00, 0x00, 0x00, 0x00,
+
+#if CONFIG_AIRDAP_DEBUG_SHELL
+    U16_TO_U8S_LE(0x0008),
+    U16_TO_U8S_LE(MS_OS_20_SUBSET_HEADER_FUNCTION),
+    AIRDAP_USB_DEBUG_INTERFACE,
+    0x00,
+    U16_TO_U8S_LE(MS_OS_20_DEBUG_FUNCTION_LENGTH),
+
+    U16_TO_U8S_LE(0x0014),
+    U16_TO_U8S_LE(MS_OS_20_FEATURE_COMPATBLE_ID),
+    'W', 'I', 'N', 'U', 'S', 'B', 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+#endif
 };
 
 _Static_assert(

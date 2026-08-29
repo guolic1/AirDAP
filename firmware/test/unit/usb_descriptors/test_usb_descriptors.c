@@ -8,9 +8,19 @@
 #include "airdap_usb_descriptors.h"
 
 enum {
+#if CONFIG_AIRDAP_DEBUG_SHELL
+    EXPECTED_CONFIGURATION_LENGTH = 121,
+    EXPECTED_INTERFACE_MASK = 0x0F,
+    EXPECTED_STRING_COUNT = 7,
+    EXPECTED_MS_OS_20_LENGTH = 206,
+#else
     EXPECTED_CONFIGURATION_LENGTH = 98,
-    EXPECTED_BOS_LENGTH = 33,
+    EXPECTED_INTERFACE_MASK = 0x07,
+    EXPECTED_STRING_COUNT = 6,
     EXPECTED_MS_OS_20_LENGTH = 178,
+#endif
+    EXPECTED_IAD_COUNT = 1,
+    EXPECTED_BOS_LENGTH = 33,
     EXPECTED_MS_VENDOR_CODE = 0x20,
 };
 
@@ -103,19 +113,33 @@ static void test_device_descriptor(void)
 static void test_configuration_descriptor(void)
 {
     const uint8_t *descriptor = airdap_usb_configuration_descriptor();
-    static const uint8_t expected_endpoints[] = {0x01, 0x81, 0x82, 0x03, 0x83};
+    static const uint8_t expected_endpoints[] = {
+        0x01, 0x81, 0x82, 0x03, 0x83,
+#if CONFIG_AIRDAP_DEBUG_SHELL
+        0x04, 0x84,
+#endif
+    };
     static const uint8_t expected_attributes[] = {
         TUSB_XFER_BULK,
         TUSB_XFER_BULK,
         TUSB_XFER_INTERRUPT,
         TUSB_XFER_BULK,
         TUSB_XFER_BULK,
+#if CONFIG_AIRDAP_DEBUG_SHELL
+        TUSB_XFER_BULK,
+        TUSB_XFER_BULK,
+#endif
     };
-    static const uint16_t expected_packet_sizes[] = {64, 64, 8, 64, 64};
+    static const uint16_t expected_packet_sizes[] = {
+        64, 64, 8, 64, 64,
+#if CONFIG_AIRDAP_DEBUG_SHELL
+        64, 64,
+#endif
+    };
     size_t offset = 0U;
     size_t endpoint_count = 0U;
     unsigned int interface_mask = 0U;
-    bool found_iad = false;
+    size_t iad_count = 0U;
 
     assert(descriptor != NULL);
     assert(descriptor[0] == 9U);
@@ -145,9 +169,20 @@ static void test_configuration_descriptor(void)
             } else if (number == AIRDAP_USB_CDC_CONTROL_INTERFACE) {
                 assert(descriptor[offset + 5U] == TUSB_CLASS_CDC);
                 assert(descriptor[offset + 8U] == 5U);
-            } else {
+            } else if (number == AIRDAP_USB_CDC_DATA_INTERFACE) {
                 assert(number == AIRDAP_USB_CDC_DATA_INTERFACE);
                 assert(descriptor[offset + 5U] == TUSB_CLASS_CDC_DATA);
+#if CONFIG_AIRDAP_DEBUG_SHELL
+            } else if (number == AIRDAP_USB_DEBUG_INTERFACE) {
+                assert(descriptor[offset + 4U] == 2U);
+                assert(descriptor[offset + 5U] == TUSB_CLASS_VENDOR_SPECIFIC);
+                assert(descriptor[offset + 6U] == 0U);
+                assert(descriptor[offset + 7U] == 0U);
+                assert(descriptor[offset + 8U] == 6U);
+#else
+            } else {
+                assert(false);
+#endif
             }
         } else if (type == TUSB_DESC_ENDPOINT) {
             assert(endpoint_count < sizeof(expected_endpoints));
@@ -158,30 +193,42 @@ static void test_configuration_descriptor(void)
                 expected_packet_sizes[endpoint_count]);
             ++endpoint_count;
         } else if (type == TUSB_DESC_INTERFACE_ASSOCIATION) {
-            assert(descriptor[offset + 2U] == AIRDAP_USB_CDC_CONTROL_INTERFACE);
+            const uint8_t first_interface = descriptor[offset + 2U];
+            assert(first_interface == AIRDAP_USB_CDC_CONTROL_INTERFACE);
             assert(descriptor[offset + 3U] == 2U);
-            found_iad = true;
+            ++iad_count;
         }
         offset += length;
     }
 
     assert(offset == EXPECTED_CONFIGURATION_LENGTH);
-    assert(interface_mask == 0x07U);
+    assert(interface_mask == EXPECTED_INTERFACE_MASK);
     assert(endpoint_count == sizeof(expected_endpoints));
-    assert(found_iad);
+    assert(iad_count == EXPECTED_IAD_COUNT);
+
+    size_t in_endpoint_count = 1U; /* Endpoint zero consumes one IN endpoint. */
+    for (size_t index = 0U; index < sizeof(expected_endpoints); ++index) {
+        if ((expected_endpoints[index] & 0x80U) != 0U) {
+            ++in_endpoint_count;
+        }
+    }
+    assert(in_endpoint_count <= 5U);
 }
 
 static void test_strings_and_stable_serial(void)
 {
     const char **strings = airdap_usb_string_descriptors();
 
-    assert(airdap_usb_string_descriptor_count() == 6U);
+    assert(airdap_usb_string_descriptor_count() == EXPECTED_STRING_COUNT);
     assert((uint8_t) strings[0][0] == 0x09U);
     assert((uint8_t) strings[0][1] == 0x04U);
     assert(strcmp(strings[1], "AirDAP") == 0);
     assert(strstr(strings[2], "CMSIS-DAP") != NULL);
     assert(strstr(strings[4], "CMSIS-DAP") != NULL);
     assert(strstr(strings[5], "UART") != NULL);
+#if CONFIG_AIRDAP_DEBUG_SHELL
+    assert(strstr(strings[6], "Debug Shell") != NULL);
+#endif
 
     airdap_usb_descriptors_set_serial("ADP-A1B2C3D4E5F6");
     assert(strcmp(strings[3], "ADP-A1B2C3D4E5F6") == 0);
@@ -235,7 +282,7 @@ static void assert_ms_os_20_descriptor(const uint8_t *descriptor)
     assert(read_u16(descriptor + 10U) == 8U);
     assert(read_u16(descriptor + 12U) == MS_OS_20_SUBSET_HEADER_CONFIGURATION);
     assert(descriptor[14] == 0U);
-    assert(read_u16(descriptor + 16U) == 168U);
+    assert(read_u16(descriptor + 16U) == EXPECTED_MS_OS_20_LENGTH - 10U);
 
     assert(read_u16(descriptor + 18U) == 8U);
     assert(read_u16(descriptor + 20U) == MS_OS_20_SUBSET_HEADER_FUNCTION);
@@ -257,6 +304,16 @@ static void assert_ms_os_20_descriptor(const uint8_t *descriptor)
         80U,
         expected_device_interface_guid,
         2U);
+
+#if CONFIG_AIRDAP_DEBUG_SHELL
+    assert(read_u16(descriptor + 178U) == 8U);
+    assert(read_u16(descriptor + 180U) == MS_OS_20_SUBSET_HEADER_FUNCTION);
+    assert(descriptor[182] == AIRDAP_USB_DEBUG_INTERFACE);
+    assert(read_u16(descriptor + 184U) == 28U);
+    assert(read_u16(descriptor + 186U) == 20U);
+    assert(read_u16(descriptor + 188U) == MS_OS_20_FEATURE_COMPATBLE_ID);
+    assert(memcmp(descriptor + 190U, "WINUSB\0\0", 8U) == 0);
+#endif
 }
 
 static void test_ms_os_20_control_request(void)

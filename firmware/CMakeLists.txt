@@ -12,6 +12,7 @@ project(airdap)
 add_custom_target(airdap_verify_bootloader ALL
     COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/tools/verify_bootloader.py"
         --build-dir "${CMAKE_BINARY_DIR}"
+        --sdkconfig "${SDKCONFIG}"
         --nm "${CMAKE_NM}"
         --objdump "${CMAKE_OBJDUMP}"
     DEPENDS bootloader

@@ -21,11 +21,14 @@ USB_PID = 0x4021
 USB_DAP_INTERFACE = 0
 USB_CDC_CONTROL_INTERFACE = 1
 USB_CDC_DATA_INTERFACE = 2
+USB_DEBUG_INTERFACE = 3
 USB_DAP_OUT_ENDPOINT = 0x01
 USB_DAP_IN_ENDPOINT = 0x81
 USB_CDC_NOTIFICATION_ENDPOINT = 0x82
 USB_CDC_OUT_ENDPOINT = 0x03
 USB_CDC_IN_ENDPOINT = 0x83
+USB_DEBUG_OUT_ENDPOINT = 0x04
+USB_DEBUG_IN_ENDPOINT = 0x84
 USB_MAX_READ = 512
 DAP_PACKET_SIZE = 508
 DAP_MAX_BLOCK_READS = (DAP_PACKET_SIZE - 4) // 4
@@ -245,8 +248,11 @@ class PyUsbDapTransport:
             (item.bInterfaceNumber, item.bAlternateSetting): item
             for item in self.configuration
         }
-        require(set(interfaces) == {(0, 0), (1, 0), (2, 0)},
+        default_interface_set = {(0, 0), (1, 0), (2, 0)}
+        debug_interface_set = default_interface_set | {(3, 0)}
+        require(set(interfaces) in (default_interface_set, debug_interface_set),
                 f"unexpected USB interfaces {sorted(interfaces)}")
+        debug_shell_enabled = set(interfaces) == debug_interface_set
         dap = interfaces[(USB_DAP_INTERFACE, 0)]
         cdc_control = interfaces[(USB_CDC_CONTROL_INTERFACE, 0)]
         cdc_data = interfaces[(USB_CDC_DATA_INTERFACE, 0)]
@@ -267,10 +273,33 @@ class PyUsbDapTransport:
         require([endpoint.bEndpointAddress for endpoint in cdc_data_endpoints] ==
                 [USB_CDC_OUT_ENDPOINT, USB_CDC_IN_ENDPOINT], "CDC data endpoints are wrong")
         all_endpoints = dap_endpoints + cdc_control_endpoints + cdc_data_endpoints
+        expected_packet_sizes = [64, 64, 8, 64, 64]
+        expected_transfer_types = [2, 2, 3, 2, 2]
+
+        if debug_shell_enabled:
+            debug_interface = interfaces[(USB_DEBUG_INTERFACE, 0)]
+            debug_endpoints = list(debug_interface)
+            require(
+                (debug_interface.bInterfaceClass, debug_interface.bInterfaceSubClass,
+                 debug_interface.bInterfaceProtocol) == (0xFF, 0x00, 0x00),
+                "debug Vendor interface class must be FF/00/00",
+            )
+            require(
+                [endpoint.bEndpointAddress for endpoint in debug_endpoints]
+                == [USB_DEBUG_OUT_ENDPOINT, USB_DEBUG_IN_ENDPOINT],
+                "debug Vendor Bulk endpoints are wrong",
+            )
+            debug_name = self.usb_util.get_string(self.device, debug_interface.iInterface)
+            require(debug_name is not None and "Debug Shell" in debug_name,
+                    "debug interface string does not contain Debug Shell")
+            all_endpoints += debug_endpoints
+            expected_packet_sizes += [64, 64]
+            expected_transfer_types += [2, 2]
+
         require([endpoint.wMaxPacketSize for endpoint in all_endpoints] ==
-                [64, 64, 8, 64, 64], "USB endpoint packet sizes are wrong")
+                expected_packet_sizes, "USB endpoint packet sizes are wrong")
         require([(endpoint.bmAttributes & 0x03) for endpoint in all_endpoints] ==
-                [2, 2, 3, 2, 2], "USB endpoint transfer types are wrong")
+                expected_transfer_types, "USB endpoint transfer types are wrong")
 
         interface_name = self.usb_util.get_string(self.device, dap.iInterface)
         require(interface_name is not None and "CMSIS-DAP" in interface_name,
@@ -299,7 +328,10 @@ class PyUsbDapTransport:
             "dap_interface": "FF/00/00",
             "dap_endpoints": ["0x01", "0x81"],
             "cdc_endpoints": ["0x82", "0x03", "0x83"],
+            "debug_shell_enabled": debug_shell_enabled,
         }
+        if debug_shell_enabled:
+            self.descriptor_evidence["debug_shell_endpoints"] = ["0x04", "0x84"]
 
     def exchange(self, request: bytes) -> bytes:
         require(self.claimed, "USB DAP interface is not open")

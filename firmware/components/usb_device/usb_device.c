@@ -7,6 +7,9 @@
 
 #include "airdap_dap.h"
 #include "airdap_dap_protocol.h"
+#if CONFIG_AIRDAP_DEBUG_SHELL
+#include "airdap_debug_shell.h"
+#endif
 #include "airdap_target_uart.h"
 #include "airdap_usb.h"
 #include "airdap_usb_descriptors.h"
@@ -60,6 +63,9 @@ static void usb_event_callback(tinyusb_event_t *event, void *argument)
     if (event->id == TINYUSB_EVENT_DETACHED) {
         dap_receive_length = 0U;
         enqueue_disconnect();
+#if CONFIG_AIRDAP_DEBUG_SHELL
+        airdap_debug_shell_disconnected();
+#endif
     }
 }
 
@@ -151,6 +157,18 @@ void tud_vendor_rx_cb(
             capacity);
         consume_dap_requests();
     }
+}
+
+void tud_vendor_tx_cb(uint8_t interface_number, uint32_t sent_bytes)
+{
+#if CONFIG_AIRDAP_DEBUG_SHELL
+    if (interface_number == 1U) {
+        airdap_debug_shell_tx_complete(sent_bytes);
+    }
+#else
+    (void) interface_number;
+    (void) sent_bytes;
+#endif
 }
 
 static void cdc_receive_callback(int interface_number, cdcacm_event_t *event)
@@ -304,9 +322,20 @@ esp_err_t airdap_usb_init(void)
         return ESP_ERR_NO_MEM;
     }
 
+#if CONFIG_AIRDAP_DEBUG_SHELL
+    error = airdap_debug_shell_start();
+    if (error != ESP_OK) {
+        return error;
+    }
+    ESP_LOGI(
+        TAG,
+        "USB CMSIS-DAP v2 + target CDC + debug Vendor Bulk initialized, serial %s",
+        serial_number);
+#else
     ESP_LOGI(
         TAG,
         "USB CMSIS-DAP v2 + CDC initialized, serial %s",
         serial_number);
+#endif
     return ESP_OK;
 }
