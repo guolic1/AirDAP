@@ -12,7 +12,7 @@ enum {
     EXPECTED_CONFIGURATION_LENGTH = 121,
     EXPECTED_INTERFACE_MASK = 0x0F,
     EXPECTED_STRING_COUNT = 7,
-    EXPECTED_MS_OS_20_LENGTH = 206,
+    EXPECTED_MS_OS_20_LENGTH = 338,
 #else
     EXPECTED_CONFIGURATION_LENGTH = 98,
     EXPECTED_INTERFACE_MASK = 0x07,
@@ -26,6 +26,10 @@ enum {
 
 static const char expected_device_interface_guid[] =
     "{E00ECB98-DD2B-4E70-8471-A7223FADDAF9}";
+#if CONFIG_AIRDAP_DEBUG_SHELL
+static const char expected_debug_device_interface_guid[] =
+    "{C39A92E6-4303-4F84-A5BB-88AD3C51B2DA}";
+#endif
 
 static bool control_called;
 static uint8_t control_rhport;
@@ -103,7 +107,7 @@ static void test_device_descriptor(void)
     assert(descriptor->bMaxPacketSize0 == 64U);
     assert(descriptor->idVendor == 0x303AU);
     assert(descriptor->idProduct == 0x4021U);
-    assert(descriptor->bcdDevice == 0x0101U);
+    assert(descriptor->bcdDevice == 0x0102U);
     assert(descriptor->iManufacturer == 1U);
     assert(descriptor->iProduct == 2U);
     assert(descriptor->iSerialNumber == 3U);
@@ -309,10 +313,22 @@ static void assert_ms_os_20_descriptor(const uint8_t *descriptor)
     assert(read_u16(descriptor + 178U) == 8U);
     assert(read_u16(descriptor + 180U) == MS_OS_20_SUBSET_HEADER_FUNCTION);
     assert(descriptor[182] == AIRDAP_USB_DEBUG_INTERFACE);
-    assert(read_u16(descriptor + 184U) == 28U);
+    assert(read_u16(descriptor + 184U) == 160U);
     assert(read_u16(descriptor + 186U) == 20U);
     assert(read_u16(descriptor + 188U) == MS_OS_20_FEATURE_COMPATBLE_ID);
     assert(memcmp(descriptor + 190U, "WINUSB\0\0", 8U) == 0);
+
+    assert(read_u16(descriptor + 206U) == 132U);
+    assert(read_u16(descriptor + 208U) == MS_OS_20_FEATURE_REG_PROPERTY);
+    assert(read_u16(descriptor + 210U) == 7U);
+    assert(read_u16(descriptor + 212U) == 42U);
+    assert_utf16le_ascii(descriptor + 214U, 42U, "DeviceInterfaceGUIDs", 1U);
+    assert(read_u16(descriptor + 256U) == 80U);
+    assert_utf16le_ascii(
+        descriptor + 258U,
+        80U,
+        expected_debug_device_interface_guid,
+        2U);
 #endif
 }
 

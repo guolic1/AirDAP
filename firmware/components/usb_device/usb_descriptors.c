@@ -36,7 +36,7 @@ enum {
 #endif
         ,
     MS_OS_20_DAP_FUNCTION_LENGTH = 160,
-    MS_OS_20_DEBUG_FUNCTION_LENGTH = 28,
+    MS_OS_20_DEBUG_FUNCTION_LENGTH = 160,
     MS_OS_20_DESCRIPTOR_LENGTH = 178
 #if CONFIG_AIRDAP_DEBUG_SHELL
         + MS_OS_20_DEBUG_FUNCTION_LENGTH
@@ -59,7 +59,7 @@ static const tusb_desc_device_t device_descriptor = {
     .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
     .idVendor = TINYUSB_ESPRESSIF_VID,
     .idProduct = USB_PRODUCT_ID,
-    .bcdDevice = 0x0101,
+    .bcdDevice = 0x0102,
     .iManufacturer = STRING_MANUFACTURER,
     .iProduct = STRING_PRODUCT,
     .iSerialNumber = STRING_SERIAL,
@@ -179,6 +179,29 @@ static const uint8_t ms_os_20_descriptor[] = {
     U16_TO_U8S_LE(MS_OS_20_FEATURE_COMPATBLE_ID),
     'W', 'I', 'N', 'U', 'S', 'B', 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+    /* Keep this GUID stable and distinct so libusb can claim this function. */
+    U16_TO_U8S_LE(MS_OS_20_REG_PROPERTY_DESCRIPTOR_LENGTH),
+    U16_TO_U8S_LE(MS_OS_20_FEATURE_REG_PROPERTY),
+    U16_TO_U8S_LE(MS_OS_20_PROPERTY_DATA_REG_MULTI_SZ),
+    U16_TO_U8S_LE(MS_OS_20_PROPERTY_NAME_LENGTH),
+    'D', 0x00, 'e', 0x00, 'v', 0x00, 'i', 0x00,
+    'c', 0x00, 'e', 0x00, 'I', 0x00, 'n', 0x00,
+    't', 0x00, 'e', 0x00, 'r', 0x00, 'f', 0x00,
+    'a', 0x00, 'c', 0x00, 'e', 0x00, 'G', 0x00,
+    'U', 0x00, 'I', 0x00, 'D', 0x00, 's', 0x00,
+    0x00, 0x00,
+    U16_TO_U8S_LE(MS_OS_20_PROPERTY_DATA_LENGTH),
+    '{', 0x00, 'C', 0x00, '3', 0x00, '9', 0x00,
+    'A', 0x00, '9', 0x00, '2', 0x00, 'E', 0x00,
+    '6', 0x00, '-', 0x00, '4', 0x00, '3', 0x00,
+    '0', 0x00, '3', 0x00, '-', 0x00, '4', 0x00,
+    'F', 0x00, '8', 0x00, '4', 0x00, '-', 0x00,
+    'A', 0x00, '5', 0x00, 'B', 0x00, 'B', 0x00,
+    '-', 0x00, '8', 0x00, '8', 0x00, 'A', 0x00,
+    'D', 0x00, '3', 0x00, 'C', 0x00, '5', 0x00,
+    '1', 0x00, 'B', 0x00, '2', 0x00, 'D', 0x00,
+    'A', 0x00, '}', 0x00, 0x00, 0x00, 0x00, 0x00,
 #endif
 };
 
