@@ -9,8 +9,8 @@ substitute for this checklist.
 
 Install current pyOCD, PyUSB, and pyserial releases in an isolated Python
 environment. On Windows, PyUSB also needs a libusb backend capable of opening
-the WinUSB-bound DAP interface. On Linux, grant the user access to interface 0
-with an appropriate udev rule.
+the WinUSB-bound Vendor interfaces. On Linux, grant the user access to the
+device with an appropriate udev rule.
 
 With target UART TX/RX connected as a loopback and a known binary reference
 image selected for the target, run:
@@ -35,9 +35,10 @@ reference target. It validates the USB interface and endpoint layout, USB and
 DAP serial agreement, DAP capabilities, the 508-byte response boundary,
 stable DP IDCODE, reset command, CDC loopback line codings, a 500 kHz/1 MHz/
 5 MHz program/readback sweep, and the requested reconnect/program/readback
-cycles. The JSON includes tool versions, image hash, timings, and hardware
-identifiers. Run the command again with the recorded `--serial` after an
-unplug/replug to prove serial stability.
+cycles. The JSON records whether the optional Vendor Bulk debug interface is
+present. The JSON also includes tool versions, image hash, timings, and
+hardware identifiers. Run the command again with the recorded `--serial` after
+an unplug/replug to prove serial stability.
 
 The helper cannot observe analog or electrical behavior. Oscilloscope traces,
 ADC comparison, contention checks, GPIO9 open-drain behavior, reverse-current
@@ -69,6 +70,10 @@ Confirm one composite device with VID `303A`, PID `4021`, and a stable serial
 - Bulk OUT `0x01` precedes Bulk IN `0x81`, both with 64-byte max packets;
 - interface 0 binds WinUSB through the Microsoft OS 2.0 descriptor;
 - interfaces 1/2 enumerate as CDC ACM with endpoints `0x82`, `0x03`, `0x83`;
+- when the debug-shell build is selected, interface 3 enumerates as class
+  `FF/00/00`, is named `AirDAP Debug Shell`, and has Bulk OUT `0x04` followed
+  by Bulk IN `0x84`;
+- interfaces 0 and 3 bind WinUSB through the Microsoft OS 2.0 descriptor;
 - unplug/replug preserves both the USB serial and driver bindings.
 
 Repeat descriptor inspection on Linux with `lsusb -v` when available.
@@ -98,7 +103,24 @@ parity, and stop bits from the host and confirm supported CDC line coding is
 applied. Confirm unsupported mark/space parity is rejected without crashing or
 changing the last valid configuration.
 
-## 6. Reset and target power
+## 6. Optional Vendor Bulk debug shell
+
+For a build made with `sdkconfig.debug-shell.defaults`, run:
+
+```sh
+python tools/airdap-shell.py --serial <ADP-serial>
+```
+
+Confirm this does not open or change `AirDAP Target UART`. Run `help` and verify
+that `help`, `status`, and `restart` are listed. Run `status` and verify decimal
+target voltage, USB VBUS voltage, uptime, and free heap fields. Confirm normal
+ESP application logs arrive after the session starts and still appear on the
+primary console. Finally, run `restart`, verify the acknowledgement is received
+in full before disconnect, and confirm the composite device re-enumerates with
+the same serial number. Repeat with Bulk IN deliberately left unread past the
+firmware's bounded timeout and confirm AirDAP does not restart.
+
+## 7. Reset and target power
 
 - Issue `DAP_ResetTarget` and verify a 1 ms asserted reset pulse at the target.
 - Exercise `DAP_SWJ_Pins` with nRESET selected and verify asserted/released
