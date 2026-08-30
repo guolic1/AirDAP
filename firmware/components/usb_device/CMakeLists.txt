@@ -10,6 +10,7 @@ set(usb_device_private_requires
     esp_timer
     freertos
     log
+    swd_engine
     target_uart
     voltage_monitor
 )
@@ -22,6 +23,7 @@ if(CONFIG_AIRDAP_DEBUG_SHELL)
     list(APPEND usb_device_sources
         "debug_shell.c"
         "debug_shell_input.c"
+        "debug_shell_swd_probe.c"
         "debug_shell_tx_state.c"
     )
 endif()

@@ -9,7 +9,9 @@
 
 #include "airdap_debug_shell.h"
 #include "airdap_debug_shell_input.h"
+#include "airdap_debug_shell_swd_probe.h"
 #include "airdap_debug_shell_tx_state.h"
+#include "airdap_swd.h"
 #include "airdap_voltage_monitor.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -42,6 +44,7 @@ typedef struct {
 
 static int help_command(const char *arguments);
 static int status_command(const char *arguments);
+static int swd_idcode_command(const char *arguments);
 static int restart_command(const char *arguments);
 
 static const shell_command_t commands[] = {
@@ -54,6 +57,11 @@ static const shell_command_t commands[] = {
         .name = "status",
         .help = "Show voltages, uptime, and free heap",
         .handler = status_command,
+    },
+    {
+        .name = "swd-idcode",
+        .help = "Read the target DP IDCODE [clock_khz]",
+        .handler = swd_idcode_command,
     },
     {
         .name = "restart",
@@ -352,6 +360,136 @@ static int status_command(const char *arguments)
         esp_timer_get_time() / 1000,
         esp_get_free_heap_size());
     return 0;
+}
+
+static int shell_swd_set_clock(void *context, uint32_t clock_hz)
+{
+    (void) context;
+    esp_err_t error = airdap_swd_set_clock(clock_hz);
+    if (error != ESP_OK) {
+        return (int) error;
+    }
+    return (int) airdap_swd_configure_bus(1U, false);
+}
+
+static int shell_swd_write_sequence(
+    void *context,
+    const uint8_t *data,
+    size_t bit_count)
+{
+    (void) context;
+    return (int) airdap_swd_write_sequence(data, bit_count);
+}
+
+static int shell_swd_read_sequence(
+    void *context,
+    uint8_t *data,
+    size_t bit_count)
+{
+    (void) context;
+    /*
+     * The first sample captures ACK bit 0 on the edge ending turnaround. The
+     * transaction then reads the remaining ACK, IDCODE, parity, and release.
+     */
+    return (int) airdap_swd_read_sequence(data, bit_count);
+}
+
+static int shell_swd_release(void *context)
+{
+    (void) context;
+    return (int) airdap_swd_set_io_state(false);
+}
+
+static int swd_idcode_command(const char *arguments)
+{
+    static const airdap_debug_shell_swd_backend_t backend = {
+        .context = NULL,
+        .set_clock = shell_swd_set_clock,
+        .write_sequence = shell_swd_write_sequence,
+        .read_sequence = shell_swd_read_sequence,
+        .release = shell_swd_release,
+    };
+    airdap_debug_shell_swd_probe_result_t result;
+    const airdap_debug_shell_swd_probe_status_t status =
+        airdap_debug_shell_swd_probe(arguments, &backend, &result);
+
+    switch (status) {
+    case AIRDAP_DEBUG_SHELL_SWD_PROBE_OK:
+        shell_printf(
+            "swd-idcode: ok clock_khz=%" PRIu32 " idcode=0x%08" PRIX32 "\n",
+            result.clock_khz,
+            result.idcode);
+        return 0;
+
+    case AIRDAP_DEBUG_SHELL_SWD_PROBE_USAGE:
+        shell_printf("usage: swd-idcode [clock_khz]\n");
+        return 1;
+
+    case AIRDAP_DEBUG_SHELL_SWD_PROBE_CLOCK_OUT_OF_RANGE:
+        shell_printf(
+            "swd-idcode: clock_khz must be %u..%u\n",
+            AIRDAP_DEBUG_SHELL_SWD_MIN_CLOCK_KHZ,
+            AIRDAP_DEBUG_SHELL_SWD_MAX_CLOCK_KHZ);
+        return 1;
+
+    case AIRDAP_DEBUG_SHELL_SWD_PROBE_SET_CLOCK_FAILED:
+        shell_printf(
+            "swd-idcode: set clock failed: %s\n",
+            esp_err_to_name((esp_err_t) result.operation_error));
+        break;
+
+    case AIRDAP_DEBUG_SHELL_SWD_PROBE_CONNECT_FAILED:
+        shell_printf(
+            "swd-idcode: transfer failed clock_khz=%" PRIu32 " error=%s\n",
+            result.clock_khz,
+            esp_err_to_name((esp_err_t) result.operation_error));
+        break;
+
+    case AIRDAP_DEBUG_SHELL_SWD_PROBE_RESPONSE_INVALID: {
+        const char *ack_name = result.ack == AIRDAP_SWD_ACK_WAIT
+            ? "WAIT"
+            : result.ack == AIRDAP_SWD_ACK_FAULT ? "FAULT" : "invalid";
+        shell_printf(
+            "swd-idcode: response failed clock_khz=%" PRIu32
+            " ack=0x%X (%s) raw=0x%010" PRIX64 "\n",
+            result.clock_khz,
+            (unsigned int) result.ack,
+            ack_name,
+            result.response_bits);
+        break;
+    }
+
+    case AIRDAP_DEBUG_SHELL_SWD_PROBE_PARITY_ERROR:
+        shell_printf(
+            "swd-idcode: parity error clock_khz=%" PRIu32
+            " idcode=0x%08" PRIX32 " received=%u expected=%u"
+            " raw=0x%010" PRIX64 "\n",
+            result.clock_khz,
+            result.idcode,
+            (unsigned int) result.received_parity,
+            (unsigned int) result.expected_parity,
+            result.response_bits);
+        break;
+
+    case AIRDAP_DEBUG_SHELL_SWD_PROBE_RELEASE_FAILED:
+        shell_printf(
+            "swd-idcode: release failed after idcode=0x%08" PRIX32 ": %s\n",
+            result.idcode,
+            esp_err_to_name((esp_err_t) result.release_error));
+        return 1;
+
+    case AIRDAP_DEBUG_SHELL_SWD_PROBE_INVALID_BACKEND:
+    default:
+        shell_printf("swd-idcode: internal backend unavailable\n");
+        return 1;
+    }
+
+    if (result.release_error != 0) {
+        shell_printf(
+            "swd-idcode: SWDIO release also failed: %s\n",
+            esp_err_to_name((esp_err_t) result.release_error));
+    }
+    return 1;
 }
 
 static int restart_command(const char *arguments)
