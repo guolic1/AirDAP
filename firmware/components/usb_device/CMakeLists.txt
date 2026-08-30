@@ -4,6 +4,7 @@ set(usb_device_sources
     "usb_device.c"
 )
 set(usb_device_private_requires
+    config_store
     dap_protocol
     device_identity
     esp_system
@@ -23,6 +24,7 @@ if(CONFIG_AIRDAP_DEBUG_SHELL)
     endif()
     list(APPEND usb_device_sources
         "debug_shell.c"
+        "debug_shell_config_status.c"
         "debug_shell_identity.c"
         "debug_shell_input.c"
         "debug_shell_swd_probe.c"

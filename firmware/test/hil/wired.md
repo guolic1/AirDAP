@@ -112,12 +112,14 @@ python tools/airdap-shell.py --serial <ADP-serial>
 ```
 
 Confirm this does not open or change `AirDAP Target UART`. Run `help` and verify
-that `help`, `identity`, `status`, `swd-idcode`, and `restart` are listed in cyan
-and the descriptions remain in the terminal's default color. Confirm `version`
-is not listed and reports a red unrecognized-command error when entered. Verify
-the prompt is cyan, a successful `status` result is green, and `status extra`
-usage guidance is yellow. Type `sta`, press Tab, and verify it completes to
-`status `. On an empty line, press Tab and verify all five commands are listed.
+that `help`, `identity`, `config-status`, `status`, `swd-idcode`, and `restart`
+are listed in cyan and the descriptions remain in the terminal's default
+color. Confirm `version` is not listed and reports a red unrecognized-command
+error when entered. Verify the prompt is cyan, successful `config-status` and
+`status` results are green, and `config-status extra` and `status extra` usage
+guidance is yellow. Type `con`, press Tab, and verify it completes to
+`config-status `. Type `sta`, press Tab, and verify it completes to `status `.
+On an empty line, press Tab and verify all six commands are listed.
 Type `s`, press Tab, and verify `status` and `swd-idcode` are listed in cyan on
 separate lines before the prompt restores `s`. Use Left/Right, Home/End,
 Backspace, and Delete to edit text at the beginning, middle, and end of a command
@@ -134,6 +136,9 @@ device and CMSIS-DAP `DAP_Info` serial, its device ID uses the same stable
 source, its UUID has 32 hexadecimal digits, and its `firmware_version` value
 matches both the exact Git tag on the built commit or, when untagged, its
 seven-character Git hash and the version reported by the USB OTA query. Run
+`config-status` and verify it reports the current decimal schema version and
+either `provisioned` or `unprovisioned`, without a password, PoP, PSK, private
+key, Wi-Fi credential, pairing record, or authentication-material value. Run
 `status` and verify decimal target voltage, USB VBUS voltage, uptime, and free
 heap fields. With OpenOCD and other CMSIS-DAP clients closed, run `swd-idcode
 100` against the known-good reference target. Confirm it reports the same
@@ -146,7 +151,38 @@ before disconnect, and confirm the composite device re-enumerates with the same
 serial number. Repeat with Bulk IN deliberately left unread past the firmware's
 bounded timeout and confirm AirDAP does not restart.
 
-## 7. Reset and target power
+## 7. Config-store hard-power-cycle fixture
+
+Use a dedicated development board because this fixture replaces the normal
+application and erases its flash. It writes only fixed, non-secret marker bytes;
+never substitute production credentials. From `firmware/`, activate ESP-IDF,
+then build and flash the standalone fixture into an ignored build directory:
+
+```sh
+airdap_firmware_dir=$(pwd)
+idf.py -C test/hil/config_store \
+  -B "$airdap_firmware_dir/build/config-store-hil" \
+  -D IDF_TARGET=esp32s3 \
+  -D SDKCONFIG="$airdap_firmware_dir/build/config-store-hil/sdkconfig" \
+  -D DEPENDENCIES_LOCK="$airdap_firmware_dir/build/config-store-hil/dependencies.lock" \
+  erase-flash flash monitor
+```
+
+Wait for `STAGE_WRITE_OK`, disconnect all board power without issuing a software
+restart, wait five seconds, reconnect power, and resume the serial monitor. The
+fixture must print `STAGE_RESTORE_OK`, proving that the friendly name,
+provisioning state, and all three public blob slots were recovered through
+`airdap_config_store_init()` and public getters. At `STAGE_CLEAR_OK`, repeat the
+same hard power removal. The third boot must print `PASS`: the Wi-Fi and pairing
+slots remain absent, provisioning is reset, and the unselected friendly name
+and authentication marker remain present. Any `FAIL` or panic fails P1-T2.
+
+Erase the fixture before returning the board to normal firmware. Host fake-NVS
+tests do not replace this procedure, and this procedure validates logical
+retention/clear behavior rather than laboratory recovery of obsolete flash
+pages.
+
+## 8. Reset and target power
 
 - Issue `DAP_ResetTarget` and verify a 1 ms asserted reset pulse at the target.
 - Exercise `DAP_SWJ_Pins` with nRESET selected and verify asserted/released

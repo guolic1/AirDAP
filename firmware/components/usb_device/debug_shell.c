@@ -8,6 +8,8 @@
 #include <string.h>
 
 #include "airdap_debug_shell.h"
+#include "airdap_debug_shell_commands.h"
+#include "airdap_debug_shell_config_status.h"
 #include "airdap_debug_shell_identity.h"
 #include "airdap_debug_shell_input.h"
 #include "airdap_debug_shell_swd_probe.h"
@@ -57,36 +59,16 @@ typedef struct {
 
 static int help_command(const char *arguments);
 static int identity_command(const char *arguments);
+static int config_status_command(const char *arguments);
 static int status_command(const char *arguments);
 static int swd_idcode_command(const char *arguments);
 static int restart_command(const char *arguments);
 
 static const shell_command_t commands[] = {
-    {
-        .name = "help",
-        .help = "List available commands",
-        .handler = help_command,
-    },
-    {
-        .name = "identity",
-        .help = "Show the shared device identity",
-        .handler = identity_command,
-    },
-    {
-        .name = "status",
-        .help = "Show voltages, uptime, and free heap",
-        .handler = status_command,
-    },
-    {
-        .name = "swd-idcode",
-        .help = "Read the target DP IDCODE [clock_khz]",
-        .handler = swd_idcode_command,
-    },
-    {
-        .name = "restart",
-        .help = "Restart the AirDAP firmware",
-        .handler = restart_command,
-    },
+#define AIRDAP_DEBUG_SHELL_COMMAND(name_, help_, handler_) \
+    {.name = name_, .help = help_, .handler = handler_},
+    AIRDAP_DEBUG_SHELL_COMMAND_LIST(AIRDAP_DEBUG_SHELL_COMMAND)
+#undef AIRDAP_DEBUG_SHELL_COMMAND
 };
 
 static SemaphoreHandle_t output_mutex;
@@ -486,6 +468,25 @@ static int identity_command(const char *arguments)
     }
     shell_printf("%s", output);
     return 0;
+}
+
+static int config_status_command(const char *arguments)
+{
+    char output[AIRDAP_DEBUG_SHELL_CONFIG_STATUS_OUTPUT_SIZE];
+    airdap_debug_shell_config_status_style_t style;
+    const int result = airdap_debug_shell_config_status_execute(
+        arguments,
+        output,
+        sizeof(output),
+        &style);
+    const char *ansi_style = ansi_red;
+    if (style == AIRDAP_DEBUG_SHELL_CONFIG_STATUS_STYLE_YELLOW) {
+        ansi_style = ansi_yellow;
+    } else if (style == AIRDAP_DEBUG_SHELL_CONFIG_STATUS_STYLE_GREEN) {
+        ansi_style = ansi_green;
+    }
+    shell_printf_styled(ansi_style, "%s", output);
+    return result;
 }
 
 static int status_command(const char *arguments)

@@ -3,6 +3,7 @@
 #include "sdkconfig.h"
 
 #include "airdap_board.h"
+#include "airdap_config_store.h"
 #include "airdap_device_identity.h"
 #include "airdap_ota.h"
 #include "airdap_swd.h"
@@ -24,6 +25,7 @@ void app_main(void)
     airdap_ota_initialize();
     ESP_ERROR_CHECK(airdap_board_init_safe());
     ESP_ERROR_CHECK(airdap_device_identity_init());
+    ESP_ERROR_CHECK(airdap_config_store_init());
     ESP_ERROR_CHECK(airdap_voltage_monitor_init());
     ESP_ERROR_CHECK(airdap_swd_init(AIRDAP_SWD_DEFAULT_CLOCK_HZ));
     ESP_ERROR_CHECK(airdap_voltage_monitor_read(&voltage));

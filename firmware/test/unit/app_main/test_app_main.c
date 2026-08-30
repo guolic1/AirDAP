@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "airdap_config_store.h"
 #include "airdap_device_identity.h"
 #include "airdap_voltage_monitor.h"
 #include "esp_err.h"
@@ -11,6 +12,7 @@ typedef enum {
     CALL_OTA_INITIALIZE,
     CALL_BOARD_INITIALIZE,
     CALL_DEVICE_IDENTITY_INITIALIZE,
+    CALL_CONFIG_STORE_INITIALIZE,
     CALL_VOLTAGE_INITIALIZE,
     CALL_SWD_INITIALIZE,
     CALL_VOLTAGE_READ,
@@ -18,7 +20,7 @@ typedef enum {
     CALL_OTA_CONFIRM,
 } call_t;
 
-static call_t calls[8];
+static call_t calls[9];
 static size_t call_count;
 
 static void record(call_t call)
@@ -41,6 +43,12 @@ esp_err_t airdap_board_init_safe(void)
 esp_err_t airdap_device_identity_init(void)
 {
     record(CALL_DEVICE_IDENTITY_INITIALIZE);
+    return ESP_OK;
+}
+
+esp_err_t airdap_config_store_init(void)
+{
+    record(CALL_CONFIG_STORE_INITIALIZE);
     return ESP_OK;
 }
 
@@ -86,6 +94,7 @@ int main(void)
         CALL_OTA_INITIALIZE,
         CALL_BOARD_INITIALIZE,
         CALL_DEVICE_IDENTITY_INITIALIZE,
+        CALL_CONFIG_STORE_INITIALIZE,
         CALL_VOLTAGE_INITIALIZE,
         CALL_SWD_INITIALIZE,
         CALL_VOLTAGE_READ,
