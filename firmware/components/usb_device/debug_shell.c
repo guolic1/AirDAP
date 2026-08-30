@@ -11,9 +11,9 @@
 #include "airdap_debug_shell_input.h"
 #include "airdap_debug_shell_swd_probe.h"
 #include "airdap_debug_shell_tx_state.h"
+#include "airdap_device_identity.h"
 #include "airdap_swd.h"
 #include "airdap_voltage_monitor.h"
-#include "esp_app_desc.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -352,8 +352,12 @@ static int version_command(const char *arguments)
         return 1;
     }
 
-    const esp_app_desc_t *description = esp_app_get_description();
-    shell_printf("firmware_version=%s\n", description->version);
+    const airdap_device_identity_t *identity = airdap_device_identity_get();
+    if (identity == NULL) {
+        shell_printf("version: device identity unavailable\n");
+        return 1;
+    }
+    shell_printf("firmware_version=%s\n", identity->firmware_version);
     return 0;
 }
 

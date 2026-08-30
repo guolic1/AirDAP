@@ -3,12 +3,14 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "airdap_device_identity.h"
 #include "airdap_voltage_monitor.h"
 #include "esp_err.h"
 
 typedef enum {
     CALL_OTA_INITIALIZE,
     CALL_BOARD_INITIALIZE,
+    CALL_DEVICE_IDENTITY_INITIALIZE,
     CALL_VOLTAGE_INITIALIZE,
     CALL_SWD_INITIALIZE,
     CALL_VOLTAGE_READ,
@@ -33,6 +35,12 @@ void airdap_ota_initialize(void)
 esp_err_t airdap_board_init_safe(void)
 {
     record(CALL_BOARD_INITIALIZE);
+    return ESP_OK;
+}
+
+esp_err_t airdap_device_identity_init(void)
+{
+    record(CALL_DEVICE_IDENTITY_INITIALIZE);
     return ESP_OK;
 }
 
@@ -77,6 +85,7 @@ int main(void)
     static const call_t expected[] = {
         CALL_OTA_INITIALIZE,
         CALL_BOARD_INITIALIZE,
+        CALL_DEVICE_IDENTITY_INITIALIZE,
         CALL_VOLTAGE_INITIALIZE,
         CALL_SWD_INITIALIZE,
         CALL_VOLTAGE_READ,

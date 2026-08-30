@@ -5,8 +5,7 @@ set(usb_device_sources
 )
 set(usb_device_private_requires
     dap_protocol
-    esp_app_format
-    esp_hw_support
+    device_identity
     esp_system
     esp_tinyusb
     esp_timer

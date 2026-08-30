@@ -2,21 +2,19 @@
 #include <inttypes.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 
 #include "airdap_dap.h"
 #include "airdap_dap_protocol.h"
 #include "airdap_dap_stream.h"
+#include "airdap_device_identity.h"
 #if CONFIG_AIRDAP_DEBUG_SHELL
 #include "airdap_debug_shell.h"
 #endif
 #include "airdap_target_uart.h"
 #include "airdap_usb.h"
 #include "airdap_usb_descriptors.h"
-#include "esp_app_desc.h"
 #include "esp_log.h"
-#include "esp_mac.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -236,35 +234,18 @@ static void target_uart_task(void *argument)
     }
 }
 
-static esp_err_t make_serial_number(char serial_number[17])
-{
-    uint8_t mac[6];
-    const esp_err_t error = esp_efuse_mac_get_default(mac);
-    if (error != ESP_OK) {
-        return error;
-    }
-    const int length = snprintf(
-        serial_number,
-        17,
-        "ADP-%02X%02X%02X%02X%02X%02X",
-        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    return length == 16 ? ESP_OK : ESP_FAIL;
-}
-
 esp_err_t airdap_usb_init(void)
 {
-    static char serial_number[17];
-    esp_err_t error = make_serial_number(serial_number);
-    if (error != ESP_OK) {
-        return error;
+    const airdap_device_identity_t *identity = airdap_device_identity_get();
+    if (identity == NULL) {
+        return ESP_ERR_INVALID_STATE;
     }
 
-    error = airdap_target_uart_init();
+    esp_err_t error = airdap_target_uart_init();
     if (error != ESP_OK) {
         return error;
     }
-    const esp_app_desc_t *app_description = esp_app_get_description();
-    error = airdap_dap_init(serial_number, app_description->version);
+    error = airdap_dap_init(identity->usb_serial, identity->firmware_version);
     if (error != ESP_OK) {
         return error;
     }
@@ -285,7 +266,7 @@ esp_err_t airdap_usb_init(void)
         return ESP_ERR_NO_MEM;
     }
 
-    airdap_usb_descriptors_set_serial(serial_number);
+    airdap_usb_descriptors_set_serial(identity->usb_serial);
     tinyusb_config_t usb_config = TINYUSB_DEFAULT_CONFIG(
         usb_event_callback,
         NULL);
@@ -332,12 +313,12 @@ esp_err_t airdap_usb_init(void)
     ESP_LOGI(
         TAG,
         "USB CMSIS-DAP v2 + target CDC + debug Vendor Bulk initialized, serial %s",
-        serial_number);
+        identity->usb_serial);
 #else
     ESP_LOGI(
         TAG,
         "USB CMSIS-DAP v2 + CDC initialized, serial %s",
-        serial_number);
+        identity->usb_serial);
 #endif
     return ESP_OK;
 }

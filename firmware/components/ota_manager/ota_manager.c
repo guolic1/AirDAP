@@ -3,8 +3,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "airdap_device_identity.h"
 #include "airdap_ota.h"
-#include "esp_app_desc.h"
 #include "esp_err.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
@@ -52,8 +52,8 @@ airdap_ota_status_t airdap_ota_get_info(airdap_ota_info_t *info)
     }
 
     const esp_partition_t *partition = esp_ota_get_next_update_partition(NULL);
-    const esp_app_desc_t *description = esp_app_get_description();
-    if (partition == NULL || description == NULL || partition->size > UINT32_MAX) {
+    const airdap_device_identity_t *identity = airdap_device_identity_get();
+    if (partition == NULL || identity == NULL || partition->size > UINT32_MAX) {
         return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
     }
 
@@ -63,10 +63,10 @@ airdap_ota_status_t airdap_ota_get_info(airdap_ota_info_t *info)
     info->max_image_size = (uint32_t) partition->size;
     size_t version_length = 0U;
     while (version_length < AIRDAP_OTA_VERSION_CAPACITY &&
-           description->version[version_length] != '\0') {
+           identity->firmware_version[version_length] != '\0') {
         ++version_length;
     }
-    memcpy(info->running_version, description->version, version_length);
+    memcpy(info->running_version, identity->firmware_version, version_length);
     info->running_version[version_length] = '\0';
     return AIRDAP_OTA_STATUS_OK;
 }
