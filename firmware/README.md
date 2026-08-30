@@ -85,6 +85,8 @@ not part of this repository. The application currently provides:
 - a versioned NVS configuration store for provisioning metadata and bounded
   opaque credential slots;
 - DAP/SWD ownership arbitration for USB, network, and internal diagnostics;
+- a bounded transport-independent DAP service with session-safe response
+  routing for USB and future network sessions;
 - target reset, power/status GPIO, VTref, and USB VBUS monitoring.
 
 The shared device identity is derived from the eFuse base MAC. Its USB serial
@@ -108,6 +110,18 @@ CMSIS-DAP uses 512-byte internal buffers and advertises a 508-byte packet
 limit. At full-speed USB this keeps the largest response from ending on an
 exact 64-byte endpoint boundary, so TinyUSB cannot leave an automatic ZLP for
 the following DAP transaction.
+
+USB request framing remains in the USB component, while a shared DAP service
+owns the four-entry worker queue and DAP execution task. Each queued request
+captures its transport, service-issued session, response token, and callback.
+The service validates the session before processing and again before response
+delivery. Final validation and callback delivery are serialized with session
+close, so close cannot return while an old response callback is still active
+and a replacement USB session cannot receive that response. Queue-full,
+timeout, stale-session, and response delivery failures remain observable
+through service results and counters. The NETWORK transport identifier is only
+an internal routing contract at this stage; it does not expose a network
+listener or provide authentication.
 
 `DAP_Connect` acquires the USB DAP/SWD owner. A different active owner makes
 the connect fail without releasing or driving that owner's bus. Disconnect,
@@ -288,7 +302,7 @@ The other hardware-independent tests use the same pattern:
 ```sh
 for suite in \
     bootloader_artifact ota_layout board config_store device_identity voltage_monitor swd_protocol \
-    dap_ownership dap_backend dap_protocol \
+    dap_ownership dap_backend dap_protocol dap_service \
     dap_ota dap_stream ota_manager app_main target_uart usb_descriptors project_version \
     debug_shell_config_status debug_shell_identity debug_shell_input \
     debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update wired_hil; do
@@ -304,10 +318,11 @@ concurrent writes, fake-NVS restart recovery, selective configuration clearing,
 safe configuration-status command behavior, ADC scaling, SWD transaction
 framing, DAP owner transitions and physical-backend
 release calls, CMSIS-DAP and OTA command framing, OTA state transitions, stale
-USB-frame recovery, host update ordering, UART line-coding mapping, both
-compile-time USB descriptor variants, bounded shell input, the bounded SWD
-IDCODE command flow, debug TX completion state, host tools, and wired HIL
-helper's protocol checks. They do not prove USB enumeration, real NVS
+USB-frame recovery, interleaved USB/NETWORK DAP routing, stale-session response
+suppression, bounded queue failures, host update ordering, UART line-coding
+mapping, both compile-time USB descriptor variants, bounded shell input, the
+bounded SWD IDCODE command flow, debug TX completion state, host tools, and
+wired HIL helper's protocol checks. They do not prove USB enumeration, real NVS
 power-loss persistence or purge behavior, physical OTA persistence, bootloader
 rollback on a board, or electrical SWD timing.
 Follow `test/hil/wired.md` on a populated AirDAP board before marking roadmap

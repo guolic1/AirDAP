@@ -184,14 +184,31 @@ size_t airdap_dap_ota_process(
     return 2U;
 }
 
-static size_t process(const uint8_t *request, size_t request_length, uint8_t *response)
+static size_t process_owner(
+    airdap_dap_owner_t owner,
+    const uint8_t *request,
+    size_t request_length,
+    uint8_t *response)
 {
     memset(response, 0xCC, AIRDAP_DAP_PACKET_SIZE);
     return airdap_dap_process(
+        owner,
         request,
         request_length,
         response,
         AIRDAP_DAP_PACKET_SIZE);
+}
+
+static size_t process(
+    const uint8_t *request,
+    size_t request_length,
+    uint8_t *response)
+{
+    return process_owner(
+        AIRDAP_DAP_OWNER_USB,
+        request,
+        request_length,
+        response);
 }
 
 static void assert_line_reset(unsigned expected_calls)
@@ -222,7 +239,9 @@ int main(void)
 
     assert(process(ota_begin, sizeof(ota_begin), response) == 2U);
     assert(ota_receiving);
-    assert(process(disconnect, sizeof(disconnect), response) == 2U);
+    airdap_dap_session_closed(AIRDAP_DAP_OWNER_NETWORK);
+    assert(ota_receiving && ota_disconnect_calls == 0U);
+    airdap_dap_session_closed(AIRDAP_DAP_OWNER_USB);
     assert(!ota_receiving);
     assert(ota_disconnect_calls == 1U);
     assert(release_io_calls == 0U && release_reset_calls == 0U);
@@ -231,6 +250,14 @@ int main(void)
     assert(response[1] == AIRDAP_DAP_PORT_SWD);
     assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_USB);
     assert_line_reset(1U);
+
+    assert(process_owner(
+        AIRDAP_DAP_OWNER_NETWORK,
+        connect,
+        sizeof(connect),
+        response) == 2U);
+    assert(response[1] == AIRDAP_DAP_PORT_DISABLED);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_USB);
 
     const unsigned release_io_before_sequence = release_io_calls;
     const unsigned release_reset_before_sequence = release_reset_calls;
