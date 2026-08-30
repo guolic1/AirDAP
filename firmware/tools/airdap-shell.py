@@ -22,9 +22,18 @@ DEBUG_IN_ENDPOINT = 0x84
 USB_READ_SIZE = 512
 INTERACTIVE_READ_TIMEOUT_MS = 100
 SESSION_START = b"\x00"
+SESSION_START_COLOR = b"\x01"
 SESSION_END = b"\x04"
 PROMPT = b"airdap> "
 RESTART_ACKNOWLEDGEMENT = b"Restarting AirDAP...\n"
+ANSI_RESET = b"\x1b[0m"
+ANSI_CYAN = b"\x1b[36m"
+ANSI_YELLOW = b"\x1b[33m"
+COLORED_PROMPT = ANSI_CYAN + PROMPT + ANSI_RESET
+COLORED_RESTART_ACKNOWLEDGEMENT = (
+    ANSI_YELLOW + RESTART_ACKNOWLEDGEMENT + ANSI_RESET
+)
+LOCAL_EOF = SESSION_END[0]  # Ctrl-D
 LOCAL_EXIT = 0x1D  # Ctrl-]
 
 
@@ -158,8 +167,8 @@ class VendorShellTransport:
                 return b""
             raise ShellError(f"USB Bulk IN failed: {error}") from error
 
-    def start_session(self) -> None:
-        self.write(SESSION_START)
+    def start_session(self, color: bool = False) -> None:
+        self.write(SESSION_START_COLOR if color else SESSION_START)
 
     def close(self) -> None:
         if self.claimed:
@@ -201,13 +210,43 @@ def read_until(
 def read_until_prompt(
     transport: CommandTransport,
     timeout_seconds: float,
+    marker: bytes = PROMPT,
 ) -> bytes:
     return read_until(
         transport,
-        PROMPT,
+        marker,
         timeout_seconds,
         "the AirDAP shell prompt",
     )
+
+
+def read_until_command_prompt(
+    transport: CommandTransport,
+    encoded_command: bytes,
+    timeout_seconds: float,
+    prompt_marker: bytes = PROMPT,
+) -> bytes:
+    deadline = time.monotonic() + timeout_seconds
+    echo_marker = encoded_command + b"\n"
+    received = bytearray()
+    echo_end: int | None = None
+
+    while True:
+        if echo_end is None:
+            echo_index = received.find(echo_marker)
+            if echo_index >= 0:
+                echo_end = echo_index + len(echo_marker)
+        if echo_end is not None and prompt_marker in received[echo_end:]:
+            return bytes(received)
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ShellError("timed out waiting for the AirDAP shell prompt")
+        chunk = transport.read(timeout_ms=max(1, int(remaining * 1000)))
+        if chunk:
+            received.extend(chunk)
+        else:
+            time.sleep(0.005)
 
 
 def _encode_command(command: str) -> bytes:
@@ -239,17 +278,37 @@ def run_command(
     transport: CommandTransport,
     command: str,
     timeout_seconds: float,
+    color: bool = False,
 ) -> bytes:
     encoded = _encode_command(command)
     transport.write(encoded + b"\n")
     if _is_restart_command(command):
         return read_until(
             transport,
-            RESTART_ACKNOWLEDGEMENT,
+            COLORED_RESTART_ACKNOWLEDGEMENT if color else RESTART_ACKNOWLEDGEMENT,
             timeout_seconds,
             "the restart acknowledgement",
         )
-    return read_until_prompt(transport, timeout_seconds)
+    return read_until_command_prompt(
+        transport,
+        encoded,
+        timeout_seconds,
+        COLORED_PROMPT if color else PROMPT,
+    )
+
+
+def _color_enabled(
+    mode: str,
+    command_mode: bool,
+    output_stream: BinaryIO,
+) -> bool:
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+    if mode != "auto":
+        raise ValueError(f"unsupported color mode: {mode}")
+    return not command_mode and output_stream.isatty()
 
 
 @contextlib.contextmanager
@@ -276,8 +335,15 @@ def raw_terminal(stream: BinaryIO) -> Iterator[None]:
 def _read_windows_key(getch: Callable[[], bytes]) -> bytes:
     data = getch()
     if data in (b"\x00", b"\xe0"):
-        getch()
-        return b""
+        return {
+            b"H": b"\x1b[A",
+            b"P": b"\x1b[B",
+            b"K": b"\x1b[D",
+            b"M": b"\x1b[C",
+            b"G": b"\x1b[H",
+            b"O": b"\x1b[F",
+            b"S": b"\x1b[3~",
+        }.get(getch(), b"")
     return data
 
 
@@ -335,12 +401,22 @@ def interactive_session(
                     continue
                 if not data:
                     continue
-                if LOCAL_EXIT in data:
-                    prefix = data.split(bytes((LOCAL_EXIT,)), 1)[0]
-                    if prefix:
-                        transport.write(prefix)
+                exit_index = next(
+                    (
+                        index
+                        for index, byte in enumerate(data)
+                        if byte in (LOCAL_EOF, LOCAL_EXIT)
+                    ),
+                    None,
+                )
+                if exit_index is not None:
+                    data = data[:exit_index]
+                data = data.replace(SESSION_START, b"")
+                data = data.replace(SESSION_START_COLOR, b"")
+                if data:
+                    transport.write(data)
+                if exit_index is not None:
                     break
-                transport.write(data)
     finally:
         stop.set()
         reader.join()
@@ -366,6 +442,12 @@ def make_parser() -> argparse.ArgumentParser:
         type=float,
         default=3.0,
         help="seconds to wait for each shell prompt",
+    )
+    parser.add_argument(
+        "--color",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="color output: auto for interactive TTYs, always, or never",
     )
     return parser
 
@@ -401,12 +483,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     operation_error: BaseException | None = None
     try:
         transport.open()
-        transport.start_session()
+        color = _color_enabled(
+            args.color,
+            command_mode=bool(args.command),
+            output_stream=sys.stdout.buffer,
+        )
+        transport.start_session(color=color)
         if args.command:
-            sys.stdout.buffer.write(read_until_prompt(transport, args.command_timeout))
+            sys.stdout.buffer.write(
+                read_until_prompt(
+                    transport,
+                    args.command_timeout,
+                    COLORED_PROMPT if color else PROMPT,
+                )
+            )
             for command in args.command:
                 sys.stdout.buffer.write(
-                    run_command(transport, command, args.command_timeout)
+                    run_command(
+                        transport,
+                        command,
+                        args.command_timeout,
+                        color=color,
+                    )
                 )
             sys.stdout.buffer.flush()
         else:

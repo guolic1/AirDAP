@@ -19,6 +19,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "tusb.h"
@@ -28,11 +29,15 @@ enum {
     SHELL_TASK_STACK_SIZE = 4096,
     SHELL_TASK_PRIORITY = 4,
     SHELL_READ_CHUNK = 64,
+    SHELL_SESSION_START = 0x00,
+    SHELL_SESSION_START_COLOR = 0x01,
+    SHELL_SESSION_END = 0x04,
     SHELL_POLL_INTERVAL_MS = 10,
     SHELL_WRITE_TIMEOUT_MS = 100,
     RESTART_FLUSH_TIMEOUT_MS = 1000,
     SHELL_FORMAT_BUFFER_SIZE = 384,
     LOG_MIRROR_BUFFER_SIZE = 512,
+    LOG_QUEUE_DEPTH = 4,
 };
 
 typedef int (*shell_command_handler_t)(const char *arguments);
@@ -42,6 +47,12 @@ typedef struct {
     const char *help;
     shell_command_handler_t handler;
 } shell_command_t;
+
+typedef struct {
+    uint32_t session_generation;
+    size_t length;
+    char data[LOG_MIRROR_BUFFER_SIZE];
+} shell_log_message_t;
 
 static int help_command(const char *arguments);
 static int version_command(const char *arguments);
@@ -78,7 +89,10 @@ static const shell_command_t commands[] = {
 };
 
 static SemaphoreHandle_t output_mutex;
+static QueueHandle_t log_queue;
 static atomic_bool session_active = ATOMIC_VAR_INIT(false);
+static atomic_bool session_color_enabled = ATOMIC_VAR_INIT(false);
+static _Atomic(uint32_t) session_generation = ATOMIC_VAR_INIT(0U);
 static _Atomic(vprintf_like_t) previous_log_vprintf = ATOMIC_VAR_INIT(vprintf);
 static portMUX_TYPE tx_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static airdap_debug_shell_tx_state_t tx_state;
@@ -252,21 +266,66 @@ static void shell_write(const char *data, size_t length, void *context)
     (void) debug_write(data, length, pdMS_TO_TICKS(SHELL_WRITE_TIMEOUT_MS));
 }
 
-static void shell_printf(const char *format, ...)
+static const char ansi_reset[] = "\x1b[0m";
+static const char ansi_red[] = "\x1b[31m";
+static const char ansi_green[] = "\x1b[32m";
+static const char ansi_yellow[] = "\x1b[33m";
+static const char ansi_cyan[] = "\x1b[36m";
+
+static void shell_vprintf_styled(
+    const char *style,
+    const char *format,
+    va_list arguments)
 {
     char output[SHELL_FORMAT_BUFFER_SIZE];
-    va_list arguments;
-    va_start(arguments, format);
-    const int formatted = vsnprintf(output, sizeof(output), format, arguments);
-    va_end(arguments);
+    const bool styled = style != NULL && atomic_load(&session_color_enabled);
+    const size_t style_length = styled ? strlen(style) : 0U;
+    const size_t reset_length = styled ? sizeof(ansi_reset) - 1U : 0U;
+    size_t length = 0U;
+
+    if (style_length + reset_length + 1U >= sizeof(output)) {
+        return;
+    }
+    if (styled) {
+        memcpy(output, style, style_length);
+        length = style_length;
+    }
+
+    const size_t content_capacity = sizeof(output) - length - reset_length;
+    const int formatted = vsnprintf(
+        output + length,
+        content_capacity,
+        format,
+        arguments);
 
     if (formatted <= 0) {
         return;
     }
-    const size_t length = (size_t) formatted < sizeof(output)
+    const size_t content_length = (size_t) formatted < content_capacity
         ? (size_t) formatted
-        : sizeof(output) - 1U;
+        : content_capacity - 1U;
+    length += content_length;
+    if (styled) {
+        memcpy(output + length, ansi_reset, reset_length);
+        length += reset_length;
+    }
     shell_write(output, length, NULL);
+}
+
+static void shell_printf(const char *format, ...)
+{
+    va_list arguments;
+    va_start(arguments, format);
+    shell_vprintf_styled(NULL, format, arguments);
+    va_end(arguments);
+}
+
+static void shell_printf_styled(const char *style, const char *format, ...)
+{
+    va_list arguments;
+    va_start(arguments, format);
+    shell_vprintf_styled(style, format, arguments);
+    va_end(arguments);
 }
 
 static int mirror_log_vprintf(const char *format, va_list arguments)
@@ -277,26 +336,53 @@ static int mirror_log_vprintf(const char *format, va_list arguments)
     const int result = primary != NULL ? primary(format, primary_arguments) : 0;
     va_end(primary_arguments);
 
-    if (!atomic_load(&session_active)) {
+    if (!atomic_load(&session_active) || log_queue == NULL) {
         return result;
     }
 
-    char output[LOG_MIRROR_BUFFER_SIZE];
+    shell_log_message_t message = {
+        .session_generation = atomic_load(&session_generation),
+    };
     va_list mirror_arguments;
     va_copy(mirror_arguments, arguments);
     const int formatted = vsnprintf(
-        output,
-        sizeof(output),
+        message.data,
+        sizeof(message.data),
         format,
         mirror_arguments);
     va_end(mirror_arguments);
     if (formatted > 0) {
-        const size_t length = (size_t) formatted < sizeof(output)
+        message.length = (size_t) formatted < sizeof(message.data)
             ? (size_t) formatted
-            : sizeof(output) - 1U;
-        (void) debug_write(output, length, 0U);
+            : sizeof(message.data) - 1U;
+        if (atomic_load(&session_active) &&
+            message.session_generation == atomic_load(&session_generation)) {
+            (void) xQueueSend(log_queue, &message, 0);
+        }
     }
     return result;
+}
+
+static void drain_log_queue(
+    airdap_debug_shell_input_t *input,
+    const airdap_debug_shell_input_callbacks_t *callbacks)
+{
+    shell_log_message_t message;
+
+    for (size_t index = 0U; index < LOG_QUEUE_DEPTH; ++index) {
+        if (!atomic_load(&session_active) ||
+            xQueueReceive(log_queue, &message, 0) != pdTRUE) {
+            return;
+        }
+        if (message.session_generation != atomic_load(&session_generation)) {
+            continue;
+        }
+        airdap_debug_shell_input_write_background(
+            input,
+            message.data,
+            message.length,
+            callbacks);
+    }
 }
 
 static void shell_execute(const char *line, void *context)
@@ -329,18 +415,52 @@ static void shell_execute(const char *line, void *context)
         }
     }
 
-    shell_printf("Unrecognized command: %.*s\n", (int) command_length, line);
+    shell_printf_styled(
+        ansi_red,
+        "Unrecognized command: %.*s\n",
+        (int) command_length,
+        line);
+}
+
+static const char *shell_complete(
+    const char *prefix,
+    size_t match_index,
+    void *context)
+{
+    const size_t prefix_length = strlen(prefix);
+    size_t current_match = 0U;
+
+    (void) context;
+    for (size_t index = 0U; index < sizeof(commands) / sizeof(commands[0]); ++index) {
+        if (strncmp(commands[index].name, prefix, prefix_length) != 0) {
+            continue;
+        }
+        if (current_match == match_index) {
+            return commands[index].name;
+        }
+        ++current_match;
+    }
+    return NULL;
 }
 
 static int help_command(const char *arguments)
 {
     if (*arguments != '\0') {
-        shell_printf("usage: help\n");
+        shell_printf_styled(ansi_yellow, "usage: help\n");
         return 1;
     }
 
     for (size_t index = 0U; index < sizeof(commands) / sizeof(commands[0]); ++index) {
-        shell_printf("%-8s %s\n", commands[index].name, commands[index].help);
+        if (atomic_load(&session_color_enabled)) {
+            shell_printf(
+                "%s%-8s%s %s\n",
+                ansi_cyan,
+                commands[index].name,
+                ansi_reset,
+                commands[index].help);
+        } else {
+            shell_printf("%-8s %s\n", commands[index].name, commands[index].help);
+        }
     }
     return 0;
 }
@@ -360,18 +480,22 @@ static int version_command(const char *arguments)
 static int status_command(const char *arguments)
 {
     if (*arguments != '\0') {
-        shell_printf("usage: status\n");
+        shell_printf_styled(ansi_yellow, "usage: status\n");
         return 1;
     }
 
     airdap_voltage_reading_t voltage;
     const esp_err_t error = airdap_voltage_monitor_read(&voltage);
     if (error != ESP_OK) {
-        shell_printf("status: voltage read failed: %s\n", esp_err_to_name(error));
+        shell_printf_styled(
+            ansi_red,
+            "status: voltage read failed: %s\n",
+            esp_err_to_name(error));
         return 1;
     }
 
-    shell_printf(
+    shell_printf_styled(
+        ansi_green,
         "target_mv=%" PRIu32 " usb_vbus_mv=%" PRIu32
         " uptime_ms=%" PRId64 " free_heap=%" PRIu32 "\n",
         voltage.target_mv,
@@ -434,31 +558,35 @@ static int swd_idcode_command(const char *arguments)
 
     switch (status) {
     case AIRDAP_DEBUG_SHELL_SWD_PROBE_OK:
-        shell_printf(
+        shell_printf_styled(
+            ansi_green,
             "swd-idcode: ok clock_khz=%" PRIu32 " idcode=0x%08" PRIX32 "\n",
             result.clock_khz,
             result.idcode);
         return 0;
 
     case AIRDAP_DEBUG_SHELL_SWD_PROBE_USAGE:
-        shell_printf("usage: swd-idcode [clock_khz]\n");
+        shell_printf_styled(ansi_yellow, "usage: swd-idcode [clock_khz]\n");
         return 1;
 
     case AIRDAP_DEBUG_SHELL_SWD_PROBE_CLOCK_OUT_OF_RANGE:
-        shell_printf(
+        shell_printf_styled(
+            ansi_yellow,
             "swd-idcode: clock_khz must be %u..%u\n",
             AIRDAP_DEBUG_SHELL_SWD_MIN_CLOCK_KHZ,
             AIRDAP_DEBUG_SHELL_SWD_MAX_CLOCK_KHZ);
         return 1;
 
     case AIRDAP_DEBUG_SHELL_SWD_PROBE_SET_CLOCK_FAILED:
-        shell_printf(
+        shell_printf_styled(
+            ansi_red,
             "swd-idcode: set clock failed: %s\n",
             esp_err_to_name((esp_err_t) result.operation_error));
         break;
 
     case AIRDAP_DEBUG_SHELL_SWD_PROBE_CONNECT_FAILED:
-        shell_printf(
+        shell_printf_styled(
+            ansi_red,
             "swd-idcode: transfer failed clock_khz=%" PRIu32 " error=%s\n",
             result.clock_khz,
             esp_err_to_name((esp_err_t) result.operation_error));
@@ -468,7 +596,8 @@ static int swd_idcode_command(const char *arguments)
         const char *ack_name = result.ack == AIRDAP_SWD_ACK_WAIT
             ? "WAIT"
             : result.ack == AIRDAP_SWD_ACK_FAULT ? "FAULT" : "invalid";
-        shell_printf(
+        shell_printf_styled(
+            ansi_red,
             "swd-idcode: response failed clock_khz=%" PRIu32
             " ack=0x%X (%s) raw=0x%010" PRIX64 "\n",
             result.clock_khz,
@@ -479,7 +608,8 @@ static int swd_idcode_command(const char *arguments)
     }
 
     case AIRDAP_DEBUG_SHELL_SWD_PROBE_PARITY_ERROR:
-        shell_printf(
+        shell_printf_styled(
+            ansi_red,
             "swd-idcode: parity error clock_khz=%" PRIu32
             " idcode=0x%08" PRIX32 " received=%u expected=%u"
             " raw=0x%010" PRIX64 "\n",
@@ -491,7 +621,8 @@ static int swd_idcode_command(const char *arguments)
         break;
 
     case AIRDAP_DEBUG_SHELL_SWD_PROBE_RELEASE_FAILED:
-        shell_printf(
+        shell_printf_styled(
+            ansi_red,
             "swd-idcode: release failed after idcode=0x%08" PRIX32 ": %s\n",
             result.idcode,
             esp_err_to_name((esp_err_t) result.release_error));
@@ -499,12 +630,15 @@ static int swd_idcode_command(const char *arguments)
 
     case AIRDAP_DEBUG_SHELL_SWD_PROBE_INVALID_BACKEND:
     default:
-        shell_printf("swd-idcode: internal backend unavailable\n");
+        shell_printf_styled(
+            ansi_red,
+            "swd-idcode: internal backend unavailable\n");
         return 1;
     }
 
     if (result.release_error != 0) {
-        shell_printf(
+        shell_printf_styled(
+            ansi_red,
             "swd-idcode: SWDIO release also failed: %s\n",
             esp_err_to_name((esp_err_t) result.release_error));
     }
@@ -514,17 +648,24 @@ static int swd_idcode_command(const char *arguments)
 static int restart_command(const char *arguments)
 {
     static const char acknowledgement[] = "Restarting AirDAP...\n";
+    static const char colored_acknowledgement[] =
+        "\x1b[33mRestarting AirDAP...\n\x1b[0m";
 
     if (*arguments != '\0') {
-        shell_printf("usage: restart\n");
+        shell_printf_styled(ansi_yellow, "usage: restart\n");
         return 1;
     }
 
+    const char *output = atomic_load(&session_color_enabled)
+        ? colored_acknowledgement
+        : acknowledgement;
     if (!write_and_wait(
-        acknowledgement,
-        sizeof(acknowledgement) - 1U,
+        output,
+        strlen(output),
         pdMS_TO_TICKS(RESTART_FLUSH_TIMEOUT_MS))) {
-        shell_printf("restart: acknowledgement transfer failed\n");
+        shell_printf_styled(
+            ansi_red,
+            "restart: acknowledgement transfer failed\n");
         return 1;
     }
     if (!atomic_load(&session_active) ||
@@ -535,37 +676,45 @@ static int restart_command(const char *arguments)
     return 0;
 }
 
-static void start_session(airdap_debug_shell_input_t *input)
+static void start_session(
+    airdap_debug_shell_input_t *input,
+    airdap_debug_shell_input_callbacks_t *callbacks,
+    bool color_enabled)
 {
-    static const char banner[] =
-        "\nAirDAP debug shell\n"
-        "Type 'help' to list commands. Ctrl-] exits airdap-shell.\n"
-        "airdap> ";
-
+    airdap_debug_shell_disconnected();
+    (void) atomic_fetch_add(&session_generation, 1U);
+    (void) xQueueReset(log_queue);
     if (xSemaphoreTake(output_mutex, portMAX_DELAY) != pdTRUE) {
         return;
     }
     portENTER_CRITICAL(&tx_state_lock);
     airdap_debug_shell_tx_state_connected(&tx_state);
+    atomic_store(&session_color_enabled, color_enabled);
     atomic_store(&session_active, true);
     portEXIT_CRITICAL(&tx_state_lock);
     xSemaphoreGive(output_mutex);
     airdap_debug_shell_input_init(input);
-    shell_write(banner, sizeof(banner) - 1U, NULL);
+    callbacks->color_enabled = color_enabled;
+    shell_printf("\n");
+    shell_printf_styled(ansi_cyan, "AirDAP debug shell\n");
+    shell_printf("Tab completes or lists commands; arrows edit and recall history.\n");
+    shell_printf("Type 'help' to list commands. Ctrl-] or Ctrl-D exits airdap-shell.\n");
+    shell_printf_styled(ansi_cyan, "airdap> ");
 }
 
 static void end_session(void)
 {
-    atomic_store(&session_active, false);
+    airdap_debug_shell_disconnected();
 }
 
 static void shell_task(void *argument)
 {
     (void) argument;
-    airdap_debug_shell_input_t input;
-    const airdap_debug_shell_input_callbacks_t callbacks = {
+    static airdap_debug_shell_input_t input;
+    airdap_debug_shell_input_callbacks_t callbacks = {
         .write = shell_write,
         .execute = shell_execute,
+        .complete = shell_complete,
         .context = NULL,
     };
     uint8_t data[SHELL_READ_CHUNK];
@@ -579,6 +728,10 @@ static void shell_task(void *argument)
             continue;
         }
 
+        if (atomic_load(&session_active)) {
+            drain_log_queue(&input, &callbacks);
+        }
+
         const uint32_t received = tud_vendor_n_read(
             DEBUG_VENDOR_INSTANCE,
             data,
@@ -589,9 +742,13 @@ static void shell_task(void *argument)
         }
 
         for (uint32_t index = 0U; index < received; ++index) {
-            if (data[index] == 0x00U) {
-                start_session(&input);
-            } else if (data[index] == 0x04U) {
+            if (data[index] == SHELL_SESSION_START ||
+                data[index] == SHELL_SESSION_START_COLOR) {
+                start_session(
+                    &input,
+                    &callbacks,
+                    data[index] == SHELL_SESSION_START_COLOR);
+            } else if (data[index] == SHELL_SESSION_END) {
                 end_session();
                 airdap_debug_shell_input_init(&input);
             } else if (atomic_load(&session_active)) {
@@ -601,6 +758,9 @@ static void shell_task(void *argument)
                     1U,
                     &callbacks);
             }
+        }
+        if (atomic_load(&session_active)) {
+            drain_log_queue(&input, &callbacks);
         }
     }
 }
@@ -612,6 +772,12 @@ esp_err_t airdap_debug_shell_start(void)
     if (output_mutex == NULL) {
         return ESP_ERR_NO_MEM;
     }
+    log_queue = xQueueCreate(LOG_QUEUE_DEPTH, sizeof(shell_log_message_t));
+    if (log_queue == NULL) {
+        vSemaphoreDelete(output_mutex);
+        output_mutex = NULL;
+        return ESP_ERR_NO_MEM;
+    }
 
     if (xTaskCreatePinnedToCore(
         shell_task,
@@ -621,6 +787,8 @@ esp_err_t airdap_debug_shell_start(void)
         SHELL_TASK_PRIORITY,
         NULL,
         1) != pdPASS) {
+        vQueueDelete(log_queue);
+        log_queue = NULL;
         vSemaphoreDelete(output_mutex);
         output_mutex = NULL;
         return ESP_ERR_NO_MEM;
@@ -634,6 +802,7 @@ esp_err_t airdap_debug_shell_start(void)
 void airdap_debug_shell_disconnected(void)
 {
     atomic_store(&session_active, false);
+    atomic_store(&session_color_enabled, false);
 
     TaskHandle_t waiter;
     portENTER_CRITICAL(&tx_state_lock);
