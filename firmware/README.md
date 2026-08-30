@@ -84,11 +84,14 @@ not part of this repository. The application currently provides:
 - an SPI2 half-duplex SWD backend on GPIO12/GPIO13/GPIO14;
 - target reset, power/status GPIO, VTref, and USB VBUS monitoring.
 
-The USB serial is derived from the eFuse base MAC. VID `0x303A` and PID
-`0x4021` are development identifiers; product firmware must use identifiers
-the project is authorized to ship. The checked-in layout is for the confirmed
-16 MiB module and provides two 4 MiB OTA application slots. Secure Boot, Flash
-Encryption, authenticated updates, and networking remain deferred.
+The shared device identity is derived from the eFuse base MAC. Its USB serial
+and current device ID are both `ADP-` followed by the full 12 uppercase MAC
+digits. Its 128-bit UUID is the first 16 bytes of
+`SHA-256("AirDAP" || eFuse base MAC)`. VID `0x303A` and PID `0x4021` are
+development identifiers; product firmware must use identifiers the project is
+authorized to ship. The checked-in layout is for the confirmed 16 MiB module
+and provides two 4 MiB OTA application slots. Secure Boot, Flash Encryption,
+authenticated updates, and networking remain deferred.
 
 The firmware version is the single tag pointing directly at the built commit.
 When that commit has no tag, the version is its seven-character Git hash. A
@@ -182,7 +185,7 @@ newest matching entry restores the unsubmitted input line. Commands can also be
 run non-interactively:
 
 ```sh
-python tools/airdap-shell.py -c help -c status -c "swd-idcode 100"
+python tools/airdap-shell.py -c help -c identity -c status -c "swd-idcode 100"
 ```
 
 `--color auto` is the default: it enables ANSI colors for an interactive TTY
@@ -200,7 +203,8 @@ The firmware accepts printable ASCII, CR/LF line endings, backspace/delete,
 Ctrl-C, Tab, and ANSI navigation sequences. Available commands are:
 
 - `help` — list commands;
-- `version` — print the running firmware version;
+- `identity` — print the USB serial, device ID, UUID, firmware and protocol
+  versions, and capability bits from the shared device identity;
 - `status` — print `target_mv`, `usb_vbus_mv`, `uptime_ms`, and `free_heap`;
 - `swd-idcode [clock_khz]` — reset the SWD line, select SWD, and read the
   target DP IDCODE at 100 kHz by default; accepted clocks are 100–10,000 kHz;
@@ -245,9 +249,9 @@ The other hardware-independent tests use the same pattern:
 
 ```sh
 for suite in \
-    bootloader_artifact ota_layout board voltage_monitor swd_protocol dap_protocol \
+    bootloader_artifact ota_layout board device_identity voltage_monitor swd_protocol dap_protocol \
     dap_ota dap_stream ota_manager app_main target_uart usb_descriptors project_version \
-    debug_shell_input \
+    debug_shell_identity debug_shell_input \
     debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
     cmake --build "build-host/$suite"

@@ -5,8 +5,7 @@ set(usb_device_sources
 )
 set(usb_device_private_requires
     dap_protocol
-    esp_app_format
-    esp_hw_support
+    device_identity
     esp_system
     esp_tinyusb
     esp_timer
@@ -24,6 +23,7 @@ if(CONFIG_AIRDAP_DEBUG_SHELL)
     endif()
     list(APPEND usb_device_sources
         "debug_shell.c"
+        "debug_shell_identity.c"
         "debug_shell_input.c"
         "debug_shell_swd_probe.c"
         "debug_shell_tx_state.c"

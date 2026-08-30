@@ -5,8 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "airdap_device_identity.h"
 #include "airdap_ota.h"
-#include "esp_app_desc.h"
 #include "esp_err.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
@@ -30,8 +30,8 @@ static const esp_partition_t update_partition = {
     .subtype = 0x11,
     .label = "ota_1",
 };
-static const esp_app_desc_t app_description = {
-    .version = "1.2.3-test",
+static const airdap_device_identity_t device_identity = {
+    .firmware_version = "1.2.3-test",
 };
 
 static esp_err_t begin_result;
@@ -42,6 +42,7 @@ static esp_err_t activate_result;
 static esp_err_t state_result;
 static esp_err_t confirm_result;
 static esp_ota_img_states_t running_state;
+static bool return_device_identity;
 static bool return_update_partition;
 static bool restarted;
 static unsigned begin_calls;
@@ -65,6 +66,7 @@ static void reset_fakes(void)
     state_result = ESP_OK;
     confirm_result = ESP_OK;
     running_state = ESP_OTA_IMG_VALID;
+    return_device_identity = true;
     return_update_partition = true;
     restarted = false;
     begin_calls = 0U;
@@ -92,9 +94,9 @@ const esp_partition_t *esp_ota_get_running_partition(void)
     return &running_partition;
 }
 
-const esp_app_desc_t *esp_app_get_description(void)
+const airdap_device_identity_t *airdap_device_identity_get(void)
 {
-    return &app_description;
+    return return_device_identity ? &device_identity : NULL;
 }
 
 esp_err_t esp_ota_get_state_partition(
@@ -179,6 +181,9 @@ static void test_reports_update_capacity_and_running_version(void)
     assert(strcmp(info.running_version, "1.2.3-test") == 0);
 
     return_update_partition = false;
+    assert(airdap_ota_get_info(&info) == AIRDAP_OTA_STATUS_INTERNAL_ERROR);
+    return_update_partition = true;
+    return_device_identity = false;
     assert(airdap_ota_get_info(&info) == AIRDAP_OTA_STATUS_INTERNAL_ERROR);
     assert(airdap_ota_get_info(NULL) == AIRDAP_OTA_STATUS_INVALID_ARGUMENT);
 }

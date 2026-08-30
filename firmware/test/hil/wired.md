@@ -112,10 +112,11 @@ python tools/airdap-shell.py --serial <ADP-serial>
 ```
 
 Confirm this does not open or change `AirDAP Target UART`. Run `help` and verify
-that `help`, `version`, `status`, `swd-idcode`, and `restart` are listed in cyan and the
-descriptions remain in the terminal's default color. Verify the prompt is cyan,
-a successful `status` result is green, `status extra` usage guidance is yellow,
-and an unknown command is red. Type `sta`, press Tab, and verify it completes to
+that `help`, `identity`, `status`, `swd-idcode`, and `restart` are listed in cyan
+and the descriptions remain in the terminal's default color. Confirm `version`
+is not listed and reports a red unrecognized-command error when entered. Verify
+the prompt is cyan, a successful `status` result is green, and `status extra`
+usage guidance is yellow. Type `sta`, press Tab, and verify it completes to
 `status `. On an empty line, press Tab and verify all five commands are listed.
 Type `s`, press Tab, and verify `status` and `swd-idcode` are listed in cyan on
 separate lines before the prompt restores `s`. Use Left/Right, Home/End,
@@ -128,12 +129,15 @@ default color mode. Reconnect the shell and verify the previous session's
 history is unavailable. While application logs are arriving, pause with the
 cursor in the middle of an unfinished command and verify each log retains its
 original formatting and is followed by the intact colored prompt, input, and
-cursor position. Run `version` and confirm its `firmware_version` value matches
-both the exact Git tag on the built commit or, when untagged, its seven-character
-Git hash and the version reported by the USB OTA query. Run `status` and verify
-decimal target voltage, USB VBUS voltage, uptime, and free heap fields. With
-OpenOCD and other CMSIS-DAP clients closed, run `swd-idcode 100` against the
-known-good reference target. Confirm it reports the same nonzero DP IDCODE
+cursor position. Run `identity` and confirm its USB serial matches the composite
+device and CMSIS-DAP `DAP_Info` serial, its device ID uses the same stable
+source, its UUID has 32 hexadecimal digits, and its `firmware_version` value
+matches both the exact Git tag on the built commit or, when untagged, its
+seven-character Git hash and the version reported by the USB OTA query. Run
+`status` and verify decimal target voltage, USB VBUS voltage, uptime, and free
+heap fields. With OpenOCD and other CMSIS-DAP clients closed, run `swd-idcode
+100` against the known-good reference target. Confirm it reports the same
+nonzero DP IDCODE
 recorded in section 4, then repeat once with the target disconnected and confirm
 the command reports a red error and the target-side SWDIO line is released.
 Confirm normal ESP application logs still appear on the primary console.
