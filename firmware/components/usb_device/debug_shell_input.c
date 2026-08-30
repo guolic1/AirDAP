@@ -201,8 +201,7 @@ static void complete_command(
     airdap_debug_shell_input_t *input,
     const airdap_debug_shell_input_callbacks_t *callbacks)
 {
-    if (callbacks->complete == NULL || input->length == 0U ||
-        input->cursor != input->length ||
+    if (callbacks->complete == NULL || input->cursor != input->length ||
         memchr(input->line, ' ', input->length) != NULL) {
         return;
     }
@@ -210,8 +209,34 @@ static void complete_command(
     input->line[input->length] = '\0';
     const char *completion = callbacks->complete(
         input->line,
+        0U,
         callbacks->context);
     if (completion == NULL) {
+        return;
+    }
+
+    const char *next_completion = callbacks->complete(
+        input->line,
+        1U,
+        callbacks->context);
+    if (next_completion != NULL) {
+        write_text(callbacks, "\n");
+        size_t match_index = 0U;
+        do {
+            write_text(callbacks, completion);
+            write_text(callbacks, "\n");
+            ++match_index;
+            completion = match_index == 1U
+                ? next_completion
+                : callbacks->complete(
+                    input->line,
+                    match_index,
+                    callbacks->context);
+        } while (completion != NULL);
+        write_text(callbacks, prompt);
+        if (input->length > 0U) {
+            callbacks->write(input->line, input->length, callbacks->context);
+        }
         return;
     }
 

@@ -364,22 +364,25 @@ static void shell_execute(const char *line, void *context)
     shell_printf("Unrecognized command: %.*s\n", (int) command_length, line);
 }
 
-static const char *shell_complete(const char *prefix, void *context)
+static const char *shell_complete(
+    const char *prefix,
+    size_t match_index,
+    void *context)
 {
     const size_t prefix_length = strlen(prefix);
-    const char *match = NULL;
+    size_t current_match = 0U;
 
     (void) context;
     for (size_t index = 0U; index < sizeof(commands) / sizeof(commands[0]); ++index) {
         if (strncmp(commands[index].name, prefix, prefix_length) != 0) {
             continue;
         }
-        if (match != NULL) {
-            return NULL;
+        if (current_match == match_index) {
+            return commands[index].name;
         }
-        match = commands[index].name;
+        ++current_match;
     }
-    return match;
+    return NULL;
 }
 
 static int help_command(const char *arguments)
@@ -577,7 +580,7 @@ static void start_session(airdap_debug_shell_input_t *input)
 {
     static const char banner[] =
         "\nAirDAP debug shell\n"
-        "Tab completes commands; arrows edit and recall history.\n"
+        "Tab completes or lists commands; arrows edit and recall history.\n"
         "Type 'help' to list commands. Ctrl-] or Ctrl-D exits airdap-shell.\n"
         "airdap> ";
 

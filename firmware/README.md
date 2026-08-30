@@ -166,11 +166,12 @@ python tools/airdap-shell.py --serial ADP-001122334455
 When only one AirDAP is connected, `--serial` may be omitted. Press Ctrl-] or
 Ctrl-D to leave the local tool; Ctrl-C is forwarded to cancel the current
 firmware input line. In interactive mode, Tab completes a unique command name,
-Left/Right, Home/End, and Delete edit the current line, and Up/Down browses the
-eight most recent commands from the current session. When the input line is not
-empty, history navigation only visits commands with that prefix. Moving down
-past the newest matching entry restores the unsubmitted input line. Commands can
-also be run non-interactively:
+or lists all matching commands when the prefix is empty or ambiguous. Left/Right,
+Home/End, and Delete edit the current line, and Up/Down browses the eight most
+recent commands from the current session. When the input line is not empty,
+history navigation only visits commands with that prefix. Moving down past the
+newest matching entry restores the unsubmitted input line. Commands can also be
+run non-interactively:
 
 ```sh
 python tools/airdap-shell.py -c help -c status -c "swd-idcode 100"

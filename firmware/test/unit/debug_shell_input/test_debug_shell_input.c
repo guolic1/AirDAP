@@ -36,27 +36,31 @@ static void capture_execute(const char *line, void *context)
     ++capture->executed_count;
 }
 
-static const char *complete_command(const char *prefix, void *context)
+static const char *complete_command(
+    const char *prefix,
+    size_t match_index,
+    void *context)
 {
     static const char *const commands[] = {
         "help",
         "status",
+        "swd-idcode",
         "restart",
     };
     const size_t prefix_length = strlen(prefix);
-    const char *match = NULL;
+    size_t current_match = 0U;
 
     (void) context;
     for (size_t index = 0U; index < sizeof(commands) / sizeof(commands[0]); ++index) {
         if (strncmp(commands[index], prefix, prefix_length) != 0) {
             continue;
         }
-        if (match != NULL) {
-            return NULL;
+        if (current_match == match_index) {
+            return commands[index];
         }
-        match = commands[index];
+        ++current_match;
     }
-    return match;
+    return NULL;
 }
 
 static airdap_debug_shell_input_callbacks_t make_callbacks(capture_t *capture)
@@ -176,6 +180,41 @@ static void test_tab_completes_unique_command(void)
     assert(capture.executed_count == 1U);
     assert(strcmp(capture.executed[0], "status ") == 0);
     assert(strcmp(capture.output, "status \nairdap> ") == 0);
+}
+
+static void test_tab_lists_all_commands_for_empty_prefix(void)
+{
+    airdap_debug_shell_input_t input;
+    capture_t capture = {0};
+    airdap_debug_shell_input_callbacks_t callbacks = make_callbacks(&capture);
+
+    callbacks.complete = complete_command;
+    airdap_debug_shell_input_init(&input);
+    consume_text(&input, "\t", &callbacks);
+
+    assert(strcmp(
+        capture.output,
+        "\nhelp\nstatus\nswd-idcode\nrestart\nairdap> ") == 0);
+    assert(input.length == 0U);
+    assert(input.cursor == 0U);
+}
+
+static void test_tab_lists_ambiguous_commands_and_restores_input(void)
+{
+    airdap_debug_shell_input_t input;
+    capture_t capture = {0};
+    airdap_debug_shell_input_callbacks_t callbacks = make_callbacks(&capture);
+
+    callbacks.complete = complete_command;
+    airdap_debug_shell_input_init(&input);
+    consume_text(&input, "s\t", &callbacks);
+
+    assert(strcmp(
+        capture.output,
+        "s\nstatus\nswd-idcode\nairdap> s") == 0);
+    assert(strcmp(input.line, "s") == 0);
+    assert(input.length == 1U);
+    assert(input.cursor == 1U);
 }
 
 static void test_up_recalls_latest_command_across_split_escape_sequence(void)
@@ -343,6 +382,8 @@ int main(void)
     test_overflow_newline_reports_and_recovers();
     test_ctrl_c_cancels_overflow_and_recovers();
     test_tab_completes_unique_command();
+    test_tab_lists_all_commands_for_empty_prefix();
+    test_tab_lists_ambiguous_commands_and_restores_input();
     test_up_recalls_latest_command_across_split_escape_sequence();
     test_down_restores_unsubmitted_draft();
     test_history_keeps_last_eight_commands();
