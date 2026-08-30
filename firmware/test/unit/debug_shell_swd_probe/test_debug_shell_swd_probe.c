@@ -137,11 +137,12 @@ static uint64_t make_response(uint8_t ack, uint32_t idcode, uint8_t parity)
         (UINT64_C(1) << 36U);
 }
 
-static void test_usb_and_network_owners_block_probe_without_touching_swd(void)
+static void test_existing_owners_block_probe_without_touching_swd(void)
 {
     static const airdap_dap_owner_t owners[] = {
         AIRDAP_DAP_OWNER_USB,
         AIRDAP_DAP_OWNER_NETWORK,
+        AIRDAP_DAP_OWNER_DIAGNOSTIC,
     };
 
     for (size_t index = 0U; index < sizeof(owners) / sizeof(owners[0]); ++index) {
@@ -407,7 +408,7 @@ int main(void)
     assert(airdap_dap_ownership_initialize(&ownership_backend) ==
         AIRDAP_DAP_OWNERSHIP_OK);
 
-    test_usb_and_network_owners_block_probe_without_touching_swd();
+    test_existing_owners_block_probe_without_touching_swd();
     test_probe_blocks_revoke_and_releases_diagnostic_owner();
     test_default_clock_reads_idcode_and_releases_bus();
     test_stm32f1_hardware_capture_starts_with_ack();

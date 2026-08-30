@@ -552,6 +552,7 @@ static int shell_swd_read_sequence(
 static bool shell_swd_cancelled(void *context)
 {
     (void) context;
+    /* USB detach clears session_active asynchronously in usb_event_callback. */
     return !atomic_load(&session_active) ||
         !tud_vendor_n_mounted(DEBUG_VENDOR_INSTANCE);
 }

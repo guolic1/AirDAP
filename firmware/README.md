@@ -251,7 +251,7 @@ Ctrl-C, Tab, and ANSI navigation sequences. Available commands are:
   AirDAP; a bounded transfer timeout leaves the firmware running.
 
 When OpenOCD or another CMSIS-DAP client owns SWD, `swd-idcode` returns `busy`
-without driving the target. After every successful, failed, or disconnected
+without driving the target. After every successful, failed, or USB-detached
 attempt, the command releases its DIAGNOSTIC owner, leaves SWDIO high impedance,
 and deasserts nRESET.
 
