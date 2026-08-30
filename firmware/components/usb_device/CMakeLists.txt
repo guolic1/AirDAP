@@ -1,4 +1,5 @@
 set(usb_device_sources
+    "dap_stream.c"
     "usb_descriptors.c"
     "usb_device.c"
 )

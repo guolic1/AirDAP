@@ -7,6 +7,7 @@
 
 #include "airdap_dap.h"
 #include "airdap_dap_protocol.h"
+#include "airdap_dap_stream.h"
 #if CONFIG_AIRDAP_DEBUG_SHELL
 #include "airdap_debug_shell.h"
 #endif
@@ -15,6 +16,7 @@
 #include "airdap_usb_descriptors.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -40,8 +42,8 @@ typedef struct {
 
 static const char *TAG = "airdap_usb";
 static QueueHandle_t dap_queue;
-static uint8_t dap_receive_buffer[AIRDAP_DAP_BUFFER_SIZE];
-static size_t dap_receive_length;
+static airdap_dap_stream_t dap_stream;
+static uint8_t dap_usb_read_buffer[AIRDAP_DAP_BUFFER_SIZE];
 
 static void enqueue_disconnect(void)
 {
@@ -61,7 +63,7 @@ static void usb_event_callback(tinyusb_event_t *event, void *argument)
 {
     (void) argument;
     if (event->id == TINYUSB_EVENT_DETACHED) {
-        dap_receive_length = 0U;
+        airdap_dap_stream_init(&dap_stream);
         enqueue_disconnect();
 #if CONFIG_AIRDAP_DEBUG_SHELL
         airdap_debug_shell_disconnected();
@@ -96,39 +98,19 @@ static void dap_worker_task(void *argument)
     }
 }
 
-static void consume_dap_requests(void)
+static void enqueue_dap_request(
+    void *context,
+    const uint8_t *request,
+    size_t request_length)
 {
-    size_t offset = 0U;
-    while (offset < dap_receive_length) {
-        const size_t request_length = airdap_dap_request_size(
-            dap_receive_buffer + offset,
-            dap_receive_length - offset);
-        if (request_length == 0U) {
-            break;
-        }
-        if (request_length == SIZE_MAX || request_length > AIRDAP_DAP_PACKET_SIZE) {
-            ESP_LOGW(TAG, "Malformed DAP request discarded");
-            dap_receive_length = 0U;
-            return;
-        }
-
-        dap_work_item_t item = {
-            .length = request_length,
-            .respond = true,
-        };
-        memcpy(item.data, dap_receive_buffer + offset, request_length);
-        if (xQueueSend(dap_queue, &item, 0) != pdTRUE) {
-            ESP_LOGW(TAG, "DAP queue full; request dropped");
-        }
-        offset += request_length;
-    }
-
-    if (offset > 0U) {
-        dap_receive_length -= offset;
-        memmove(
-            dap_receive_buffer,
-            dap_receive_buffer + offset,
-            dap_receive_length);
+    (void) context;
+    dap_work_item_t item = {
+        .length = request_length,
+        .respond = true,
+    };
+    memcpy(item.data, request, request_length);
+    if (xQueueSend(dap_queue, &item, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "DAP queue full; request dropped");
     }
 }
 
@@ -143,19 +125,36 @@ void tud_vendor_rx_cb(
         return;
     }
 
+    if (airdap_dap_stream_expire(&dap_stream, esp_timer_get_time())) {
+        ESP_LOGW(TAG, "Stale partial DAP request discarded");
+        enqueue_disconnect();
+    }
+
     while (tud_vendor_n_available(interface_number) > 0U) {
-        const size_t capacity = sizeof(dap_receive_buffer) - dap_receive_length;
-        if (capacity == 0U) {
-            ESP_LOGW(TAG, "DAP receive buffer overflow");
-            tud_vendor_n_read_flush(interface_number);
-            dap_receive_length = 0U;
+        const size_t received = tud_vendor_n_read(
+            interface_number,
+            dap_usb_read_buffer,
+            sizeof(dap_usb_read_buffer));
+        if (received == 0U) {
             return;
         }
-        dap_receive_length += tud_vendor_n_read(
-            interface_number,
-            dap_receive_buffer + dap_receive_length,
-            capacity);
-        consume_dap_requests();
+        const airdap_dap_stream_result_t result = airdap_dap_stream_feed(
+            &dap_stream,
+            dap_usb_read_buffer,
+            received,
+            esp_timer_get_time(),
+            enqueue_dap_request,
+            NULL);
+        if (result != AIRDAP_DAP_STREAM_OK) {
+            if (result == AIRDAP_DAP_STREAM_OVERFLOW) {
+                ESP_LOGW(TAG, "DAP receive buffer overflow");
+            } else {
+                ESP_LOGW(TAG, "Malformed DAP request discarded");
+            }
+            tud_vendor_n_read_flush(interface_number);
+            enqueue_disconnect();
+            return;
+        }
     }
 }
 
@@ -272,6 +271,7 @@ esp_err_t airdap_usb_init(void)
     if (dap_queue == NULL) {
         return ESP_ERR_NO_MEM;
     }
+    airdap_dap_stream_init(&dap_stream);
     if (xTaskCreatePinnedToCore(
         dap_worker_task,
         "dap_worker",

@@ -24,6 +24,12 @@ enum {
     ID_DAP_SWJ_SEQUENCE = 0x12,
     ID_DAP_SWD_CONFIGURE = 0x13,
     ID_DAP_SWD_SEQUENCE = 0x1D,
+    ID_AIRDAP_OTA_QUERY = 0x80,
+    ID_AIRDAP_OTA_BEGIN = 0x81,
+    ID_AIRDAP_OTA_WRITE = 0x82,
+    ID_AIRDAP_OTA_COMMIT = 0x83,
+    ID_AIRDAP_OTA_ABORT = 0x84,
+    ID_AIRDAP_OTA_REBOOT = 0x85,
     ID_DAP_INVALID = 0xFF,
 
     DAP_INFO_VENDOR = 0x01,
@@ -45,7 +51,15 @@ enum {
     DAP_TRANSFER_MISMATCH = 1U << 4,
 
     DAP_SWJ_PIN_NRESET = 1U << 7,
+
+    AIRDAP_OTA_WRITE_HEADER_SIZE = 7,
+    AIRDAP_OTA_MAX_WRITE_SIZE = 496,
 };
+
+_Static_assert(
+    AIRDAP_OTA_WRITE_HEADER_SIZE + AIRDAP_OTA_MAX_WRITE_SIZE <=
+        AIRDAP_DAP_PACKET_SIZE,
+    "OTA write request must fit the DAP packet size");
 
 static uint16_t read_u16(const uint8_t *data)
 {
@@ -501,6 +515,10 @@ size_t airdap_dap_request_size(
         return available_length >= 3U ? 3U : 0U;
     case ID_DAP_DISCONNECT:
     case ID_DAP_RESET_TARGET:
+    case ID_AIRDAP_OTA_QUERY:
+    case ID_AIRDAP_OTA_COMMIT:
+    case ID_AIRDAP_OTA_ABORT:
+    case ID_AIRDAP_OTA_REBOOT:
         return 1U;
     case ID_DAP_TRANSFER_CONFIGURE:
     case ID_DAP_WRITE_ABORT:
@@ -508,7 +526,18 @@ size_t airdap_dap_request_size(
     case ID_DAP_SWJ_PINS:
         return available_length >= 7U ? 7U : 0U;
     case ID_DAP_SWJ_CLOCK:
+    case ID_AIRDAP_OTA_BEGIN:
         return available_length >= 5U ? 5U : 0U;
+    case ID_AIRDAP_OTA_WRITE:
+        if (available_length < AIRDAP_OTA_WRITE_HEADER_SIZE) {
+            return 0U;
+        }
+        length = read_u16(request + 5U);
+        if (length > AIRDAP_OTA_MAX_WRITE_SIZE) {
+            return SIZE_MAX;
+        }
+        length += AIRDAP_OTA_WRITE_HEADER_SIZE;
+        return available_length >= length ? length : 0U;
     case ID_DAP_SWJ_SEQUENCE:
         if (available_length < 2U) {
             return 0U;
@@ -755,6 +784,23 @@ size_t airdap_dap_process_packet(
     case ID_DAP_SWD_SEQUENCE:
         return process_swd_sequence(
             processor, request, request_length, response, response_capacity);
+
+    case ID_AIRDAP_OTA_QUERY:
+    case ID_AIRDAP_OTA_BEGIN:
+    case ID_AIRDAP_OTA_WRITE:
+    case ID_AIRDAP_OTA_COMMIT:
+    case ID_AIRDAP_OTA_ABORT:
+    case ID_AIRDAP_OTA_REBOOT:
+        if (processor->backend.vendor_command == NULL) {
+            return invalid_response(response, response_capacity);
+        }
+        return processor->backend.vendor_command(
+            processor->backend.context,
+            processor->selected_port != AIRDAP_DAP_PORT_DISABLED,
+            request,
+            request_length,
+            response,
+            response_capacity);
 
     default:
         return invalid_response(response, response_capacity);

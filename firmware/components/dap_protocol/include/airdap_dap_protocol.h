@@ -64,6 +64,13 @@ typedef struct {
         void *context,
         uint8_t status_type,
         bool active);
+    size_t (*vendor_command)(
+        void *context,
+        bool debug_connected,
+        const uint8_t *request,
+        size_t request_length,
+        uint8_t *response,
+        size_t response_capacity);
 } airdap_dap_backend_t;
 
 typedef struct {

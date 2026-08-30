@@ -3,6 +3,7 @@
 #include "sdkconfig.h"
 
 #include "airdap_board.h"
+#include "airdap_ota.h"
 #include "airdap_swd.h"
 #include "airdap_usb.h"
 #include "airdap_voltage_monitor.h"
@@ -19,11 +20,13 @@ void app_main(void)
 {
     airdap_voltage_reading_t voltage;
 
+    airdap_ota_initialize();
     ESP_ERROR_CHECK(airdap_board_init_safe());
     ESP_ERROR_CHECK(airdap_voltage_monitor_init());
     ESP_ERROR_CHECK(airdap_swd_init(AIRDAP_SWD_DEFAULT_CLOCK_HZ));
     ESP_ERROR_CHECK(airdap_voltage_monitor_read(&voltage));
     ESP_ERROR_CHECK(airdap_usb_init());
+    ESP_ERROR_CHECK(airdap_ota_confirm_running_image());
 
     ESP_LOGI(
         TAG,
