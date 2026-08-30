@@ -1,2 +1,6 @@
 /.vscode/
 /.worktree/
+*.md
+!/docs/
+!/docs/*.md
+!/docs/**/*.md
