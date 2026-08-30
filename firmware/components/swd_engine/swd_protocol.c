@@ -8,6 +8,12 @@ enum {
     AIRDAP_SWD_REQUEST_BITS = 8,
     AIRDAP_SWD_ACK_BITS = 3,
     AIRDAP_SWD_DATA_BITS = 33,
+    AIRDAP_SWD_WRITE_GUARD_BITS = 1,
+    AIRDAP_SWD_WRITE_EMBEDDED_IDLE_CYCLES = 6,
+    AIRDAP_SWD_WRITE_FRAME_BITS =
+        AIRDAP_SWD_WRITE_GUARD_BITS +
+        AIRDAP_SWD_DATA_BITS +
+        AIRDAP_SWD_WRITE_EMBEDDED_IDLE_CYCLES,
     AIRDAP_SWD_CONNECT_IDLE_CYCLES = 8,
     AIRDAP_SWD_CONNECT_WAIT_RETRIES = 5,
 };
@@ -62,18 +68,55 @@ uint8_t airdap_swd_encode_request(const airdap_swd_request_t *request)
         (1U << 7U));
 }
 
-static esp_err_t write_idle_cycles(const airdap_swd_io_t *io)
+static esp_err_t write_idle_cycles(
+    const airdap_swd_io_t *io,
+    uint8_t idle_cycles)
 {
-    uint8_t remaining = io->idle_cycles;
+    uint8_t remaining = idle_cycles;
     while (remaining > 0U) {
-        const uint8_t chunk = remaining > 64U ? 64U : remaining;
+        uint8_t chunk = remaining > 64U ? 64U : remaining;
+        if (remaining == 65U) {
+            chunk = 63U;
+        } else if (remaining == 1U) {
+            /* ESP32-S3 GPSPI cannot transmit a one-bit TX transaction. */
+            chunk = 2U;
+        }
         esp_err_t error = io->write_bits(io->context, 0U, chunk);
         if (error != ESP_OK) {
             return error;
         }
-        remaining -= chunk;
+        remaining = chunk > remaining
+            ? 0U
+            : (uint8_t) (remaining - chunk);
     }
     return ESP_OK;
+}
+
+static esp_err_t write_data_phase_and_idle(
+    const airdap_swd_io_t *io,
+    uint64_t data_bits)
+{
+    /*
+     * ESP32-S3 3-wire GPSPI consumes the first TX bit while changing from the
+     * target-driven ACK/turnaround phase to host output. Prefix a guard bit so
+     * WDATA[0] remains aligned, then append six low idle bits to make the full
+     * transaction byte-aligned. The target observes the 32 data bits, parity,
+     * and idle clocks after the consumed guard bit.
+     */
+    esp_err_t error = io->write_bits(
+        io->context,
+        data_bits << AIRDAP_SWD_WRITE_GUARD_BITS,
+        AIRDAP_SWD_WRITE_FRAME_BITS);
+    if (error != ESP_OK) {
+        return error;
+    }
+
+    const uint8_t remaining_idle_cycles =
+        io->idle_cycles >= AIRDAP_SWD_WRITE_EMBEDDED_IDLE_CYCLES
+        ? (uint8_t) (
+            io->idle_cycles - AIRDAP_SWD_WRITE_EMBEDDED_IDLE_CYCLES)
+        : 0U;
+    return write_idle_cycles(io, remaining_idle_cycles);
 }
 
 static esp_err_t restore_host_and_idle(const airdap_swd_io_t *io)
@@ -83,7 +126,15 @@ static esp_err_t restore_host_and_idle(const airdap_swd_io_t *io)
         return error;
     }
 
-    return write_idle_cycles(io);
+    /*
+     * Keep one low host-owned clock between a target-driven read and the next
+     * request. Without it, the ESP32-S3 direction handoff leaves the following
+     * STM32F1 request unrecognized when the host configures zero idle cycles.
+     * write_idle_cycles() expands the one-bit minimum to the two bits supported
+     * by ESP32-S3 GPSPI.
+     */
+    const uint8_t idle_cycles = io->idle_cycles == 0U ? 1U : io->idle_cycles;
+    return write_idle_cycles(io, idle_cycles);
 }
 
 static esp_err_t complete_protocol_error(const airdap_swd_io_t *io)
@@ -126,11 +177,7 @@ static esp_err_t complete_error_data_phase(
     if (error != ESP_OK) {
         return error;
     }
-    error = io->write_bits(io->context, 0U, AIRDAP_SWD_DATA_BITS);
-    if (error != ESP_OK) {
-        return error;
-    }
-    return write_idle_cycles(io);
+    return write_data_phase_and_idle(io, 0U);
 }
 
 static esp_err_t transfer_attempt(
@@ -202,12 +249,7 @@ static esp_err_t transfer_attempt(
     const uint64_t data_bits =
         (uint64_t) *data |
         ((uint64_t) parity32(*data) << 32U);
-    error = io->write_bits(io->context, data_bits, AIRDAP_SWD_DATA_BITS);
-    if (error != ESP_OK) {
-        return error;
-    }
-
-    return write_idle_cycles(io);
+    return write_data_phase_and_idle(io, data_bits);
 }
 
 esp_err_t airdap_swd_protocol_transfer(

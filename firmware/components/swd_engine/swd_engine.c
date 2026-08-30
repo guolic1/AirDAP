@@ -133,7 +133,16 @@ static esp_err_t turnaround(void *context, bool host_output)
     if (error != ESP_OK) {
         return error;
     }
-    return read_bits(swd, swd->turnaround_cycles, &ignored);
+
+    /*
+     * The target drives ACK on the rising edge that ends host-to-target
+     * turnaround. SPI mode 0 samples that edge, so the first ACK read also
+     * supplies the final turnaround clock. Only preceding cycles are ignored.
+     */
+    if (swd->turnaround_cycles == 1U) {
+        return ESP_OK;
+    }
+    return read_bits(swd, swd->turnaround_cycles - 1U, &ignored);
 }
 
 static airdap_swd_io_t protocol_io(void)

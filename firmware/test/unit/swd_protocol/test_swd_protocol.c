@@ -215,8 +215,34 @@ static void test_write_data_and_parity(void)
         0U,
         &ack) == ESP_OK);
     assert(ack == AIRDAP_SWD_ACK_OK);
-    assert_event(&fake, 4U, EVENT_WRITE_BITS, data_with_parity(select), 33U);
-    assert_event(&fake, 5U, EVENT_WRITE_BITS, 0U, 8U);
+    assert_event(&fake, 4U, EVENT_WRITE_BITS, data_with_parity(select) << 1U, 40U);
+    assert_event(&fake, 5U, EVENT_WRITE_BITS, 0U, 2U);
+}
+
+static void test_write_with_zero_configured_idle_keeps_safe_tail_clock(void)
+{
+    const uint32_t abort = UINT32_C(0x1E);
+    fake_io_t fake = {0};
+    airdap_swd_io_t io = make_io(&fake);
+    io.idle_cycles = 0U;
+    uint32_t data = abort;
+    airdap_swd_ack_t ack = AIRDAP_SWD_ACK_NONE;
+
+    queue_read(&fake, AIRDAP_SWD_ACK_OK, 3U);
+
+    assert(airdap_swd_protocol_transfer(
+        &io,
+        &(airdap_swd_request_t) {
+            .port = AIRDAP_SWD_PORT_DP,
+            .direction = AIRDAP_SWD_WRITE,
+            .address = 0x0,
+        },
+        &data,
+        0U,
+        &ack) == ESP_OK);
+    assert(ack == AIRDAP_SWD_ACK_OK);
+    assert_event(&fake, 4U, EVENT_WRITE_BITS, data_with_parity(abort) << 1U, 40U);
+    assert(fake.event_count == 5U);
 }
 
 static void test_wait_is_retried(void)
@@ -265,10 +291,12 @@ static void test_long_idle_cycles_are_chunked(void)
         0U,
         &ack) == ESP_OK);
     assert(ack == AIRDAP_SWD_ACK_OK);
+    assert_event(&fake, fake.event_count - 5U, EVENT_WRITE_BITS,
+        data_with_parity(UINT32_C(0x12345678)) << 1U, 40U);
     assert_event(&fake, fake.event_count - 4U, EVENT_WRITE_BITS, 0U, 64U);
     assert_event(&fake, fake.event_count - 3U, EVENT_WRITE_BITS, 0U, 64U);
     assert_event(&fake, fake.event_count - 2U, EVENT_WRITE_BITS, 0U, 64U);
-    assert_event(&fake, fake.event_count - 1U, EVENT_WRITE_BITS, 0U, 63U);
+    assert_event(&fake, fake.event_count - 1U, EVENT_WRITE_BITS, 0U, 57U);
 }
 
 static void test_wait_data_phase_is_clocked(void)
@@ -293,6 +321,81 @@ static void test_wait_data_phase_is_clocked(void)
         &ack) == ESP_OK);
     assert(ack == AIRDAP_SWD_ACK_WAIT);
     assert_event(&fake, 3U, EVENT_READ_BITS, 0U, 33U);
+}
+
+static void test_wait_write_data_phase_uses_supported_tx_length(void)
+{
+    fake_io_t fake = {0};
+    airdap_swd_io_t io = make_io(&fake);
+    io.data_phase = true;
+    io.idle_cycles = 0U;
+    uint32_t data = UINT32_C(0x12345678);
+    airdap_swd_ack_t ack = AIRDAP_SWD_ACK_NONE;
+
+    queue_read(&fake, AIRDAP_SWD_ACK_WAIT, 3U);
+    assert(airdap_swd_protocol_transfer(
+        &io,
+        &(airdap_swd_request_t) {
+            .port = AIRDAP_SWD_PORT_DP,
+            .direction = AIRDAP_SWD_WRITE,
+            .address = 0x0,
+        },
+        &data,
+        0U,
+        &ack) == ESP_OK);
+    assert(ack == AIRDAP_SWD_ACK_WAIT);
+    assert(fake.events[3].type == EVENT_TURNAROUND);
+    assert(fake.events[3].host_output);
+    assert_event(&fake, 4U, EVENT_WRITE_BITS, 0U, 40U);
+    assert(fake.event_count == 5U);
+}
+
+static void test_single_read_idle_cycle_is_safely_padded(void)
+{
+    fake_io_t fake = {0};
+    airdap_swd_io_t io = make_io(&fake);
+    io.idle_cycles = 1U;
+    uint32_t data = 0U;
+    airdap_swd_ack_t ack = AIRDAP_SWD_ACK_NONE;
+
+    queue_read(&fake, AIRDAP_SWD_ACK_OK, 3U);
+    queue_read(&fake, data_with_parity(UINT32_C(0x12345678)), 33U);
+    assert(airdap_swd_protocol_transfer(
+        &io,
+        &(airdap_swd_request_t) {
+            .port = AIRDAP_SWD_PORT_DP,
+            .direction = AIRDAP_SWD_READ,
+            .address = 0x0,
+        },
+        &data,
+        0U,
+        &ack) == ESP_OK);
+    assert(ack == AIRDAP_SWD_ACK_OK);
+    assert_event(&fake, fake.event_count - 1U, EVENT_WRITE_BITS, 0U, 2U);
+}
+
+static void test_zero_read_idle_cycles_keep_safe_host_recovery(void)
+{
+    fake_io_t fake = {0};
+    airdap_swd_io_t io = make_io(&fake);
+    io.idle_cycles = 0U;
+    uint32_t data = 0U;
+    airdap_swd_ack_t ack = AIRDAP_SWD_ACK_NONE;
+
+    queue_read(&fake, AIRDAP_SWD_ACK_OK, 3U);
+    queue_read(&fake, data_with_parity(UINT32_C(0x12345678)), 33U);
+    assert(airdap_swd_protocol_transfer(
+        &io,
+        &(airdap_swd_request_t) {
+            .port = AIRDAP_SWD_PORT_DP,
+            .direction = AIRDAP_SWD_READ,
+            .address = 0x0,
+        },
+        &data,
+        0U,
+        &ack) == ESP_OK);
+    assert(ack == AIRDAP_SWD_ACK_OK);
+    assert_event(&fake, fake.event_count - 1U, EVENT_WRITE_BITS, 0U, 2U);
 }
 
 static void test_bad_data_parity_is_rejected_after_bus_recovery(void)
@@ -377,9 +480,13 @@ int main(void)
     test_request_encoding();
     test_dp_read_and_parity();
     test_write_data_and_parity();
+    test_write_with_zero_configured_idle_keeps_safe_tail_clock();
     test_wait_is_retried();
     test_long_idle_cycles_are_chunked();
     test_wait_data_phase_is_clocked();
+    test_wait_write_data_phase_uses_supported_tx_length();
+    test_single_read_idle_cycle_is_safely_padded();
+    test_zero_read_idle_cycles_keep_safe_host_recovery();
     test_bad_data_parity_is_rejected_after_bus_recovery();
     test_invalid_ack_backs_off_full_data_phase();
     test_connect_sequence_reads_idcode();
