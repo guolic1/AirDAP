@@ -31,6 +31,9 @@ typedef struct {
     bool last_ap;
     bool last_read;
     bool fail_read_sequence;
+    bool vendor_debug_connected;
+    uint8_t vendor_command;
+    unsigned vendor_calls;
 } fake_backend_t;
 
 static bool fake_connect(void *context)
@@ -150,6 +153,25 @@ static void fake_delay(void *context, uint16_t delay_us)
     fake->delay_us = delay_us;
 }
 
+static size_t fake_vendor_command(
+    void *context,
+    bool debug_connected,
+    const uint8_t *request,
+    size_t request_length,
+    uint8_t *response,
+    size_t response_capacity)
+{
+    fake_backend_t *fake = context;
+    assert(request != NULL && request_length > 0U);
+    assert(response != NULL && response_capacity >= 2U);
+    fake->vendor_debug_connected = debug_connected;
+    fake->vendor_command = request[0];
+    ++fake->vendor_calls;
+    response[0] = request[0];
+    response[1] = 0x5AU;
+    return 2U;
+}
+
 static airdap_dap_backend_t make_backend(fake_backend_t *fake)
 {
     return (airdap_dap_backend_t) {
@@ -165,6 +187,7 @@ static airdap_dap_backend_t make_backend(fake_backend_t *fake)
         .swj_pins = fake_swj_pins,
         .reset_target = fake_reset,
         .delay_us = fake_delay,
+        .vendor_command = fake_vendor_command,
     };
 }
 
@@ -397,6 +420,55 @@ static void test_request_framing(void)
     assert(airdap_dap_request_size(swd_sequence, 4U) == 0U);
     assert(airdap_dap_request_size(swd_sequence, sizeof(swd_sequence)) ==
         sizeof(swd_sequence));
+
+    const uint8_t ota_query[] = {0x80};
+    assert(airdap_dap_request_size(ota_query, sizeof(ota_query)) == 1U);
+
+    const uint8_t ota_begin[] = {0x81, 1, 0, 0, 0};
+    assert(airdap_dap_request_size(ota_begin, 4U) == 0U);
+    assert(airdap_dap_request_size(ota_begin, sizeof(ota_begin)) ==
+        sizeof(ota_begin));
+
+    const uint8_t ota_write[] = {0x82, 0, 0, 0, 0, 3, 0, 1, 2, 3};
+    assert(airdap_dap_request_size(ota_write, 9U) == 0U);
+    assert(airdap_dap_request_size(ota_write, sizeof(ota_write)) ==
+        sizeof(ota_write));
+
+    uint8_t oversized_ota_write[AIRDAP_DAP_PACKET_SIZE] = {0};
+    oversized_ota_write[0] = 0x82;
+    oversized_ota_write[5] = 497U & 0xFFU;
+    oversized_ota_write[6] = 497U >> 8U;
+    assert(airdap_dap_request_size(
+        oversized_ota_write,
+        sizeof(oversized_ota_write)) == SIZE_MAX);
+
+    for (uint8_t command = 0x83U; command <= 0x85U; ++command) {
+        const uint8_t request[] = {command};
+        assert(airdap_dap_request_size(request, sizeof(request)) == 1U);
+    }
+}
+
+static void test_vendor_commands(
+    airdap_dap_processor_t *processor,
+    fake_backend_t *fake)
+{
+    uint8_t response[AIRDAP_DAP_PACKET_SIZE];
+    const uint8_t query[] = {0x80};
+
+    const unsigned calls_before = fake->vendor_calls;
+    assert(process(processor, query, sizeof(query), response) == 2U);
+    assert(response[0] == 0x80U && response[1] == 0x5AU);
+    assert(fake->vendor_calls == calls_before + 1U);
+    assert(fake->vendor_command == 0x80U);
+    assert(!fake->vendor_debug_connected);
+
+    const uint8_t connect[] = {0x02, 0x01};
+    assert(process(processor, connect, sizeof(connect), response) == 2U);
+    assert(process(processor, query, sizeof(query), response) == 2U);
+    assert(fake->vendor_debug_connected);
+
+    const uint8_t disconnect[] = {0x03};
+    assert(process(processor, disconnect, sizeof(disconnect), response) == 2U);
 }
 
 int main(void)
@@ -414,6 +486,7 @@ int main(void)
     test_transfers(&processor, &fake);
     test_disconnect_and_invalid(&processor, &fake);
     test_request_framing();
+    test_vendor_commands(&processor, &fake);
 
     puts("DAP protocol tests passed");
     return 0;

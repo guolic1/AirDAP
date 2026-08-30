@@ -59,6 +59,15 @@ ELF, that `call_start_cpu0()` calls `bootloader_before_init()` before
 the 9-second RTC watchdog, and full application image validation remain
 enabled.
 
+The build also verifies the fixed 16 MiB OTA layout and rollback configuration.
+That gate can be rerun directly:
+
+```sh
+python tools/verify_ota_layout.py \
+    --partition-table partitions.csv \
+    --sdkconfig sdkconfig
+```
+
 To flash and monitor a connected board:
 
 ```sh
@@ -77,14 +86,67 @@ not part of this repository. The application currently provides:
 
 The USB serial is derived from the eFuse base MAC. VID `0x303A` and PID
 `0x4021` are development identifiers; product firmware must use identifiers
-the project is authorized to ship. Secure Boot, OTA partitions, and networking
-remain deferred to their roadmap stages. The final flash size and OTA layout
-must be selected after the exact ESP32-S3-MINI-1U ordering code is fixed.
+the project is authorized to ship. The checked-in layout is for the confirmed
+16 MiB module and provides two 4 MiB OTA application slots. Secure Boot, Flash
+Encryption, authenticated updates, and networking remain deferred.
 
 CMSIS-DAP uses 512-byte internal buffers and advertises a 508-byte packet
 limit. At full-speed USB this keeps the largest response from ending on an
 exact 64-byte endpoint boundary, so TinyUSB cannot leave an automatic ZLP for
 the following DAP transaction.
+
+## Development USB OTA
+
+The first rollout from the former single-`factory` layout requires one complete
+serial flash. This installs the 16 MiB flash header, bootloader rollback
+support, partition table, initial OTA metadata, and the application in
+`ota_0`:
+
+```sh
+idf.py -p <airdap-programming-port> flash
+```
+
+An application-only update cannot migrate an existing device's partition
+table. Do not use the Python updater until this baseline flash has completed
+successfully.
+
+After the baseline is installed, build the next application and update over
+the normal AirDAP USB connection without pressing reset or GPIO0:
+
+```sh
+python -m pip install pyusb
+python tools/airdap-update.py --serial ADP-001122334455 build/airdap.bin
+```
+
+When only one AirDAP is connected, `--serial` may be omitted. Stop pyOCD,
+OpenOCD, debuggers, and other processes that have claimed the CMSIS-DAP
+interface before running the command. On Linux the user needs an appropriate
+udev rule; on Windows interface 0 must retain its WinUSB binding.
+
+The tool queries the inactive-slot capacity, disconnects the SWD debug port,
+uploads sequential 496-byte chunks, validates and selects the image, requests
+a software restart, then waits for the same USB serial and reports its running
+version. It writes only `airdap.bin`; it does not replace the bootloader,
+partition table, NVS, PHY data, or OTA metadata partition directly.
+
+An incomplete, rejected, or physically disconnected upload is aborted without
+selecting the inactive slot. A committed image is initially `PENDING_VERIFY`;
+the application confirms it only after board, voltage, SWD, and USB
+initialization succeed. If it resets before confirmation, the ESP-IDF
+bootloader rolls back to the prior valid slot.
+
+If a USB transfer fails after only part of a variable-length command was
+received, firmware expires the abandoned frame after 250 ms. The updater waits
+300 ms before recovery, sends `OTA_ABORT`, and drains any stale response before
+reporting the original error. Restart the same command from offset zero; this
+development protocol does not resume partial uploads.
+
+This is an unauthenticated development interface. Anyone with physical USB
+access and a valid ESP32-S3 application image can replace the firmware. It is
+not a product OTA security boundary and provides no signing, encryption,
+authorization, resume, or network update support. Follow
+[`test/hil/usb_ota.md`](test/hil/usb_ota.md) before relying on update and
+rollback behavior on hardware.
 
 ## Optional Vendor Bulk debug shell
 
@@ -159,9 +221,9 @@ The other hardware-independent tests use the same pattern:
 
 ```sh
 for suite in \
-    bootloader_artifact board voltage_monitor swd_protocol dap_protocol target_uart \
-    usb_descriptors debug_shell_input debug_shell_swd_probe debug_shell_tx_state \
-    airdap_shell wired_hil; do
+    bootloader_artifact ota_layout board voltage_monitor swd_protocol dap_protocol \
+    dap_ota dap_stream ota_manager app_main target_uart usb_descriptors debug_shell_input \
+    debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
     cmake --build "build-host/$suite"
     ctest --test-dir "build-host/$suite" --output-on-failure
@@ -169,10 +231,12 @@ done
 ```
 
 These tests prove GPIO ordering, bootloader artifact-contract validation, ADC
-scaling, SWD transaction framing, CMSIS-DAP command framing, UART line-coding
-mapping, both compile-time USB descriptor variants, bounded shell input, and
-the bounded SWD IDCODE command flow, debug TX completion state, host tool, and
-wired HIL helper's protocol checks. They do not prove USB enumeration or
-electrical SWD timing.
+scaling, SWD transaction framing, CMSIS-DAP and OTA command framing, OTA state
+transitions, stale USB-frame recovery, host update ordering, UART line-coding
+mapping, both compile-time USB descriptor variants, bounded shell input, the
+bounded SWD IDCODE command flow, debug TX completion state, host tools, and
+wired HIL helper's protocol checks. They do not prove USB enumeration,
+physical flash persistence, bootloader rollback on a board, or electrical SWD
+timing.
 Follow `test/hil/wired.md` on a populated AirDAP board before marking roadmap
 Stage 1 complete.

@@ -9,6 +9,15 @@ idf_build_set_property(MINIMAL_BUILD ON)
 
 project(airdap)
 
+add_custom_target(airdap_verify_ota_layout ALL
+    COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/tools/verify_ota_layout.py"
+        --partition-table "${CMAKE_CURRENT_LIST_DIR}/partitions.csv"
+        --sdkconfig "${SDKCONFIG}"
+    DEPENDS partition_table
+    COMMENT "Verifying AirDAP OTA partition layout"
+    VERBATIM
+)
+
 add_custom_target(airdap_verify_bootloader ALL
     COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/tools/verify_bootloader.py"
         --build-dir "${CMAKE_BINARY_DIR}"

@@ -4,7 +4,9 @@
 
 #include "airdap_board.h"
 #include "airdap_dap.h"
+#include "airdap_dap_ota.h"
 #include "airdap_dap_protocol.h"
+#include "airdap_ota.h"
 #include "airdap_swd.h"
 #include "esp_rom_sys.h"
 
@@ -22,7 +24,8 @@ static bool target_reset_released = true;
 static bool backend_connect(void *context)
 {
     (void) context;
-    return airdap_swd_set_io_state(true) == ESP_OK;
+    return airdap_ota_debug_allowed() &&
+        airdap_swd_set_io_state(true) == ESP_OK;
 }
 
 static void backend_disconnect(void *context)
@@ -31,6 +34,7 @@ static void backend_disconnect(void *context)
     (void) airdap_swd_set_io_state(false);
     (void) airdap_target_reset_set_asserted(false);
     target_reset_released = true;
+    airdap_ota_handle_disconnect();
 }
 
 static bool backend_set_clock(void *context, uint32_t clock_hz)
@@ -164,6 +168,23 @@ static void backend_delay_us(void *context, uint16_t delay_us)
     esp_rom_delay_us(delay_us);
 }
 
+static size_t backend_vendor_command(
+    void *context,
+    bool debug_connected,
+    const uint8_t *request,
+    size_t request_length,
+    uint8_t *response,
+    size_t response_capacity)
+{
+    (void) context;
+    return airdap_dap_ota_process(
+        debug_connected,
+        request,
+        request_length,
+        response,
+        response_capacity);
+}
+
 esp_err_t airdap_dap_init(const char *serial_number)
 {
     if (serial_number == NULL) {
@@ -185,6 +206,7 @@ esp_err_t airdap_dap_init(const char *serial_number)
         .swj_pins = backend_swj_pins,
         .reset_target = backend_reset_target,
         .delay_us = backend_delay_us,
+        .vendor_command = backend_vendor_command,
     };
     airdap_dap_processor_init(&processor, &backend, serial_number);
     initialized = true;
