@@ -27,6 +27,8 @@ enum {
     SHELL_TASK_STACK_SIZE = 4096,
     SHELL_TASK_PRIORITY = 4,
     SHELL_READ_CHUNK = 64,
+    SHELL_SESSION_START = 0x00,
+    SHELL_SESSION_END = 0x04,
     SHELL_POLL_INTERVAL_MS = 10,
     SHELL_WRITE_TIMEOUT_MS = 100,
     RESTART_FLUSH_TIMEOUT_MS = 1000,
@@ -520,9 +522,10 @@ static void start_session(airdap_debug_shell_input_t *input)
 {
     static const char banner[] =
         "\nAirDAP debug shell\n"
-        "Type 'help' to list commands. Ctrl-] exits airdap-shell.\n"
+        "Type 'help' to list commands. Ctrl-] or Ctrl-D exits airdap-shell.\n"
         "airdap> ";
 
+    airdap_debug_shell_disconnected();
     if (xSemaphoreTake(output_mutex, portMAX_DELAY) != pdTRUE) {
         return;
     }
@@ -537,7 +540,7 @@ static void start_session(airdap_debug_shell_input_t *input)
 
 static void end_session(void)
 {
-    atomic_store(&session_active, false);
+    airdap_debug_shell_disconnected();
 }
 
 static void shell_task(void *argument)
@@ -570,9 +573,9 @@ static void shell_task(void *argument)
         }
 
         for (uint32_t index = 0U; index < received; ++index) {
-            if (data[index] == 0x00U) {
+            if (data[index] == SHELL_SESSION_START) {
                 start_session(&input);
-            } else if (data[index] == 0x04U) {
+            } else if (data[index] == SHELL_SESSION_END) {
                 end_session();
                 airdap_debug_shell_input_init(&input);
             } else if (atomic_load(&session_active)) {

@@ -25,6 +25,7 @@ SESSION_START = b"\x00"
 SESSION_END = b"\x04"
 PROMPT = b"airdap> "
 RESTART_ACKNOWLEDGEMENT = b"Restarting AirDAP...\n"
+LOCAL_EOF = SESSION_END[0]  # Ctrl-D
 LOCAL_EXIT = 0x1D  # Ctrl-]
 
 
@@ -335,12 +336,21 @@ def interactive_session(
                     continue
                 if not data:
                     continue
-                if LOCAL_EXIT in data:
-                    prefix = data.split(bytes((LOCAL_EXIT,)), 1)[0]
-                    if prefix:
-                        transport.write(prefix)
+                exit_index = next(
+                    (
+                        index
+                        for index, byte in enumerate(data)
+                        if byte in (LOCAL_EOF, LOCAL_EXIT)
+                    ),
+                    None,
+                )
+                if exit_index is not None:
+                    data = data[:exit_index]
+                data = data.replace(SESSION_START, b"")
+                if data:
+                    transport.write(data)
+                if exit_index is not None:
                     break
-                transport.write(data)
     finally:
         stop.set()
         reader.join()

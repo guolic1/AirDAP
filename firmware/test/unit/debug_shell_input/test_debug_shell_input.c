@@ -94,7 +94,7 @@ static void test_edit_cancel_and_control_filter(void)
     assert(strstr(capture.output, "^C\nairdap> ") != NULL);
 }
 
-static void test_overflow_discards_and_recovers(void)
+static void test_overflow_newline_reports_and_recovers(void)
 {
     airdap_debug_shell_input_t input;
     capture_t capture = {0};
@@ -109,20 +109,43 @@ static void test_overflow_discards_and_recovers(void)
         oversized,
         sizeof(oversized),
         &callbacks);
-    consume_text(&input, "\x03restart\n", &callbacks);
+    consume_text(&input, "\n", &callbacks);
     consume_text(&input, "help\n", &callbacks);
 
     assert(capture.executed_count == 1U);
     assert(strcmp(capture.executed[0], "help") == 0);
     assert(strstr(capture.output, "error: command line too long\n") != NULL);
-    assert(strstr(capture.output, "^C") == NULL);
+}
+
+static void test_ctrl_c_cancels_overflow_and_recovers(void)
+{
+    airdap_debug_shell_input_t input;
+    capture_t capture = {0};
+    const airdap_debug_shell_input_callbacks_t callbacks = make_callbacks(&capture);
+    uint8_t oversized[AIRDAP_DEBUG_SHELL_LINE_CAPACITY];
+
+    memset(oversized, 'a', sizeof(oversized));
+
+    airdap_debug_shell_input_init(&input);
+    airdap_debug_shell_input_consume(
+        &input,
+        oversized,
+        sizeof(oversized),
+        &callbacks);
+    consume_text(&input, "\x03help\n", &callbacks);
+
+    assert(capture.executed_count == 1U);
+    assert(strcmp(capture.executed[0], "help") == 0);
+    assert(strstr(capture.output, "^C\nairdap> ") != NULL);
+    assert(strstr(capture.output, "error: command line too long\n") == NULL);
 }
 
 int main(void)
 {
     test_split_line_and_crlf();
     test_edit_cancel_and_control_filter();
-    test_overflow_discards_and_recovers();
+    test_overflow_newline_reports_and_recovers();
+    test_ctrl_c_cancels_overflow_and_recovers();
 
     puts("Debug shell input tests passed");
     return 0;

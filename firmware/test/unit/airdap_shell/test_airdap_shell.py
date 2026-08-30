@@ -342,6 +342,40 @@ class AirDapShellTests(unittest.TestCase):
         self.assertTrue(all(timeout <= 100 for timeout in transport.read_timeouts))
         self.assertTrue(transport.read_completed.is_set())
 
+    def test_interactive_ctrl_d_sends_prefix_then_exits(self) -> None:
+        transport = InteractiveTransport()
+        keys = iter([b"status\x04ignored", b"\x1d"])
+
+        with mock.patch.object(
+            airdap_shell,
+            "_read_keyboard",
+            side_effect=lambda _stream, _stop: next(keys),
+        ):
+            airdap_shell.interactive_session(
+                transport,
+                NullStream(),
+                NullStream(),
+            )
+
+        self.assertEqual(transport.writes, [b"status"])
+
+    def test_interactive_nul_is_not_forwarded_as_session_start(self) -> None:
+        transport = InteractiveTransport()
+        keys = iter([b"\x00help", b"\x1d"])
+
+        with mock.patch.object(
+            airdap_shell,
+            "_read_keyboard",
+            side_effect=lambda _stream, _stop: next(keys),
+        ):
+            airdap_shell.interactive_session(
+                transport,
+                NullStream(),
+                NullStream(),
+            )
+
+        self.assertEqual(transport.writes, [b"help"])
+
     def test_restart_must_be_last_in_command_sequence(self) -> None:
         with self.assertRaisesRegex(airdap_shell.ShellError, "last"):
             airdap_shell.validate_command_sequence(["restart", "status"])

@@ -65,15 +65,15 @@ void airdap_debug_shell_input_consume(
             continue;
         }
 
-        if (input->discarding) {
-            continue;
-        }
-
         if (byte == 0x03U) {
             input->length = 0U;
             input->discarding = false;
             write_text(callbacks, "^C\n");
             write_text(callbacks, prompt);
+            continue;
+        }
+
+        if (input->discarding) {
             continue;
         }
 
