@@ -112,13 +112,17 @@ python tools/airdap-shell.py --serial <ADP-serial>
 ```
 
 Confirm this does not open or change `AirDAP Target UART`. Run `help` and verify
-that `help`, `status`, and `restart` are listed. Run `status` and verify decimal
-target voltage, USB VBUS voltage, uptime, and free heap fields. Confirm normal
-ESP application logs arrive after the session starts and still appear on the
-primary console. Finally, run `restart`, verify the acknowledgement is received
-in full before disconnect, and confirm the composite device re-enumerates with
-the same serial number. Repeat with Bulk IN deliberately left unread past the
-firmware's bounded timeout and confirm AirDAP does not restart.
+that `help`, `status`, `swd-idcode`, and `restart` are listed. Run `status` and
+verify decimal target voltage, USB VBUS voltage, uptime, and free heap fields.
+With OpenOCD and other CMSIS-DAP clients closed, run `swd-idcode 100` against
+the known-good reference target. Confirm it reports the same nonzero DP IDCODE
+recorded in section 4, then repeat once with the target disconnected and confirm
+the command reports an error and the target-side SWDIO line is released. Confirm
+normal ESP application logs arrive after the session starts and still appear on
+the primary console. Finally, run `restart`, verify the acknowledgement is
+received in full before disconnect, and confirm the composite device
+re-enumerates with the same serial number. Repeat with Bulk IN deliberately left
+unread past the firmware's bounded timeout and confirm AirDAP does not restart.
 
 ## 7. Reset and target power
 

@@ -106,7 +106,7 @@ leave the local tool; Ctrl-C is forwarded to cancel the current firmware input
 line. Commands can also be run non-interactively:
 
 ```sh
-python tools/airdap-shell.py -c help -c status
+python tools/airdap-shell.py -c help -c status -c "swd-idcode 100"
 ```
 
 `restart` may also be used with `-c`, but it must be the final command because
@@ -118,16 +118,24 @@ and Ctrl-C. Available commands are:
 
 - `help` — list commands;
 - `status` — print `target_mv`, `usb_vbus_mv`, `uptime_ms`, and `free_heap`;
+- `swd-idcode [clock_khz]` — reset the SWD line, select SWD, and read the
+  target DP IDCODE at 100 kHz by default; accepted clocks are 100–10,000 kHz;
 - `restart` — wait for the acknowledgement transfer to complete, then restart
   AirDAP; a bounded transfer timeout leaves the firmware running.
+
+Stop OpenOCD or any other CMSIS-DAP client before running `swd-idcode`. The
+debug shell and CMSIS-DAP worker share the same physical SWD engine; concurrent
+commands would interleave separate target transactions. The command releases
+SWDIO after every attempt, including failures.
 
 After `airdap-shell` starts a session, normal ESP application logs are mirrored
 to the Vendor Bulk interface and continue to use the configured primary
 console. ROM, bootloader, early application messages, and direct standard
 output are not captured by the Vendor interface. The shell is intended for
-physically connected development systems: it has no authentication and
-deliberately exposes no SWD, target-control, persistent-history, or dynamic
-log-control commands.
+physically connected development systems: it has no authentication and exposes
+only a bounded, read-only SWD DP IDCODE diagnostic. It deliberately provides no
+arbitrary DP/AP access, target memory access, programming, persistent history,
+or dynamic log-control commands.
 
 ## Host unit tests
 
@@ -152,7 +160,8 @@ The other hardware-independent tests use the same pattern:
 ```sh
 for suite in \
     bootloader_artifact board voltage_monitor swd_protocol dap_protocol target_uart \
-    usb_descriptors debug_shell_input debug_shell_tx_state airdap_shell wired_hil; do
+    usb_descriptors debug_shell_input debug_shell_swd_probe debug_shell_tx_state \
+    airdap_shell wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
     cmake --build "build-host/$suite"
     ctest --test-dir "build-host/$suite" --output-on-failure
@@ -162,7 +171,8 @@ done
 These tests prove GPIO ordering, bootloader artifact-contract validation, ADC
 scaling, SWD transaction framing, CMSIS-DAP command framing, UART line-coding
 mapping, both compile-time USB descriptor variants, bounded shell input, and
-the debug TX completion state, host tool, and wired HIL helper's protocol
-checks. They do not prove USB enumeration or electrical SWD timing.
+the bounded SWD IDCODE command flow, debug TX completion state, host tool, and
+wired HIL helper's protocol checks. They do not prove USB enumeration or
+electrical SWD timing.
 Follow `test/hil/wired.md` on a populated AirDAP board before marking roadmap
 Stage 1 complete.
