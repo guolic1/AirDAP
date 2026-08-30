@@ -217,6 +217,54 @@ static void test_tab_lists_ambiguous_commands_and_restores_input(void)
     assert(input.cursor == 1U);
 }
 
+static void test_color_styles_completion_list_and_prompt(void)
+{
+    airdap_debug_shell_input_t input;
+    capture_t capture = {0};
+    airdap_debug_shell_input_callbacks_t callbacks = make_callbacks(&capture);
+
+    callbacks.complete = complete_command;
+    callbacks.color_enabled = true;
+    airdap_debug_shell_input_init(&input);
+    consume_text(&input, "s\t", &callbacks);
+
+    assert(strcmp(
+        capture.output,
+        "s\n"
+        "\x1b[36mstatus\x1b[0m\n"
+        "\x1b[36mswd-idcode\x1b[0m\n"
+        "\x1b[36mairdap> \x1b[0ms") == 0);
+    assert(strcmp(input.line, "s") == 0);
+    assert(input.cursor == 1U);
+}
+
+static void test_color_styles_prompt_and_bounded_input_error(void)
+{
+    airdap_debug_shell_input_t input;
+    capture_t capture = {0};
+    airdap_debug_shell_input_callbacks_t callbacks = make_callbacks(&capture);
+    uint8_t oversized[AIRDAP_DEBUG_SHELL_LINE_CAPACITY];
+
+    callbacks.color_enabled = true;
+    memset(oversized, 'a', sizeof(oversized));
+    airdap_debug_shell_input_init(&input);
+    consume_text(&input, "help\n", &callbacks);
+    airdap_debug_shell_input_consume(
+        &input,
+        oversized,
+        sizeof(oversized),
+        &callbacks);
+    consume_text(&input, "\n", &callbacks);
+
+    assert(strstr(
+        capture.output,
+        "help\n\x1b[36mairdap> \x1b[0m") != NULL);
+    assert(strstr(
+        capture.output,
+        "\x1b[31merror: command line too long\n\x1b[0m"
+        "\x1b[36mairdap> \x1b[0m") != NULL);
+}
+
 static void test_up_recalls_latest_command_across_split_escape_sequence(void)
 {
     airdap_debug_shell_input_t input;
@@ -375,6 +423,28 @@ static void test_background_output_restores_line_and_cursor(void)
     assert(strstr(capture.output, "background log\nairdap> helo\b") != NULL);
 }
 
+static void test_color_keeps_background_log_bytes_unstyled(void)
+{
+    airdap_debug_shell_input_t input;
+    capture_t capture = {0};
+    airdap_debug_shell_input_callbacks_t callbacks = make_callbacks(&capture);
+    static const char log_line[] = "background log\n";
+
+    callbacks.color_enabled = true;
+    airdap_debug_shell_input_init(&input);
+    consume_text(&input, "helo\x1b[D", &callbacks);
+    airdap_debug_shell_input_write_background(
+        &input,
+        log_line,
+        sizeof(log_line) - 1U,
+        &callbacks);
+
+    assert(strstr(
+        capture.output,
+        "background log\n\x1b[36mairdap> \x1b[0mhelo\b") != NULL);
+    assert(strstr(capture.output, "\x1b[36mbackground log") == NULL);
+}
+
 int main(void)
 {
     test_split_line_and_crlf();
@@ -384,6 +454,8 @@ int main(void)
     test_tab_completes_unique_command();
     test_tab_lists_all_commands_for_empty_prefix();
     test_tab_lists_ambiguous_commands_and_restores_input();
+    test_color_styles_completion_list_and_prompt();
+    test_color_styles_prompt_and_bounded_input_error();
     test_up_recalls_latest_command_across_split_escape_sequence();
     test_down_restores_unsubmitted_draft();
     test_history_keeps_last_eight_commands();
@@ -394,6 +466,7 @@ int main(void)
     test_backspace_edits_at_cursor();
     test_history_navigation_filters_by_draft_prefix();
     test_background_output_restores_line_and_cursor();
+    test_color_keeps_background_log_bytes_unstyled();
 
     puts("Debug shell input tests passed");
     return 0;

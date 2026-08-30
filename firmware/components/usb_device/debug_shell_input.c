@@ -5,6 +5,9 @@
 #include "airdap_debug_shell_input.h"
 
 static const char prompt[] = "airdap> ";
+static const char ansi_reset[] = "\x1b[0m";
+static const char ansi_red[] = "\x1b[31m";
+static const char ansi_cyan[] = "\x1b[36m";
 
 enum {
     ESCAPE_STATE_NONE = 0,
@@ -18,6 +21,27 @@ static void write_text(
     const char *text)
 {
     callbacks->write(text, strlen(text), callbacks->context);
+}
+
+static void write_styled_text(
+    const airdap_debug_shell_input_callbacks_t *callbacks,
+    const char *style,
+    const char *text)
+{
+    if (!callbacks->color_enabled) {
+        write_text(callbacks, text);
+        return;
+    }
+
+    write_text(callbacks, style);
+    write_text(callbacks, text);
+    write_text(callbacks, ansi_reset);
+}
+
+static void write_prompt(
+    const airdap_debug_shell_input_callbacks_t *callbacks)
+{
+    write_styled_text(callbacks, ansi_cyan, prompt);
 }
 
 static void reset_editor(airdap_debug_shell_input_t *input)
@@ -98,7 +122,7 @@ static void render_line(
     const airdap_debug_shell_input_callbacks_t *callbacks)
 {
     clear_rendered_line(erased_line_length, callbacks);
-    write_text(callbacks, prompt);
+    write_prompt(callbacks);
     if (input->length > 0U) {
         callbacks->write(input->line, input->length, callbacks->context);
     }
@@ -223,7 +247,7 @@ static void complete_command(
         write_text(callbacks, "\n");
         size_t match_index = 0U;
         do {
-            write_text(callbacks, completion);
+            write_styled_text(callbacks, ansi_cyan, completion);
             write_text(callbacks, "\n");
             ++match_index;
             completion = match_index == 1U
@@ -233,7 +257,7 @@ static void complete_command(
                     match_index,
                     callbacks->context);
         } while (completion != NULL);
-        write_text(callbacks, prompt);
+        write_prompt(callbacks);
         if (input->length > 0U) {
             callbacks->write(input->line, input->length, callbacks->context);
         }
@@ -458,7 +482,10 @@ static void finish_line(
     move_cursor_end(input, callbacks);
     write_text(callbacks, "\n");
     if (input->discarding) {
-        write_text(callbacks, "error: command line too long\n");
+        write_styled_text(
+            callbacks,
+            ansi_red,
+            "error: command line too long\n");
     } else if (input->length > 0U) {
         input->line[input->length] = '\0';
         add_history(input);
@@ -466,7 +493,7 @@ static void finish_line(
     }
 
     reset_editor(input);
-    write_text(callbacks, prompt);
+    write_prompt(callbacks);
 }
 
 void airdap_debug_shell_input_init(airdap_debug_shell_input_t *input)
@@ -508,7 +535,7 @@ void airdap_debug_shell_input_consume(
             move_cursor_end(input, callbacks);
             reset_editor(input);
             write_text(callbacks, "^C\n");
-            write_text(callbacks, prompt);
+            write_prompt(callbacks);
             continue;
         }
 
@@ -594,7 +621,7 @@ void airdap_debug_shell_input_write_background(
     if (data[length - 1U] != '\n') {
         write_text(callbacks, "\n");
     }
-    write_text(callbacks, prompt);
+    write_prompt(callbacks);
     if (input->length > 0U) {
         callbacks->write(input->line, input->length, callbacks->context);
     }

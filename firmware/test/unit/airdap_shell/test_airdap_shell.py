@@ -182,6 +182,50 @@ class AirDapShellTests(unittest.TestCase):
         self.assertEqual(device.attached, [airdap_shell.DEBUG_INTERFACE])
         self.assertEqual(usb_util.disposed, [device])
 
+    def test_colored_session_uses_capability_start_byte(self) -> None:
+        transport, endpoint_out, _, _, _ = self.make_transport()
+
+        transport.open()
+        transport.start_session(color=True)
+        transport.close()
+
+        self.assertEqual(
+            endpoint_out.writes,
+            [airdap_shell.SESSION_START_COLOR, airdap_shell.SESSION_END],
+        )
+
+    def test_color_mode_auto_only_enables_interactive_tty(self) -> None:
+        self.assertTrue(
+            airdap_shell._color_enabled(
+                "auto", command_mode=False, output_stream=TtyStream()
+            )
+        )
+        self.assertFalse(
+            airdap_shell._color_enabled(
+                "auto", command_mode=False, output_stream=NullStream()
+            )
+        )
+        self.assertFalse(
+            airdap_shell._color_enabled(
+                "auto", command_mode=True, output_stream=TtyStream()
+            )
+        )
+        self.assertTrue(
+            airdap_shell._color_enabled(
+                "always", command_mode=True, output_stream=NullStream()
+            )
+        )
+        self.assertFalse(
+            airdap_shell._color_enabled(
+                "never", command_mode=False, output_stream=TtyStream()
+            )
+        )
+
+    def test_parser_accepts_explicit_color_mode(self) -> None:
+        args = airdap_shell.make_parser().parse_args(["--color", "always"])
+
+        self.assertEqual(args.color, "always")
+
     def test_rejects_wrong_interface_endpoint_contract(self) -> None:
         wrong = FakeDevice(FakeInterface([FakeEndpoint(0x05), FakeEndpoint(0x85)]))
 
@@ -219,6 +263,23 @@ class AirDapShellTests(unittest.TestCase):
         self.assertIn(b"target_mv=3300", transcript)
         self.assertTrue(transcript.endswith(b"airdap> "))
         self.assertTrue(all(timeout <= 200 for timeout in transport.read_timeouts))
+
+    def test_colored_command_waits_for_prompt_reset_suffix(self) -> None:
+        transport = FakeCommandTransport([
+            b"status\n\x1b[32mtarget_mv=3300\x1b[0m\n\x1b[36mairdap> ",
+            b"\x1b[0m",
+        ])
+
+        transcript = airdap_shell.run_command(
+            transport,
+            "status",
+            timeout_seconds=0.2,
+            color=True,
+        )
+
+        self.assertEqual(transport.writes, [b"status\n"])
+        self.assertEqual(len(transport.read_timeouts), 2)
+        self.assertTrue(transcript.endswith(airdap_shell.COLORED_PROMPT))
 
     def test_command_mode_ignores_log_redraw_prompt_before_command_echo(self) -> None:
         transport = FakeCommandTransport([
@@ -260,6 +321,24 @@ class AirDapShellTests(unittest.TestCase):
 
         self.assertEqual(transport.writes, [b"restart\n"])
         self.assertTrue(transcript.endswith(b"Restarting AirDAP...\n"))
+
+    def test_colored_restart_waits_for_acknowledgement_reset_suffix(self) -> None:
+        transport = FakeCommandTransport([
+            b"restart\n\x1b[33mRestarting AirDAP...\n",
+            b"\x1b[0m",
+        ])
+
+        transcript = airdap_shell.run_command(
+            transport,
+            "restart",
+            timeout_seconds=0.2,
+            color=True,
+        )
+
+        self.assertEqual(len(transport.read_timeouts), 2)
+        self.assertTrue(
+            transcript.endswith(airdap_shell.COLORED_RESTART_ACKNOWLEDGEMENT)
+        )
 
     def test_rejects_control_bytes_in_command_mode(self) -> None:
         transport = FakeCommandTransport([])
@@ -393,9 +472,9 @@ class AirDapShellTests(unittest.TestCase):
 
         self.assertEqual(transport.writes, [b"status"])
 
-    def test_interactive_nul_is_not_forwarded_as_session_start(self) -> None:
+    def test_interactive_session_start_bytes_are_not_forwarded(self) -> None:
         transport = InteractiveTransport()
-        keys = iter([b"\x00help", b"\x1d"])
+        keys = iter([b"\x00\x01help", b"\x1d"])
 
         with mock.patch.object(
             airdap_shell,

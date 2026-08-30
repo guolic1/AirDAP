@@ -112,23 +112,29 @@ python tools/airdap-shell.py --serial <ADP-serial>
 ```
 
 Confirm this does not open or change `AirDAP Target UART`. Run `help` and verify
-that `help`, `status`, `swd-idcode`, and `restart` are listed. Type `sta`, press
-Tab, and verify it completes to `status `. On an empty line, press Tab and verify
-all four commands are listed. Type `s`, press Tab, and verify `status` and
-`swd-idcode` are listed on separate lines before the prompt restores `s`. Use
-Left/Right, Home/End, Backspace, and Delete to edit text at the beginning,
-middle, and end of a command. Submit multiple commands, type a prefix, and verify
-Up/Down only visits matching history; verify moving down past the newest match
-restores the unsubmitted draft and cursor. Reconnect the shell and verify the
-previous session's history is unavailable. While application logs are arriving,
-pause with the cursor in the middle of an unfinished command and verify each log
-is followed by the intact prompt, input, and cursor position. Run `status` and
-verify decimal target voltage, USB VBUS voltage, uptime, and free heap fields.
-With OpenOCD and other CMSIS-DAP clients closed, run `swd-idcode 100` against the known-good reference
-target. Confirm it reports the same nonzero DP IDCODE recorded in section 4,
-then repeat once with the target disconnected and confirm the command reports an
-error and the target-side SWDIO line is released. Confirm normal ESP application
-logs still appear on the primary console. Finally, run `restart`, verify the
+that `help`, `status`, `swd-idcode`, and `restart` are listed in cyan and the
+descriptions remain in the terminal's default color. Verify the prompt is cyan,
+a successful `status` result is green, `status extra` usage guidance is yellow,
+and an unknown command is red. Type `sta`, press Tab, and verify it completes to
+`status `. On an empty line, press Tab and verify all four commands are listed.
+Type `s`, press Tab, and verify `status` and `swd-idcode` are listed in cyan on
+separate lines before the prompt restores `s`. Use Left/Right, Home/End,
+Backspace, and Delete to edit text at the beginning, middle, and end of a command
+without prompt-width or cursor drift. Submit multiple commands, type a prefix,
+and verify Up/Down only visits matching history; verify moving down past the
+newest match restores the unsubmitted draft and cursor. Reconnect with
+`--color never` and verify the same interaction is plain text, then return to the
+default color mode. Reconnect the shell and verify the previous session's
+history is unavailable. While application logs are arriving, pause with the
+cursor in the middle of an unfinished command and verify each log retains its
+original formatting and is followed by the intact colored prompt, input, and
+cursor position. Run `status` and verify decimal target voltage, USB VBUS
+voltage, uptime, and free heap fields. With OpenOCD and other CMSIS-DAP clients
+closed, run `swd-idcode 100` against the known-good reference target. Confirm it
+reports the same nonzero DP IDCODE recorded in section 4, then repeat once with
+the target disconnected and confirm the command reports a red error and the
+target-side SWDIO line is released. Confirm normal ESP application logs still
+appear on the primary console. Finally, run `restart`, verify the yellow
 acknowledgement is received in full before disconnect, and confirm the composite
 device re-enumerates with the same serial number. Repeat with Bulk IN deliberately
 left unread past the firmware's bounded timeout and confirm AirDAP does not

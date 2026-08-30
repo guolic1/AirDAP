@@ -32,6 +32,7 @@ typedef struct {
     void (*write)(const char *data, size_t length, void *context);
     void (*execute)(const char *line, void *context);
     const char *(*complete)(const char *prefix, size_t match_index, void *context);
+    bool color_enabled;
     void *context;
 } airdap_debug_shell_input_callbacks_t;
 

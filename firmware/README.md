@@ -177,6 +177,13 @@ run non-interactively:
 python tools/airdap-shell.py -c help -c status -c "swd-idcode 100"
 ```
 
+`--color auto` is the default: it enables ANSI colors for an interactive TTY
+and keeps `-c` command output plain for scripts. Use `--color always` to force
+colors or `--color never` to disable them. Cyan marks the prompt and command
+names, green marks successful diagnostic results, yellow marks usage guidance
+and restart acknowledgement, and red marks errors. Mirrored application logs
+retain their original bytes and coloring.
+
 `restart` may also be used with `-c`, but it must be the final command because
 the device disconnects after its acknowledgement is delivered.
 
