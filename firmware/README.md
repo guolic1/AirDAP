@@ -82,6 +82,7 @@ not part of this repository. The application currently provides:
 - CDC ACM bridging to target UART1 on GPIO17/GPIO18;
 - an optional, independent Vendor Bulk debug shell;
 - an SPI2 half-duplex SWD backend on GPIO12/GPIO13/GPIO14;
+- DAP/SWD ownership arbitration for USB, network, and internal diagnostics;
 - target reset, power/status GPIO, VTref, and USB VBUS monitoring.
 
 The shared device identity is derived from the eFuse base MAC. Its USB serial
@@ -105,6 +106,14 @@ CMSIS-DAP uses 512-byte internal buffers and advertises a 508-byte packet
 limit. At full-speed USB this keeps the largest response from ending on an
 exact 64-byte endpoint boundary, so TinyUSB cannot leave an automatic ZLP for
 the following DAP transaction.
+
+`DAP_Connect` acquires the USB DAP/SWD owner. A different active owner makes
+the connect fail without releasing or driving that owner's bus. Disconnect,
+USB detach, stale USB sessions, and OTA write entry release ownership; release
+also leaves SWDIO high impedance and nRESET deasserted. Every new owner starts
+with an SWD Line Reset. The NETWORK and internal DIAGNOSTIC owner values are
+available to later transports, but this stage does not expose either through a
+network protocol or connect the Debug Shell command to the arbiter.
 
 ## Development USB OTA
 
@@ -249,7 +258,8 @@ The other hardware-independent tests use the same pattern:
 
 ```sh
 for suite in \
-    bootloader_artifact ota_layout board device_identity voltage_monitor swd_protocol dap_protocol \
+    bootloader_artifact ota_layout board device_identity voltage_monitor swd_protocol \
+    dap_ownership dap_backend dap_protocol \
     dap_ota dap_stream ota_manager app_main target_uart usb_descriptors project_version \
     debug_shell_identity debug_shell_input \
     debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update wired_hil; do
@@ -260,11 +270,12 @@ done
 ```
 
 These tests prove GPIO ordering, bootloader artifact-contract validation, ADC
-scaling, SWD transaction framing, CMSIS-DAP and OTA command framing, OTA state
-transitions, stale USB-frame recovery, host update ordering, UART line-coding
-mapping, both compile-time USB descriptor variants, bounded shell input, the
-bounded SWD IDCODE command flow, debug TX completion state, host tools, and
-wired HIL helper's protocol checks. They do not prove USB enumeration,
+scaling, SWD transaction framing, DAP owner transitions and physical-backend
+release calls, CMSIS-DAP and OTA command framing, OTA state transitions, stale
+USB-frame recovery, host update ordering, UART line-coding mapping, both
+compile-time USB descriptor variants, bounded shell input, the bounded SWD
+IDCODE command flow, debug TX completion state, host tools, and wired HIL
+helper's protocol checks. They do not prove USB enumeration,
 physical flash persistence, bootloader rollback on a board, or electrical SWD
 timing.
 Follow `test/hil/wired.md` on a populated AirDAP board before marking roadmap

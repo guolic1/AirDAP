@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "airdap_dap_ownership.h"
 #include "airdap_device_identity.h"
 #include "airdap_ota.h"
 #include "esp_err.h"
@@ -55,6 +56,9 @@ static size_t begun_size;
 static size_t last_write_size;
 static esp_ota_handle_t last_handle;
 static const esp_partition_t *activated_partition;
+static bool ownership_release_succeeds;
+static unsigned ownership_line_reset_calls;
+static unsigned ownership_release_calls;
 
 static void reset_fakes(void)
 {
@@ -79,7 +83,24 @@ static void reset_fakes(void)
     last_write_size = 0U;
     last_handle = 0U;
     activated_partition = NULL;
+    ownership_release_succeeds = true;
+    ownership_line_reset_calls = 0U;
+    ownership_release_calls = 0U;
     airdap_ota_initialize();
+}
+
+static bool ownership_line_reset(void *context)
+{
+    (void) context;
+    ++ownership_line_reset_calls;
+    return true;
+}
+
+static bool ownership_release_pins(void *context)
+{
+    (void) context;
+    ++ownership_release_calls;
+    return ownership_release_succeeds;
 }
 
 const esp_partition_t *esp_ota_get_next_update_partition(
@@ -116,6 +137,7 @@ esp_err_t esp_ota_begin(
 {
     assert(partition == &update_partition);
     assert(out_handle != NULL);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
     ++begin_calls;
     begun_size = image_size;
     *out_handle = UPDATE_HANDLE;
@@ -192,11 +214,18 @@ static void test_successful_sequential_update_commits_then_reboots(void)
 {
     static const uint8_t first[60] = {1U};
     static const uint8_t second[40] = {2U};
+    airdap_dap_ownership_claim_t usb_claim = {0};
     reset_fakes();
     uint32_t next_offset = UINT32_MAX;
 
+    assert(airdap_dap_ownership_acquire(
+        AIRDAP_DAP_OWNER_USB,
+        &usb_claim) ==
+        AIRDAP_DAP_OWNERSHIP_OK);
     assert(airdap_ota_begin(100U) == AIRDAP_OTA_STATUS_OK);
     assert(!airdap_ota_debug_allowed());
+    assert(ownership_line_reset_calls == 1U);
+    assert(ownership_release_calls == 1U);
     assert(begin_calls == 1U && begun_size == 100U);
     assert(airdap_ota_write(0U, first, sizeof(first), &next_offset) ==
         AIRDAP_OTA_STATUS_OK);
@@ -217,15 +246,22 @@ static void test_successful_sequential_update_commits_then_reboots(void)
 static void test_rejects_invalid_sizes_offsets_and_arguments(void)
 {
     static const uint8_t data[16] = {0U};
+    airdap_dap_ownership_claim_t usb_claim = {0};
     reset_fakes();
     uint32_t next_offset = 0U;
 
+    assert(airdap_dap_ownership_acquire(
+        AIRDAP_DAP_OWNER_USB,
+        &usb_claim) ==
+        AIRDAP_DAP_OWNERSHIP_OK);
     assert(airdap_ota_begin(0U) == AIRDAP_OTA_STATUS_INVALID_SIZE);
     assert(airdap_ota_begin(UPDATE_PARTITION_SIZE + 1U) ==
         AIRDAP_OTA_STATUS_INVALID_SIZE);
-    assert(begin_calls == 0U);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_USB);
+    assert(ownership_release_calls == 0U && begin_calls == 0U);
 
     assert(airdap_ota_begin(sizeof(data)) == AIRDAP_OTA_STATUS_OK);
+    assert(ownership_release_calls == 1U);
     assert(airdap_ota_begin(sizeof(data)) == AIRDAP_OTA_STATUS_INVALID_STATE);
     assert(airdap_ota_write(1U, data, sizeof(data), &next_offset) ==
         AIRDAP_OTA_STATUS_INVALID_OFFSET);
@@ -237,6 +273,52 @@ static void test_rejects_invalid_sizes_offsets_and_arguments(void)
         AIRDAP_OTA_STATUS_INVALID_SIZE);
     assert(write_calls == 0U);
     assert(airdap_ota_abort() == AIRDAP_OTA_STATUS_OK);
+}
+
+static void test_begin_requires_successful_owner_revoke(void)
+{
+    airdap_dap_ownership_operation_t operation = {0};
+    airdap_dap_ownership_claim_t usb_claim = {0};
+
+    reset_fakes();
+    assert(airdap_dap_ownership_acquire(
+        AIRDAP_DAP_OWNER_USB,
+        &usb_claim) ==
+        AIRDAP_DAP_OWNERSHIP_OK);
+    assert(airdap_dap_ownership_operation_begin(
+        &usb_claim,
+        &operation) == AIRDAP_DAP_OWNERSHIP_OK);
+    assert(airdap_ota_begin(32U) == AIRDAP_OTA_STATUS_INVALID_STATE);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_USB);
+    assert(ownership_release_calls == 0U && begin_calls == 0U);
+    assert(airdap_ota_debug_allowed());
+
+    airdap_dap_ownership_operation_end(&operation);
+    assert(airdap_ota_begin(32U) == AIRDAP_OTA_STATUS_OK);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
+    assert(ownership_release_calls == 1U && begin_calls == 1U);
+    assert(airdap_ota_abort() == AIRDAP_OTA_STATUS_OK);
+}
+
+static void test_begin_fails_if_physical_release_fails(void)
+{
+    airdap_dap_ownership_claim_t usb_claim = {0};
+    airdap_dap_ownership_claim_t network_claim = {0};
+
+    reset_fakes();
+    assert(airdap_dap_ownership_acquire(
+        AIRDAP_DAP_OWNER_USB,
+        &usb_claim) ==
+        AIRDAP_DAP_OWNERSHIP_OK);
+    ownership_release_succeeds = false;
+    assert(airdap_ota_begin(32U) == AIRDAP_OTA_STATUS_INTERNAL_ERROR);
+    assert(ownership_release_calls == 1U && begin_calls == 0U);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
+    assert(airdap_dap_ownership_acquire(
+        AIRDAP_DAP_OWNER_NETWORK,
+        &network_claim) ==
+        AIRDAP_DAP_OWNERSHIP_OFFLINE);
+    assert(airdap_ota_debug_allowed());
 }
 
 static void test_begin_failure_releases_handle_created_by_idf(void)
@@ -333,14 +415,23 @@ static void test_pending_image_is_confirmed_only_when_requested(void)
 
 int main(void)
 {
+    const airdap_dap_ownership_backend_t ownership_backend = {
+        .line_reset = ownership_line_reset,
+        .release_pins = ownership_release_pins,
+    };
+    assert(airdap_dap_ownership_initialize(&ownership_backend) ==
+        AIRDAP_DAP_OWNERSHIP_OK);
+
     test_reports_update_capacity_and_running_version();
     test_successful_sequential_update_commits_then_reboots();
     test_rejects_invalid_sizes_offsets_and_arguments();
     test_begin_failure_releases_handle_created_by_idf();
+    test_begin_requires_successful_owner_revoke();
     test_partial_commit_can_receive_remaining_bytes();
     test_write_or_validation_failure_never_activates();
     test_abort_and_disconnect_release_only_live_sessions();
     test_pending_image_is_confirmed_only_when_requested();
+    test_begin_fails_if_physical_release_fails();
 
     puts("OTA manager tests passed");
     return 0;

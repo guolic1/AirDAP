@@ -7,12 +7,14 @@ enable_testing()
 add_executable(
     ota_manager_test
     test_ota_manager.c
+    ../../../components/dap_ownership/dap_ownership.c
     ../../../components/ota_manager/ota_manager.c
 )
 target_include_directories(
     ota_manager_test
     PRIVATE
         fake_include
+        ../../../components/dap_ownership/include
         ../../../components/ota_manager/include
 )
 target_compile_features(ota_manager_test PRIVATE c_std_11)
