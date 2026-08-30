@@ -90,6 +90,14 @@ the project is authorized to ship. The checked-in layout is for the confirmed
 16 MiB module and provides two 4 MiB OTA application slots. Secure Boot, Flash
 Encryption, authenticated updates, and networking remain deferred.
 
+The firmware version is the single tag pointing directly at the built commit.
+When that commit has no tag, the version is its seven-character Git hash. A
+build fails if multiple tags point at the same commit or if Git metadata is
+unavailable. The selected value is stored in ESP-IDF's application descriptor
+and is reported consistently by OTA, CMSIS-DAP product firmware information,
+and the debug shell. Use a clean build or `idf.py reconfigure` after adding or
+removing a tag.
+
 CMSIS-DAP uses 512-byte internal buffers and advertises a 508-byte packet
 limit. At full-speed USB this keeps the largest response from ending on an
 exact 64-byte endpoint boundary, so TinyUSB cannot leave an automatic ZLP for
@@ -179,6 +187,7 @@ The firmware accepts printable ASCII, CR/LF line endings, backspace/delete,
 and Ctrl-C. Available commands are:
 
 - `help` — list commands;
+- `version` — print the running firmware version;
 - `status` — print `target_mv`, `usb_vbus_mv`, `uptime_ms`, and `free_heap`;
 - `swd-idcode [clock_khz]` — reset the SWD line, select SWD, and read the
   target DP IDCODE at 100 kHz by default; accepted clocks are 100–10,000 kHz;
@@ -222,7 +231,8 @@ The other hardware-independent tests use the same pattern:
 ```sh
 for suite in \
     bootloader_artifact ota_layout board voltage_monitor swd_protocol dap_protocol \
-    dap_ota dap_stream ota_manager app_main target_uart usb_descriptors debug_shell_input \
+    dap_ota dap_stream ota_manager app_main target_uart usb_descriptors project_version \
+    debug_shell_input \
     debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
     cmake --build "build-host/$suite"

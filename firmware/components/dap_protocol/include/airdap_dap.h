@@ -9,7 +9,9 @@
 extern "C" {
 #endif
 
-esp_err_t airdap_dap_init(const char *serial_number);
+esp_err_t airdap_dap_init(
+    const char *serial_number,
+    const char *firmware_version);
 
 size_t airdap_dap_process(
     const uint8_t *request,

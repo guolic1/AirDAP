@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.22)
 
 set(IDF_TARGET "esp32s3")
 
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/airdap_project_version.cmake")
+airdap_resolve_project_version("${CMAKE_CURRENT_LIST_DIR}" PROJECT_VER)
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 # Build only the components required by the application and its dependencies.

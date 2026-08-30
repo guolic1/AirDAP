@@ -185,9 +185,11 @@ static size_t backend_vendor_command(
         response_capacity);
 }
 
-esp_err_t airdap_dap_init(const char *serial_number)
+esp_err_t airdap_dap_init(
+    const char *serial_number,
+    const char *firmware_version)
 {
-    if (serial_number == NULL) {
+    if (serial_number == NULL || firmware_version == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
     if (initialized) {
@@ -208,7 +210,11 @@ esp_err_t airdap_dap_init(const char *serial_number)
         .delay_us = backend_delay_us,
         .vendor_command = backend_vendor_command,
     };
-    airdap_dap_processor_init(&processor, &backend, serial_number);
+    airdap_dap_processor_init(
+        &processor,
+        &backend,
+        serial_number,
+        firmware_version);
     initialized = true;
     return ESP_OK;
 }

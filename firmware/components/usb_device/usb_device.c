@@ -14,6 +14,7 @@
 #include "airdap_target_uart.h"
 #include "airdap_usb.h"
 #include "airdap_usb_descriptors.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_timer.h"
@@ -262,7 +263,8 @@ esp_err_t airdap_usb_init(void)
     if (error != ESP_OK) {
         return error;
     }
-    error = airdap_dap_init(serial_number);
+    const esp_app_desc_t *app_description = esp_app_get_description();
+    error = airdap_dap_init(serial_number, app_description->version);
     if (error != ESP_OK) {
         return error;
     }

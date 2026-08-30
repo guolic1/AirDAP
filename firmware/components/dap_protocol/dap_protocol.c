@@ -127,7 +127,6 @@ static size_t process_info(
     static const char vendor[] = "AirDAP";
     static const char product[] = "AirDAP CMSIS-DAP v2";
     static const char protocol_version[] = "2.1.2";
-    static const char product_firmware_version[] = "0.1.0";
     static const uint8_t capabilities[] = {1U << 0, 1U << 0};
     static const uint8_t packet_count[] = {1U};
     static const uint8_t packet_size[] = {
@@ -153,8 +152,8 @@ static size_t process_info(
         length = sizeof(protocol_version);
         break;
     case DAP_INFO_PRODUCT_FIRMWARE_VERSION:
-        data = (const uint8_t *) product_firmware_version;
-        length = sizeof(product_firmware_version);
+        data = (const uint8_t *) processor->firmware_version;
+        length = strlen(processor->firmware_version) + 1U;
         break;
     case DAP_INFO_CAPABILITIES:
         data = capabilities;
@@ -483,7 +482,8 @@ static size_t process_swd_sequence(
 void airdap_dap_processor_init(
     airdap_dap_processor_t *processor,
     const airdap_dap_backend_t *backend,
-    const char *serial_number)
+    const char *serial_number,
+    const char *firmware_version)
 {
     if (processor == NULL) {
         return;
@@ -493,6 +493,9 @@ void airdap_dap_processor_init(
         processor->backend = *backend;
     }
     processor->serial_number = serial_number != NULL ? serial_number : "";
+    processor->firmware_version = firmware_version != NULL
+        ? firmware_version
+        : "";
     processor->match_mask = UINT32_MAX;
 }
 

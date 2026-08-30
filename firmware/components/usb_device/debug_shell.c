@@ -13,6 +13,7 @@
 #include "airdap_debug_shell_tx_state.h"
 #include "airdap_swd.h"
 #include "airdap_voltage_monitor.h"
+#include "esp_app_desc.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -43,6 +44,7 @@ typedef struct {
 } shell_command_t;
 
 static int help_command(const char *arguments);
+static int version_command(const char *arguments);
 static int status_command(const char *arguments);
 static int swd_idcode_command(const char *arguments);
 static int restart_command(const char *arguments);
@@ -52,6 +54,11 @@ static const shell_command_t commands[] = {
         .name = "help",
         .help = "List available commands",
         .handler = help_command,
+    },
+    {
+        .name = "version",
+        .help = "Show the running firmware version",
+        .handler = version_command,
     },
     {
         .name = "status",
@@ -335,6 +342,18 @@ static int help_command(const char *arguments)
     for (size_t index = 0U; index < sizeof(commands) / sizeof(commands[0]); ++index) {
         shell_printf("%-8s %s\n", commands[index].name, commands[index].help);
     }
+    return 0;
+}
+
+static int version_command(const char *arguments)
+{
+    if (*arguments != '\0') {
+        shell_printf("usage: version\n");
+        return 1;
+    }
+
+    const esp_app_desc_t *description = esp_app_get_description();
+    shell_printf("firmware_version=%s\n", description->version);
     return 0;
 }
 

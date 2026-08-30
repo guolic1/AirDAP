@@ -216,6 +216,16 @@ static void test_info(airdap_dap_processor_t *processor)
     assert(response[0] == 0x00 && response[1] == sizeof("ADP-1234"));
     assert(strcmp((char *) response + 2U, "ADP-1234") == 0);
 
+    const uint8_t firmware_version_request[] = {0x00, 0x09};
+    length = process(
+        processor,
+        firmware_version_request,
+        sizeof(firmware_version_request),
+        response);
+    assert(length == 2U + sizeof("v1.2.3-test"));
+    assert(response[0] == 0x00 && response[1] == sizeof("v1.2.3-test"));
+    assert(strcmp((char *) response + 2U, "v1.2.3-test") == 0);
+
     const uint8_t packet_size_request[] = {0x00, 0xFF};
     length = process(
         processor, packet_size_request, sizeof(packet_size_request), response);
@@ -276,7 +286,11 @@ static void test_swj_pins_are_available_without_connect(void)
     uint8_t response[AIRDAP_DAP_PACKET_SIZE];
     const uint8_t swj_pins[] = {0x10, 0x80, 0x80, 0, 0, 0, 0};
 
-    airdap_dap_processor_init(&processor, &backend, "ADP-UNCONNECTED");
+    airdap_dap_processor_init(
+        &processor,
+        &backend,
+        "ADP-UNCONNECTED",
+        "test-version");
     assert(process(&processor, swj_pins, sizeof(swj_pins), response) == 2U);
     assert(response[0] == 0x10 && response[1] == 0x80);
     assert(fake.pin_value == 0x80 && fake.pin_select == 0x80);
@@ -290,7 +304,11 @@ static void test_unsupported_connect_releases_backend(void)
     uint8_t response[AIRDAP_DAP_PACKET_SIZE];
     const uint8_t unsupported_connect[] = {0x02, 0x02};
 
-    airdap_dap_processor_init(&processor, &backend, "ADP-UNSUPPORTED");
+    airdap_dap_processor_init(
+        &processor,
+        &backend,
+        "ADP-UNSUPPORTED",
+        "test-version");
     assert(process(
         &processor,
         unsupported_connect,
@@ -476,7 +494,11 @@ int main(void)
     fake_backend_t fake = {0};
     const airdap_dap_backend_t backend = make_backend(&fake);
     airdap_dap_processor_t processor;
-    airdap_dap_processor_init(&processor, &backend, "ADP-1234");
+    airdap_dap_processor_init(
+        &processor,
+        &backend,
+        "ADP-1234",
+        "v1.2.3-test");
 
     test_info(&processor);
     test_swj_pins_are_available_without_connect();

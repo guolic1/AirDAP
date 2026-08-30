@@ -76,6 +76,7 @@ typedef struct {
 typedef struct {
     airdap_dap_backend_t backend;
     const char *serial_number;
+    const char *firmware_version;
     uint32_t match_mask;
     uint16_t match_retries;
     uint8_t selected_port;
@@ -84,7 +85,8 @@ typedef struct {
 void airdap_dap_processor_init(
     airdap_dap_processor_t *processor,
     const airdap_dap_backend_t *backend,
-    const char *serial_number);
+    const char *serial_number,
+    const char *firmware_version);
 
 /* Returns 0 when more bytes are needed and SIZE_MAX for malformed input. */
 size_t airdap_dap_request_size(
