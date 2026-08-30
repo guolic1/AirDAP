@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "airdap_debug_shell.h"
+#include "airdap_debug_shell_identity.h"
 #include "airdap_debug_shell_input.h"
 #include "airdap_debug_shell_swd_probe.h"
 #include "airdap_debug_shell_tx_state.h"
@@ -44,7 +45,7 @@ typedef struct {
 } shell_command_t;
 
 static int help_command(const char *arguments);
-static int version_command(const char *arguments);
+static int identity_command(const char *arguments);
 static int status_command(const char *arguments);
 static int swd_idcode_command(const char *arguments);
 static int restart_command(const char *arguments);
@@ -56,9 +57,9 @@ static const shell_command_t commands[] = {
         .handler = help_command,
     },
     {
-        .name = "version",
-        .help = "Show the running firmware version",
-        .handler = version_command,
+        .name = "identity",
+        .help = "Show the shared device identity",
+        .handler = identity_command,
     },
     {
         .name = "status",
@@ -345,19 +346,25 @@ static int help_command(const char *arguments)
     return 0;
 }
 
-static int version_command(const char *arguments)
+static int identity_command(const char *arguments)
 {
     if (*arguments != '\0') {
-        shell_printf("usage: version\n");
+        shell_printf("usage: identity\n");
         return 1;
     }
 
     const airdap_device_identity_t *identity = airdap_device_identity_get();
     if (identity == NULL) {
-        shell_printf("version: device identity unavailable\n");
+        shell_printf("identity: device identity unavailable\n");
         return 1;
     }
-    shell_printf("firmware_version=%s\n", identity->firmware_version);
+
+    char output[AIRDAP_DEBUG_SHELL_IDENTITY_OUTPUT_SIZE];
+    if (!airdap_debug_shell_identity_format(identity, output, sizeof(output))) {
+        shell_printf("identity: formatting failed\n");
+        return 1;
+    }
+    shell_printf("%s", output);
     return 0;
 }
 

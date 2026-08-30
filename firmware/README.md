@@ -179,7 +179,7 @@ leave the local tool; Ctrl-C is forwarded to cancel the current firmware input
 line. Commands can also be run non-interactively:
 
 ```sh
-python tools/airdap-shell.py -c help -c status -c "swd-idcode 100"
+python tools/airdap-shell.py -c help -c identity -c status -c "swd-idcode 100"
 ```
 
 `restart` may also be used with `-c`, but it must be the final command because
@@ -190,7 +190,8 @@ The firmware accepts printable ASCII, CR/LF line endings, backspace/delete,
 and Ctrl-C. Available commands are:
 
 - `help` — list commands;
-- `version` — print the running firmware version;
+- `identity` — print the USB serial, device ID, UUID, firmware and protocol
+  versions, and capability bits from the shared device identity;
 - `status` — print `target_mv`, `usb_vbus_mv`, `uptime_ms`, and `free_heap`;
 - `swd-idcode [clock_khz]` — reset the SWD line, select SWD, and read the
   target DP IDCODE at 100 kHz by default; accepted clocks are 100–10,000 kHz;
@@ -235,7 +236,7 @@ The other hardware-independent tests use the same pattern:
 for suite in \
     bootloader_artifact ota_layout board device_identity voltage_monitor swd_protocol dap_protocol \
     dap_ota dap_stream ota_manager app_main target_uart usb_descriptors project_version \
-    debug_shell_input \
+    debug_shell_identity debug_shell_input \
     debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
     cmake --build "build-host/$suite"

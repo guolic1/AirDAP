@@ -23,6 +23,7 @@ if(CONFIG_AIRDAP_DEBUG_SHELL)
     endif()
     list(APPEND usb_device_sources
         "debug_shell.c"
+        "debug_shell_identity.c"
         "debug_shell_input.c"
         "debug_shell_swd_probe.c"
         "debug_shell_tx_state.c"

@@ -112,10 +112,13 @@ python tools/airdap-shell.py --serial <ADP-serial>
 ```
 
 Confirm this does not open or change `AirDAP Target UART`. Run `help` and verify
-that `help`, `version`, `status`, `swd-idcode`, and `restart` are listed. Run
-`version` and confirm its `firmware_version` value matches both the exact Git
-tag on the built commit or, when untagged, its seven-character Git hash and the
-version reported by the USB OTA query. Run `status` and
+that `help`, `identity`, `status`, `swd-idcode`, and `restart` are listed, and
+that `version` is not listed. Run `identity` and confirm its USB serial matches
+the composite device and CMSIS-DAP `DAP_Info` serial, its device ID uses the
+same stable source, its UUID has 32 hexadecimal digits, and its
+`firmware_version` value matches both the exact Git tag on the built commit or,
+when untagged, its seven-character Git hash and the version reported by the USB
+OTA query. Run `status` and
 verify decimal target voltage, USB VBUS voltage, uptime, and free heap fields.
 With OpenOCD and other CMSIS-DAP clients closed, run `swd-idcode 100` against
 the known-good reference target. Confirm it reports the same nonzero DP IDCODE
