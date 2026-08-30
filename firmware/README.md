@@ -165,7 +165,12 @@ python tools/airdap-shell.py --serial ADP-001122334455
 
 When only one AirDAP is connected, `--serial` may be omitted. Press Ctrl-] or
 Ctrl-D to leave the local tool; Ctrl-C is forwarded to cancel the current
-firmware input line. Commands can also be run non-interactively:
+firmware input line. In interactive mode, Tab completes a unique command name,
+Left/Right, Home/End, and Delete edit the current line, and Up/Down browses the
+eight most recent commands from the current session. When the input line is not
+empty, history navigation only visits commands with that prefix. Moving down
+past the newest matching entry restores the unsubmitted input line. Commands can
+also be run non-interactively:
 
 ```sh
 python tools/airdap-shell.py -c help -c status -c "swd-idcode 100"
@@ -176,7 +181,7 @@ the device disconnects after its acknowledgement is delivered.
 
 The host tool makes Vendor Bulk communication behave like a raw text terminal.
 The firmware accepts printable ASCII, CR/LF line endings, backspace/delete,
-and Ctrl-C. Available commands are:
+Ctrl-C, Tab, and ANSI navigation sequences. Available commands are:
 
 - `help` — list commands;
 - `status` — print `target_mv`, `usb_vbus_mv`, `uptime_ms`, and `free_heap`;
@@ -192,12 +197,14 @@ SWDIO after every attempt, including failures.
 
 After `airdap-shell` starts a session, normal ESP application logs are mirrored
 to the Vendor Bulk interface and continue to use the configured primary
-console. ROM, bootloader, early application messages, and direct standard
-output are not captured by the Vendor interface. The shell is intended for
-physically connected development systems: it has no authentication and exposes
-only a bounded, read-only SWD DP IDCODE diagnostic. It deliberately provides no
-arbitrary DP/AP access, target memory access, programming, persistent history,
-or dynamic log-control commands.
+console. When a log arrives during editing, the shell restores the prompt,
+current input, and cursor after printing it. Mirroring uses a bounded queue and
+may drop burst logs instead of blocking application tasks. ROM, bootloader,
+early application messages, and direct standard output are not captured by the
+Vendor interface. The shell is intended for physically connected development
+systems: it has no authentication and exposes only a bounded, read-only SWD DP
+IDCODE diagnostic. It deliberately provides no arbitrary DP/AP access, target
+memory access, programming, persistent history, or dynamic log-control commands.
 
 ## Host unit tests
 

@@ -220,6 +220,21 @@ class AirDapShellTests(unittest.TestCase):
         self.assertTrue(transcript.endswith(b"airdap> "))
         self.assertTrue(all(timeout <= 200 for timeout in transport.read_timeouts))
 
+    def test_command_mode_ignores_log_redraw_prompt_before_command_echo(self) -> None:
+        transport = FakeCommandTransport([
+            b"background log\nairdap> ",
+            b"status\ntarget_mv=3300\nairdap> ",
+        ])
+
+        transcript = airdap_shell.run_command(
+            transport,
+            "status",
+            timeout_seconds=0.2,
+        )
+
+        self.assertIn(b"status\ntarget_mv=3300", transcript)
+        self.assertEqual(len(transport.read_timeouts), 2)
+
     def test_command_timeout_applies_while_logs_keep_arriving(self) -> None:
         transport = ContinuousLogTransport()
 
@@ -279,8 +294,27 @@ class AirDapShellTests(unittest.TestCase):
             ).open()
         self.assertEqual(device.set_calls, 0)
 
-    def test_windows_extended_key_is_consumed_without_forwarding_nul(self) -> None:
-        keys = iter([b"\x00", b"H"])
+    def test_windows_navigation_keys_are_mapped_to_ansi_sequences(self) -> None:
+        mappings = {
+            b"H": b"\x1b[A",
+            b"P": b"\x1b[B",
+            b"K": b"\x1b[D",
+            b"M": b"\x1b[C",
+            b"G": b"\x1b[H",
+            b"O": b"\x1b[F",
+            b"S": b"\x1b[3~",
+        }
+
+        for windows_key, ansi_sequence in mappings.items():
+            with self.subTest(windows_key=windows_key):
+                keys = iter([b"\xe0", windows_key])
+                self.assertEqual(
+                    airdap_shell._read_windows_key(lambda: next(keys)),
+                    ansi_sequence,
+                )
+
+    def test_unknown_windows_extended_key_is_consumed(self) -> None:
+        keys = iter([b"\xe0", b"Q"])
 
         self.assertEqual(airdap_shell._read_windows_key(lambda: next(keys)), b"")
 

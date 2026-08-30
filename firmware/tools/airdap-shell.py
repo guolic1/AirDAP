@@ -211,6 +211,34 @@ def read_until_prompt(
     )
 
 
+def read_until_command_prompt(
+    transport: CommandTransport,
+    encoded_command: bytes,
+    timeout_seconds: float,
+) -> bytes:
+    deadline = time.monotonic() + timeout_seconds
+    echo_marker = encoded_command + b"\n"
+    received = bytearray()
+    echo_end: int | None = None
+
+    while True:
+        if echo_end is None:
+            echo_index = received.find(echo_marker)
+            if echo_index >= 0:
+                echo_end = echo_index + len(echo_marker)
+        if echo_end is not None and PROMPT in received[echo_end:]:
+            return bytes(received)
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ShellError("timed out waiting for the AirDAP shell prompt")
+        chunk = transport.read(timeout_ms=max(1, int(remaining * 1000)))
+        if chunk:
+            received.extend(chunk)
+        else:
+            time.sleep(0.005)
+
+
 def _encode_command(command: str) -> bytes:
     if not command or not command.strip(" "):
         raise ShellError("commands must be non-empty single-line text")
@@ -250,7 +278,7 @@ def run_command(
             timeout_seconds,
             "the restart acknowledgement",
         )
-    return read_until_prompt(transport, timeout_seconds)
+    return read_until_command_prompt(transport, encoded, timeout_seconds)
 
 
 @contextlib.contextmanager
@@ -277,8 +305,15 @@ def raw_terminal(stream: BinaryIO) -> Iterator[None]:
 def _read_windows_key(getch: Callable[[], bytes]) -> bytes:
     data = getch()
     if data in (b"\x00", b"\xe0"):
-        getch()
-        return b""
+        return {
+            b"H": b"\x1b[A",
+            b"P": b"\x1b[B",
+            b"K": b"\x1b[D",
+            b"M": b"\x1b[C",
+            b"G": b"\x1b[H",
+            b"O": b"\x1b[F",
+            b"S": b"\x1b[3~",
+        }.get(getch(), b"")
     return data
 
 

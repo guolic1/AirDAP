@@ -18,6 +18,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "tusb.h"
@@ -34,6 +35,7 @@ enum {
     RESTART_FLUSH_TIMEOUT_MS = 1000,
     SHELL_FORMAT_BUFFER_SIZE = 384,
     LOG_MIRROR_BUFFER_SIZE = 512,
+    LOG_QUEUE_DEPTH = 4,
 };
 
 typedef int (*shell_command_handler_t)(const char *arguments);
@@ -43,6 +45,12 @@ typedef struct {
     const char *help;
     shell_command_handler_t handler;
 } shell_command_t;
+
+typedef struct {
+    uint32_t session_generation;
+    size_t length;
+    char data[LOG_MIRROR_BUFFER_SIZE];
+} shell_log_message_t;
 
 static int help_command(const char *arguments);
 static int status_command(const char *arguments);
@@ -73,7 +81,9 @@ static const shell_command_t commands[] = {
 };
 
 static SemaphoreHandle_t output_mutex;
+static QueueHandle_t log_queue;
 static atomic_bool session_active = ATOMIC_VAR_INIT(false);
+static _Atomic(uint32_t) session_generation = ATOMIC_VAR_INIT(0U);
 static _Atomic(vprintf_like_t) previous_log_vprintf = ATOMIC_VAR_INIT(vprintf);
 static portMUX_TYPE tx_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static airdap_debug_shell_tx_state_t tx_state;
@@ -272,26 +282,53 @@ static int mirror_log_vprintf(const char *format, va_list arguments)
     const int result = primary != NULL ? primary(format, primary_arguments) : 0;
     va_end(primary_arguments);
 
-    if (!atomic_load(&session_active)) {
+    if (!atomic_load(&session_active) || log_queue == NULL) {
         return result;
     }
 
-    char output[LOG_MIRROR_BUFFER_SIZE];
+    shell_log_message_t message = {
+        .session_generation = atomic_load(&session_generation),
+    };
     va_list mirror_arguments;
     va_copy(mirror_arguments, arguments);
     const int formatted = vsnprintf(
-        output,
-        sizeof(output),
+        message.data,
+        sizeof(message.data),
         format,
         mirror_arguments);
     va_end(mirror_arguments);
     if (formatted > 0) {
-        const size_t length = (size_t) formatted < sizeof(output)
+        message.length = (size_t) formatted < sizeof(message.data)
             ? (size_t) formatted
-            : sizeof(output) - 1U;
-        (void) debug_write(output, length, 0U);
+            : sizeof(message.data) - 1U;
+        if (atomic_load(&session_active) &&
+            message.session_generation == atomic_load(&session_generation)) {
+            (void) xQueueSend(log_queue, &message, 0);
+        }
     }
     return result;
+}
+
+static void drain_log_queue(
+    airdap_debug_shell_input_t *input,
+    const airdap_debug_shell_input_callbacks_t *callbacks)
+{
+    shell_log_message_t message;
+
+    for (size_t index = 0U; index < LOG_QUEUE_DEPTH; ++index) {
+        if (!atomic_load(&session_active) ||
+            xQueueReceive(log_queue, &message, 0) != pdTRUE) {
+            return;
+        }
+        if (message.session_generation != atomic_load(&session_generation)) {
+            continue;
+        }
+        airdap_debug_shell_input_write_background(
+            input,
+            message.data,
+            message.length,
+            callbacks);
+    }
 }
 
 static void shell_execute(const char *line, void *context)
@@ -325,6 +362,24 @@ static void shell_execute(const char *line, void *context)
     }
 
     shell_printf("Unrecognized command: %.*s\n", (int) command_length, line);
+}
+
+static const char *shell_complete(const char *prefix, void *context)
+{
+    const size_t prefix_length = strlen(prefix);
+    const char *match = NULL;
+
+    (void) context;
+    for (size_t index = 0U; index < sizeof(commands) / sizeof(commands[0]); ++index) {
+        if (strncmp(commands[index].name, prefix, prefix_length) != 0) {
+            continue;
+        }
+        if (match != NULL) {
+            return NULL;
+        }
+        match = commands[index].name;
+    }
+    return match;
 }
 
 static int help_command(const char *arguments)
@@ -522,10 +577,13 @@ static void start_session(airdap_debug_shell_input_t *input)
 {
     static const char banner[] =
         "\nAirDAP debug shell\n"
+        "Tab completes commands; arrows edit and recall history.\n"
         "Type 'help' to list commands. Ctrl-] or Ctrl-D exits airdap-shell.\n"
         "airdap> ";
 
     airdap_debug_shell_disconnected();
+    (void) atomic_fetch_add(&session_generation, 1U);
+    (void) xQueueReset(log_queue);
     if (xSemaphoreTake(output_mutex, portMAX_DELAY) != pdTRUE) {
         return;
     }
@@ -546,10 +604,11 @@ static void end_session(void)
 static void shell_task(void *argument)
 {
     (void) argument;
-    airdap_debug_shell_input_t input;
+    static airdap_debug_shell_input_t input;
     const airdap_debug_shell_input_callbacks_t callbacks = {
         .write = shell_write,
         .execute = shell_execute,
+        .complete = shell_complete,
         .context = NULL,
     };
     uint8_t data[SHELL_READ_CHUNK];
@@ -561,6 +620,10 @@ static void shell_task(void *argument)
             airdap_debug_shell_input_init(&input);
             vTaskDelay(pdMS_TO_TICKS(SHELL_POLL_INTERVAL_MS));
             continue;
+        }
+
+        if (atomic_load(&session_active)) {
+            drain_log_queue(&input, &callbacks);
         }
 
         const uint32_t received = tud_vendor_n_read(
@@ -586,6 +649,9 @@ static void shell_task(void *argument)
                     &callbacks);
             }
         }
+        if (atomic_load(&session_active)) {
+            drain_log_queue(&input, &callbacks);
+        }
     }
 }
 
@@ -594,6 +660,12 @@ esp_err_t airdap_debug_shell_start(void)
     airdap_debug_shell_tx_state_init(&tx_state);
     output_mutex = xSemaphoreCreateMutex();
     if (output_mutex == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    log_queue = xQueueCreate(LOG_QUEUE_DEPTH, sizeof(shell_log_message_t));
+    if (log_queue == NULL) {
+        vSemaphoreDelete(output_mutex);
+        output_mutex = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -605,6 +677,8 @@ esp_err_t airdap_debug_shell_start(void)
         SHELL_TASK_PRIORITY,
         NULL,
         1) != pdPASS) {
+        vQueueDelete(log_queue);
+        log_queue = NULL;
         vSemaphoreDelete(output_mutex);
         output_mutex = NULL;
         return ESP_ERR_NO_MEM;

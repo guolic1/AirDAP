@@ -112,17 +112,25 @@ python tools/airdap-shell.py --serial <ADP-serial>
 ```
 
 Confirm this does not open or change `AirDAP Target UART`. Run `help` and verify
-that `help`, `status`, `swd-idcode`, and `restart` are listed. Run `status` and
-verify decimal target voltage, USB VBUS voltage, uptime, and free heap fields.
-With OpenOCD and other CMSIS-DAP clients closed, run `swd-idcode 100` against
-the known-good reference target. Confirm it reports the same nonzero DP IDCODE
-recorded in section 4, then repeat once with the target disconnected and confirm
-the command reports an error and the target-side SWDIO line is released. Confirm
-normal ESP application logs arrive after the session starts and still appear on
-the primary console. Finally, run `restart`, verify the acknowledgement is
-received in full before disconnect, and confirm the composite device
-re-enumerates with the same serial number. Repeat with Bulk IN deliberately left
-unread past the firmware's bounded timeout and confirm AirDAP does not restart.
+that `help`, `status`, `swd-idcode`, and `restart` are listed. Type `sta`, press
+Tab, and verify it completes to `status `. Use Left/Right, Home/End, Backspace,
+and Delete to edit text at the beginning, middle, and end of a command. Submit
+multiple commands, type a prefix, and verify Up/Down only visits matching
+history; verify moving down past the newest match restores the unsubmitted draft
+and cursor. Reconnect the shell and verify the previous session's history is
+unavailable. While application logs are arriving, pause with the cursor in the
+middle of an unfinished command and verify each log is followed by the intact
+prompt, input, and cursor position. Run `status` and verify decimal target
+voltage, USB VBUS voltage, uptime, and free heap fields. With OpenOCD and other
+CMSIS-DAP clients closed, run `swd-idcode 100` against the known-good reference
+target. Confirm it reports the same nonzero DP IDCODE recorded in section 4,
+then repeat once with the target disconnected and confirm the command reports an
+error and the target-side SWDIO line is released. Confirm normal ESP application
+logs still appear on the primary console. Finally, run `restart`, verify the
+acknowledgement is received in full before disconnect, and confirm the composite
+device re-enumerates with the same serial number. Repeat with Bulk IN deliberately
+left unread past the firmware's bounded timeout and confirm AirDAP does not
+restart.
 
 ## 7. Reset and target power
 
