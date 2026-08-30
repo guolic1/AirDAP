@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -14,6 +15,9 @@ typedef enum {
     AIRDAP_DEBUG_SHELL_SWD_PROBE_USAGE,
     AIRDAP_DEBUG_SHELL_SWD_PROBE_CLOCK_OUT_OF_RANGE,
     AIRDAP_DEBUG_SHELL_SWD_PROBE_INVALID_BACKEND,
+    AIRDAP_DEBUG_SHELL_SWD_PROBE_BUSY,
+    AIRDAP_DEBUG_SHELL_SWD_PROBE_OWNERSHIP_FAILED,
+    AIRDAP_DEBUG_SHELL_SWD_PROBE_CANCELLED,
     AIRDAP_DEBUG_SHELL_SWD_PROBE_SET_CLOCK_FAILED,
     AIRDAP_DEBUG_SHELL_SWD_PROBE_CONNECT_FAILED,
     AIRDAP_DEBUG_SHELL_SWD_PROBE_RESPONSE_INVALID,
@@ -29,7 +33,7 @@ typedef struct {
         const uint8_t *data,
         size_t bit_count);
     int (*read_sequence)(void *context, uint8_t *data, size_t bit_count);
-    int (*release)(void *context);
+    bool (*cancelled)(void *context);
 } airdap_debug_shell_swd_backend_t;
 
 typedef struct {

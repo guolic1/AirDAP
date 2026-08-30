@@ -7,12 +7,15 @@ enable_testing()
 add_executable(
     debug_shell_swd_probe_test
     test_debug_shell_swd_probe.c
+    ../../../components/dap_ownership/dap_ownership.c
     ../../../components/usb_device/debug_shell_swd_probe.c
 )
 
 target_include_directories(
     debug_shell_swd_probe_test
-    PRIVATE ../../../components/usb_device/private_include
+    PRIVATE
+        ../../../components/dap_ownership/include
+        ../../../components/usb_device/private_include
 )
 target_compile_features(debug_shell_swd_probe_test PRIVATE c_std_11)
 target_compile_options(

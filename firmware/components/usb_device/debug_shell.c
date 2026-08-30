@@ -549,10 +549,11 @@ static int shell_swd_read_sequence(
     return (int) airdap_swd_read_sequence(data, bit_count);
 }
 
-static int shell_swd_release(void *context)
+static bool shell_swd_cancelled(void *context)
 {
     (void) context;
-    return (int) airdap_swd_set_io_state(false);
+    return !atomic_load(&session_active) ||
+        !tud_vendor_n_mounted(DEBUG_VENDOR_INSTANCE);
 }
 
 static int swd_idcode_command(const char *arguments)
@@ -562,7 +563,7 @@ static int swd_idcode_command(const char *arguments)
         .set_clock = shell_swd_set_clock,
         .write_sequence = shell_swd_write_sequence,
         .read_sequence = shell_swd_read_sequence,
-        .release = shell_swd_release,
+        .cancelled = shell_swd_cancelled,
     };
     airdap_debug_shell_swd_probe_result_t result;
     const airdap_debug_shell_swd_probe_status_t status =
@@ -588,6 +589,23 @@ static int swd_idcode_command(const char *arguments)
             AIRDAP_DEBUG_SHELL_SWD_MIN_CLOCK_KHZ,
             AIRDAP_DEBUG_SHELL_SWD_MAX_CLOCK_KHZ);
         return 1;
+
+    case AIRDAP_DEBUG_SHELL_SWD_PROBE_BUSY:
+        shell_printf_styled(
+            ansi_yellow,
+            "swd-idcode: busy: SWD is owned by another client\n");
+        return 1;
+
+    case AIRDAP_DEBUG_SHELL_SWD_PROBE_OWNERSHIP_FAILED:
+        shell_printf_styled(
+            ansi_red,
+            "swd-idcode: ownership unavailable: %d\n",
+            result.operation_error);
+        break;
+
+    case AIRDAP_DEBUG_SHELL_SWD_PROBE_CANCELLED:
+        shell_printf_styled(ansi_yellow, "swd-idcode: cancelled\n");
+        break;
 
     case AIRDAP_DEBUG_SHELL_SWD_PROBE_SET_CLOCK_FAILED:
         shell_printf_styled(
@@ -635,9 +653,10 @@ static int swd_idcode_command(const char *arguments)
     case AIRDAP_DEBUG_SHELL_SWD_PROBE_RELEASE_FAILED:
         shell_printf_styled(
             ansi_red,
-            "swd-idcode: release failed after idcode=0x%08" PRIX32 ": %s\n",
+            "swd-idcode: release failed after idcode=0x%08" PRIX32
+            ": ownership error=%d\n",
             result.idcode,
-            esp_err_to_name((esp_err_t) result.release_error));
+            result.release_error);
         return 1;
 
     case AIRDAP_DEBUG_SHELL_SWD_PROBE_INVALID_BACKEND:
@@ -651,8 +670,9 @@ static int swd_idcode_command(const char *arguments)
     if (result.release_error != 0) {
         shell_printf_styled(
             ansi_red,
-            "swd-idcode: SWDIO release also failed: %s\n",
-            esp_err_to_name((esp_err_t) result.release_error));
+            "swd-idcode: SWDIO/nRESET release also failed:"
+            " ownership error=%d\n",
+            result.release_error);
     }
     return 1;
 }

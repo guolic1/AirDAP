@@ -113,9 +113,10 @@ the following DAP transaction.
 the connect fail without releasing or driving that owner's bus. Disconnect,
 USB detach, stale USB sessions, and OTA write entry release ownership; release
 also leaves SWDIO high impedance and nRESET deasserted. Every new owner starts
-with an SWD Line Reset. The NETWORK and internal DIAGNOSTIC owner values are
-available to later transports, but this stage does not expose either through a
-network protocol or connect the Debug Shell command to the arbiter.
+with an SWD Line Reset. The Debug Shell `swd-idcode` command acquires the
+internal DIAGNOSTIC owner for its complete transaction and reports `busy` when
+USB or NETWORK already owns SWD. NETWORK remains reserved for a later network
+transport and is not exposed by this stage.
 
 ## Persistent configuration
 
@@ -249,10 +250,10 @@ Ctrl-C, Tab, and ANSI navigation sequences. Available commands are:
 - `restart` — wait for the acknowledgement transfer to complete, then restart
   AirDAP; a bounded transfer timeout leaves the firmware running.
 
-Stop OpenOCD or any other CMSIS-DAP client before running `swd-idcode`. The
-debug shell and CMSIS-DAP worker share the same physical SWD engine; concurrent
-commands would interleave separate target transactions. The command releases
-SWDIO after every attempt, including failures.
+When OpenOCD or another CMSIS-DAP client owns SWD, `swd-idcode` returns `busy`
+without driving the target. After every successful, failed, or disconnected
+attempt, the command releases its DIAGNOSTIC owner, leaves SWDIO high impedance,
+and deasserts nRESET.
 
 After `airdap-shell` starts a session, normal ESP application logs are mirrored
 to the Vendor Bulk interface and continue to use the configured primary

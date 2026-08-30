@@ -5,6 +5,7 @@ set(usb_device_sources
 )
 set(usb_device_private_requires
     config_store
+    dap_ownership
     dap_protocol
     device_identity
     esp_system
