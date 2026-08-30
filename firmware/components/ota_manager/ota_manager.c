@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "airdap_dap_ownership.h"
 #include "airdap_device_identity.h"
 #include "airdap_ota.h"
 #include "esp_err.h"
@@ -83,6 +84,15 @@ airdap_ota_status_t airdap_ota_begin(uint32_t image_size)
     }
     if (image_size == 0U || image_size > partition->size) {
         return AIRDAP_OTA_STATUS_INVALID_SIZE;
+    }
+
+    const airdap_dap_ownership_result_t ownership_result =
+        airdap_dap_ownership_revoke();
+    if (ownership_result == AIRDAP_DAP_OWNERSHIP_BUSY) {
+        return AIRDAP_OTA_STATUS_INVALID_STATE;
+    }
+    if (ownership_result != AIRDAP_DAP_OWNERSHIP_OK) {
+        return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
     }
 
     esp_ota_handle_t handle = 0U;

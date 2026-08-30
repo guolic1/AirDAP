@@ -4,6 +4,7 @@
 
 #include "airdap_board.h"
 #include "airdap_dap.h"
+#include "airdap_dap_ownership.h"
 #include "airdap_dap_ota.h"
 #include "airdap_dap_protocol.h"
 #include "airdap_ota.h"
@@ -18,29 +19,69 @@ enum {
 };
 
 static airdap_dap_processor_t processor;
+static airdap_dap_ownership_claim_t usb_claim;
 static bool initialized;
 static bool target_reset_released = true;
+static const uint8_t swd_line_reset[] = {
+    0xFFU, 0xFFU, 0xFFU, 0xFFU,
+    0xFFU, 0xFFU, 0xFFU, 0xFFU,
+};
+
+static bool ownership_line_reset(void *context)
+{
+    (void) context;
+    return airdap_swd_write_sequence(
+        swd_line_reset,
+        sizeof(swd_line_reset) * 8U) == ESP_OK;
+}
+
+static bool ownership_release_pins(void *context)
+{
+    (void) context;
+    const esp_err_t swdio_error = airdap_swd_set_io_state(false);
+    const esp_err_t reset_error = airdap_target_reset_set_asserted(false);
+    if (reset_error == ESP_OK) {
+        target_reset_released = true;
+    }
+    return swdio_error == ESP_OK && reset_error == ESP_OK;
+}
+
+static bool begin_usb_operation(airdap_dap_ownership_operation_t *operation)
+{
+    return airdap_dap_ownership_operation_begin(
+        &usb_claim,
+        operation) == AIRDAP_DAP_OWNERSHIP_OK;
+}
 
 static bool backend_connect(void *context)
 {
     (void) context;
-    return airdap_ota_debug_allowed() &&
-        airdap_swd_set_io_state(true) == ESP_OK;
+    if (!airdap_ota_debug_allowed()) {
+        return false;
+    }
+    const airdap_dap_ownership_result_t result =
+        airdap_dap_ownership_acquire(AIRDAP_DAP_OWNER_USB, &usb_claim);
+    return result == AIRDAP_DAP_OWNERSHIP_OK ||
+        result == AIRDAP_DAP_OWNERSHIP_ALREADY_OWNER;
 }
 
 static void backend_disconnect(void *context)
 {
     (void) context;
-    (void) airdap_swd_set_io_state(false);
-    (void) airdap_target_reset_set_asserted(false);
-    target_reset_released = true;
+    (void) airdap_dap_ownership_release(&usb_claim);
     airdap_ota_handle_disconnect();
 }
 
 static bool backend_set_clock(void *context, uint32_t clock_hz)
 {
     (void) context;
-    return airdap_swd_set_clock(clock_hz) == ESP_OK;
+    airdap_dap_ownership_operation_t operation = {0};
+    if (!begin_usb_operation(&operation)) {
+        return false;
+    }
+    const bool success = airdap_swd_set_clock(clock_hz) == ESP_OK;
+    airdap_dap_ownership_operation_end(&operation);
+    return success;
 }
 
 static bool backend_configure_transfer(
@@ -49,7 +90,14 @@ static bool backend_configure_transfer(
     uint16_t wait_retries)
 {
     (void) context;
-    return airdap_swd_configure_transfer(idle_cycles, wait_retries) == ESP_OK;
+    airdap_dap_ownership_operation_t operation = {0};
+    if (!begin_usb_operation(&operation)) {
+        return false;
+    }
+    const bool success =
+        airdap_swd_configure_transfer(idle_cycles, wait_retries) == ESP_OK;
+    airdap_dap_ownership_operation_end(&operation);
+    return success;
 }
 
 static bool backend_configure_swd(
@@ -58,7 +106,14 @@ static bool backend_configure_swd(
     bool data_phase)
 {
     (void) context;
-    return airdap_swd_configure_bus(turnaround_cycles, data_phase) == ESP_OK;
+    airdap_dap_ownership_operation_t operation = {0};
+    if (!begin_usb_operation(&operation)) {
+        return false;
+    }
+    const bool success =
+        airdap_swd_configure_bus(turnaround_cycles, data_phase) == ESP_OK;
+    airdap_dap_ownership_operation_end(&operation);
+    return success;
 }
 
 static bool backend_transfer(
@@ -70,6 +125,11 @@ static bool backend_transfer(
     uint8_t *status)
 {
     (void) context;
+    airdap_dap_ownership_operation_t operation = {0};
+    if (!begin_usb_operation(&operation)) {
+        *status = DAP_TRANSFER_ERROR;
+        return false;
+    }
     airdap_swd_ack_t ack = AIRDAP_SWD_ACK_NONE;
     esp_err_t error;
 
@@ -84,6 +144,7 @@ static bool backend_transfer(
     }
 
     *status = error == ESP_OK ? (uint8_t) ack : DAP_TRANSFER_ERROR;
+    airdap_dap_ownership_operation_end(&operation);
     return error == ESP_OK;
 }
 
@@ -93,7 +154,13 @@ static bool backend_write_sequence(
     size_t bit_count)
 {
     (void) context;
-    return airdap_swd_write_sequence(data, bit_count) == ESP_OK;
+    airdap_dap_ownership_operation_t operation = {0};
+    if (!begin_usb_operation(&operation)) {
+        return false;
+    }
+    const bool success = airdap_swd_write_sequence(data, bit_count) == ESP_OK;
+    airdap_dap_ownership_operation_end(&operation);
+    return success;
 }
 
 static bool backend_read_sequence(
@@ -102,18 +169,21 @@ static bool backend_read_sequence(
     size_t bit_count)
 {
     (void) context;
-    return airdap_swd_read_sequence(data, bit_count) == ESP_OK;
+    airdap_dap_ownership_operation_t operation = {0};
+    if (!begin_usb_operation(&operation)) {
+        return false;
+    }
+    const bool success = airdap_swd_read_sequence(data, bit_count) == ESP_OK;
+    airdap_dap_ownership_operation_end(&operation);
+    return success;
 }
 
-static bool backend_swj_pins(
-    void *context,
+static bool swj_pins_owned(
     uint8_t value,
     uint8_t select,
     uint32_t wait_us,
     uint8_t *pins)
 {
-    (void) context;
-
     if ((select & DAP_SWJ_PIN_NRESET) != 0U) {
         target_reset_released = (value & DAP_SWJ_PIN_NRESET) != 0U;
         if (airdap_target_reset_set_asserted(!target_reset_released) != ESP_OK) {
@@ -147,9 +217,25 @@ static bool backend_swj_pins(
     return true;
 }
 
-static bool backend_reset_target(void *context)
+static bool backend_swj_pins(
+    void *context,
+    uint8_t value,
+    uint8_t select,
+    uint32_t wait_us,
+    uint8_t *pins)
 {
     (void) context;
+    airdap_dap_ownership_operation_t operation = {0};
+    if (!begin_usb_operation(&operation)) {
+        return false;
+    }
+    const bool success = swj_pins_owned(value, select, wait_us, pins);
+    airdap_dap_ownership_operation_end(&operation);
+    return success;
+}
+
+static bool reset_target_owned(void)
+{
     if (airdap_target_reset_set_asserted(true) != ESP_OK) {
         return false;
     }
@@ -160,6 +246,18 @@ static bool backend_reset_target(void *context)
     }
     target_reset_released = true;
     return true;
+}
+
+static bool backend_reset_target(void *context)
+{
+    (void) context;
+    airdap_dap_ownership_operation_t operation = {0};
+    if (!begin_usb_operation(&operation)) {
+        return false;
+    }
+    const bool success = reset_target_owned();
+    airdap_dap_ownership_operation_end(&operation);
+    return success;
 }
 
 static void backend_delay_us(void *context, uint16_t delay_us)
@@ -177,8 +275,9 @@ static size_t backend_vendor_command(
     size_t response_capacity)
 {
     (void) context;
+    (void) debug_connected;
     return airdap_dap_ota_process(
-        debug_connected,
+        airdap_dap_ownership_current() != AIRDAP_DAP_OWNER_NONE,
         request,
         request_length,
         response,
@@ -193,6 +292,15 @@ esp_err_t airdap_dap_init(
         return ESP_ERR_INVALID_ARG;
     }
     if (initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const airdap_dap_ownership_backend_t ownership = {
+        .line_reset = ownership_line_reset,
+        .release_pins = ownership_release_pins,
+    };
+    if (airdap_dap_ownership_initialize(&ownership) !=
+        AIRDAP_DAP_OWNERSHIP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
 
