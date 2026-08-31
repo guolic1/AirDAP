@@ -171,7 +171,17 @@ table. Do not use the Python updater until this baseline flash has completed
 successfully.
 
 After the baseline is installed, build the next application and update over
-the normal AirDAP USB connection without pressing reset or GPIO0:
+the normal AirDAP USB connection without pressing reset or GPIO0. On Windows,
+sync the checked-in `uv` environment and run the updater from the repository
+root:
+
+```powershell
+uv sync
+uv run python firmware/tools/airdap-update.py --serial ADP-001122334455 firmware/build/airdap.bin
+```
+
+In an existing non-Windows Python environment, install PyUSB and run the tool
+from `firmware/`:
 
 ```sh
 python -m pip install pyusb
@@ -216,7 +226,16 @@ The debug build preserves the existing USB assignments and appends the shell:
 - interface 3 is `AirDAP Debug Shell`, using Bulk OUT `0x04` and Bulk IN
   `0x84`.
 
-Install PyUSB, then open the interface with the checked-in host tool:
+On Windows, use the checked-in `uv` environment from the repository root to
+open the interface with the checked-in host tool:
+
+```powershell
+uv sync
+uv run python firmware/tools/airdap-shell.py --serial ADP-001122334455
+```
+
+In an existing non-Windows Python environment, install PyUSB and run the tool
+from `firmware/`:
 
 ```sh
 python -m pip install pyusb

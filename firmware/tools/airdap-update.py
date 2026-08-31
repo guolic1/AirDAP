@@ -50,6 +50,16 @@ OTA_STATUS_NAMES = {
 }
 
 
+def _windows_usb_backend() -> Any | None:
+    if os.name != "nt":
+        return None
+    try:
+        import libusb_package
+    except ImportError:
+        return None
+    return libusb_package.get_libusb1_backend()
+
+
 class UpdateError(RuntimeError):
     """Raised when the update workflow cannot prove successful completion."""
 
@@ -427,7 +437,13 @@ def make_parser() -> argparse.ArgumentParser:
 
 def _find_airdap_devices(usb_core: Any) -> list[Any]:
     return list(
-        usb_core.find(find_all=True, idVendor=USB_VID, idProduct=USB_PID) or []
+        usb_core.find(
+            find_all=True,
+            backend=_windows_usb_backend(),
+            idVendor=USB_VID,
+            idProduct=USB_PID,
+        )
+        or []
     )
 
 
