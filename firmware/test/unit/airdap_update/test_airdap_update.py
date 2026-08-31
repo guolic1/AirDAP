@@ -5,6 +5,7 @@ import io
 import struct
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -156,6 +157,61 @@ class AirDapUpdateTests(unittest.TestCase):
         usb_core.find.assert_called_once_with(
             find_all=True,
             backend=None,
+            idVendor=airdap_update.USB_VID,
+            idProduct=airdap_update.USB_PID,
+        )
+
+    def test_windows_inaccessible_device_reports_actionable_error(self) -> None:
+        device = mock.Mock(iSerialNumber=3)
+        backend = object()
+        libusb_package = mock.Mock()
+        libusb_package.get_libusb1_backend.return_value = backend
+        usb_package = types.ModuleType("usb")
+        usb_package.__path__ = []
+        usb_core = types.ModuleType("usb.core")
+        usb_core.find = mock.Mock(return_value=[device])
+        usb_util = types.ModuleType("usb.util")
+        usb_util.get_string = mock.Mock(
+            side_effect=NotImplementedError(
+                "Operation not supported or unimplemented on this platform"
+            )
+        )
+        usb_package.core = usb_core
+        usb_package.util = usb_util
+
+        image = io.BytesIO(b"firmware")
+        stderr = io.StringIO()
+        with mock.patch.object(airdap_update.os, "name", "nt"), mock.patch.object(
+            airdap_update,
+            "open_image",
+            return_value=(image, len(image.getvalue())),
+        ), mock.patch.object(
+            airdap_update.sys,
+            "stderr",
+            stderr,
+        ), mock.patch.dict(
+            sys.modules,
+            {
+                "libusb_package": libusb_package,
+                "usb": usb_package,
+                "usb.core": usb_core,
+                "usb.util": usb_util,
+            },
+        ):
+            self.assertEqual(airdap_update._run_cli(["airdap.bin"]), 1)
+
+        error_output = stderr.getvalue()
+        self.assertEqual(len(error_output.splitlines()), 1)
+        self.assertRegex(
+            error_output,
+            "^airdap-update: .*not accessible from Windows.*"
+            "detach it.*WSL.*WinUSB",
+        )
+        self.assertNotIn("Traceback", error_output)
+
+        usb_core.find.assert_called_once_with(
+            find_all=True,
+            backend=backend,
             idVendor=airdap_update.USB_VID,
             idProduct=airdap_update.USB_PID,
         )

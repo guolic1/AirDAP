@@ -72,6 +72,22 @@ class OtaInfo:
     running_version: str
 
 
+def _read_airdap_serial(device: Any, usb_util: Any) -> str | None:
+    try:
+        return usb_util.get_string(device, device.iSerialNumber)
+    except Exception as error:
+        if os.name == "nt":
+            raise UpdateError(
+                f"AirDAP {USB_VID:04X}:{USB_PID:04X} is not accessible from "
+                f"Windows: {error}. If the device is attached to WSL, detach it "
+                "from WSL before retrying and ensure USB interface 0 uses WinUSB"
+            ) from error
+        raise UpdateError(
+            f"cannot read the USB serial from AirDAP {USB_VID:04X}:{USB_PID:04X}: "
+            f"{error}"
+        ) from error
+
+
 def select_airdap_device(
     devices: Iterable[Any],
     serial: str | None,
@@ -473,8 +489,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     image, image_size = open_image(args.image)
     try:
-        serial_getter = lambda candidate: usb_util.get_string(  # noqa: E731
-            candidate, candidate.iSerialNumber
+        serial_getter = lambda candidate: _read_airdap_serial(  # noqa: E731
+            candidate, usb_util
         )
         device = select_airdap_device(
             _find_airdap_devices(usb_core),
@@ -568,9 +584,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         image.close()
 
 
-if __name__ == "__main__":
+def _run_cli(argv: Sequence[str] | None = None) -> int:
     try:
-        raise SystemExit(main())
+        return main(argv)
     except (UpdateError, OSError) as error:
         print(f"airdap-update: {error}", file=sys.stderr)
-        raise SystemExit(1) from error
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(_run_cli())
