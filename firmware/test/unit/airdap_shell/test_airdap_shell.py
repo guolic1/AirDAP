@@ -160,6 +160,37 @@ class TtyStream(NullStream):
 
 
 class AirDapShellTests(unittest.TestCase):
+    def test_windows_device_discovery_uses_packaged_libusb(self) -> None:
+        backend = object()
+        package = mock.Mock()
+        package.get_libusb1_backend.return_value = backend
+        usb_package = types.ModuleType("usb")
+        usb_package.__path__ = []
+        usb_core = types.ModuleType("usb.core")
+        usb_core.find = mock.Mock(side_effect=RuntimeError("stop after find"))
+        usb_util = types.ModuleType("usb.util")
+        usb_package.core = usb_core
+        usb_package.util = usb_util
+
+        with mock.patch.object(airdap_shell.os, "name", "nt"), mock.patch.dict(
+            sys.modules,
+            {
+                "libusb_package": package,
+                "usb": usb_package,
+                "usb.core": usb_core,
+                "usb.util": usb_util,
+            },
+        ):
+            with self.assertRaisesRegex(RuntimeError, "stop after find"):
+                airdap_shell.main([])
+
+        usb_core.find.assert_called_once_with(
+            find_all=True,
+            backend=backend,
+            idVendor=airdap_shell.USB_VID,
+            idProduct=airdap_shell.USB_PID,
+        )
+
     def make_transport(self) -> tuple[object, FakeEndpoint, FakeEndpoint, FakeDevice, FakeUsbUtil]:
         endpoint_out = FakeEndpoint(airdap_shell.DEBUG_OUT_ENDPOINT)
         endpoint_in = FakeEndpoint(airdap_shell.DEBUG_IN_ENDPOINT)
@@ -412,7 +443,7 @@ class AirDapShellTests(unittest.TestCase):
         )
         fake_tty = types.SimpleNamespace(setraw=mock.Mock())
 
-        with mock.patch.dict(
+        with mock.patch.object(airdap_shell.os, "name", "posix"), mock.patch.dict(
             sys.modules,
             {"termios": fake_termios, "tty": fake_tty},
         ):

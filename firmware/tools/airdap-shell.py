@@ -37,6 +37,16 @@ LOCAL_EOF = SESSION_END[0]  # Ctrl-D
 LOCAL_EXIT = 0x1D  # Ctrl-]
 
 
+def _windows_usb_backend() -> Any | None:
+    if os.name != "nt":
+        return None
+    try:
+        import libusb_package
+    except ImportError:
+        return None
+    return libusb_package.get_libusb1_backend()
+
+
 class ShellError(RuntimeError):
     """Raised for an observable host-tool or USB contract failure."""
 
@@ -467,7 +477,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ShellError("PyUSB is required: python -m pip install pyusb") from error
 
     devices = list(
-        usb_core.find(find_all=True, idVendor=USB_VID, idProduct=USB_PID) or []
+        usb_core.find(
+            find_all=True,
+            backend=_windows_usb_backend(),
+            idVendor=USB_VID,
+            idProduct=USB_PID,
+        )
+        or []
     )
     device = select_airdap_device(
         devices,

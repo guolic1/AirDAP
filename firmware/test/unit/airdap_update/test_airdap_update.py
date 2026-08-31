@@ -126,6 +126,40 @@ def query(version: str = "1.2.3") -> bytes:
 
 
 class AirDapUpdateTests(unittest.TestCase):
+    def test_windows_device_discovery_uses_packaged_libusb(self) -> None:
+        backend = object()
+        package = mock.Mock()
+        package.get_libusb1_backend.return_value = backend
+        usb_core = mock.Mock()
+        usb_core.find.return_value = []
+
+        with mock.patch.object(airdap_update.os, "name", "nt"), mock.patch.dict(
+            sys.modules,
+            {"libusb_package": package},
+        ):
+            self.assertEqual(airdap_update._find_airdap_devices(usb_core), [])
+
+        usb_core.find.assert_called_once_with(
+            find_all=True,
+            backend=backend,
+            idVendor=airdap_update.USB_VID,
+            idProduct=airdap_update.USB_PID,
+        )
+
+    def test_non_windows_device_discovery_uses_system_backend(self) -> None:
+        usb_core = mock.Mock()
+        usb_core.find.return_value = []
+
+        with mock.patch.object(airdap_update.os, "name", "posix"):
+            self.assertEqual(airdap_update._find_airdap_devices(usb_core), [])
+
+        usb_core.find.assert_called_once_with(
+            find_all=True,
+            backend=None,
+            idVendor=airdap_update.USB_VID,
+            idProduct=airdap_update.USB_PID,
+        )
+
     def make_transport(
         self,
         responses: list[bytes | BaseException],

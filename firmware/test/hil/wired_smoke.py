@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import platform
 import re
 import struct
@@ -58,6 +59,16 @@ Exchange = Callable[[bytes], bytes]
 
 class VerificationError(RuntimeError):
     """Raised when an observable HIL acceptance condition is not met."""
+
+
+def _windows_usb_backend() -> Any | None:
+    if os.name != "nt":
+        return None
+    try:
+        import libusb_package
+    except ImportError:
+        return None
+    return libusb_package.get_libusb1_backend()
 
 
 def require(condition: bool, message: str) -> None:
@@ -363,7 +374,15 @@ def open_usb_transport(serial_filter: str | None, timeout_ms: int) -> PyUsbDapTr
     except ImportError as error:
         raise VerificationError("PyUSB is required: python -m pip install pyusb") from error
 
-    devices = list(usb_core.find(find_all=True, idVendor=USB_VID, idProduct=USB_PID) or [])
+    devices = list(
+        usb_core.find(
+            find_all=True,
+            backend=_windows_usb_backend(),
+            idVendor=USB_VID,
+            idProduct=USB_PID,
+        )
+        or []
+    )
     if serial_filter is not None:
         devices = [device for device in devices if device.serial_number == serial_filter]
     require(devices, "no AirDAP USB device found")

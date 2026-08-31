@@ -4,6 +4,7 @@ import importlib.util
 import json
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -15,6 +16,42 @@ assert SPEC is not None and SPEC.loader is not None
 wired_smoke = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = wired_smoke
 SPEC.loader.exec_module(wired_smoke)
+
+
+class WindowsBackendTests(unittest.TestCase):
+    def test_windows_device_discovery_uses_packaged_libusb(self) -> None:
+        backend = object()
+        package = mock.Mock()
+        package.get_libusb1_backend.return_value = backend
+        usb_package = types.ModuleType("usb")
+        usb_package.__path__ = []
+        usb_core = types.ModuleType("usb.core")
+        usb_core.find = mock.Mock(return_value=[])
+        usb_util = types.ModuleType("usb.util")
+        usb_package.core = usb_core
+        usb_package.util = usb_util
+
+        with mock.patch.object(wired_smoke.os, "name", "nt"), mock.patch.dict(
+            sys.modules,
+            {
+                "libusb_package": package,
+                "usb": usb_package,
+                "usb.core": usb_core,
+                "usb.util": usb_util,
+            },
+        ):
+            with self.assertRaisesRegex(
+                wired_smoke.VerificationError,
+                "no AirDAP USB device found",
+            ):
+                wired_smoke.open_usb_transport(None, 100)
+
+        usb_core.find.assert_called_once_with(
+            find_all=True,
+            backend=backend,
+            idVendor=wired_smoke.USB_VID,
+            idProduct=wired_smoke.USB_PID,
+        )
 
 
 class FakeDap:
