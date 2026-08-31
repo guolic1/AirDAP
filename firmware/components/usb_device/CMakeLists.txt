@@ -7,6 +7,7 @@ set(usb_device_private_requires
     config_store
     dap_ownership
     dap_protocol
+    dap_service
     device_identity
     esp_system
     esp_tinyusb
