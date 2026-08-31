@@ -85,6 +85,8 @@ not part of this repository. The application currently provides:
 - a versioned NVS configuration store for provisioning metadata and bounded
   opaque credential slots;
 - DAP/SWD ownership arbitration for USB, network, and internal diagnostics;
+- a unified runtime mode state for USB presence, Wi-Fi, provisioning, OTA,
+  and the current DAP owner;
 - a bounded transport-independent DAP service with session-safe response
   routing for USB and future network sessions;
 - target reset, power/status GPIO, VTref, and USB VBUS monitoring.
@@ -119,18 +121,36 @@ delivery. Final validation and callback delivery are serialized with session
 close, so close cannot return while an old response callback is still active
 and a replacement USB session cannot receive that response. Queue-full,
 timeout, stale-session, and response delivery failures remain observable
-through service results and counters. The NETWORK transport identifier is only
-an internal routing contract at this stage; it does not expose a network
-listener or provide authentication.
+through service results and counters. Opening a NETWORK DAP service session
+requires the caller to assert that its outer session was authenticated. This is
+an admission contract, not an authentication implementation: the NETWORK
+transport identifier remains internal at this stage and no network listener is
+exposed.
 
-`DAP_Connect` acquires the USB DAP/SWD owner. A different active owner makes
-the connect fail without releasing or driving that owner's bus. Disconnect,
-USB detach, stale USB sessions, and OTA write entry release ownership; release
-also leaves SWDIO high impedance and nRESET deasserted. Every new owner starts
-with an SWD Line Reset. The Debug Shell `swd-idcode` command acquires the
-internal DIAGNOSTIC owner for its complete transaction and reports `busy` when
-USB or NETWORK already owns SWD. NETWORK remains reserved for a later network
-transport and is not exposed by this stage.
+The mode state publishes orthogonal USB, Wi-Fi, provisioning, OTA, and live DAP
+owner fields. USB attach/detach and OTA lifecycle events are wired today;
+Wi-Fi and provisioning remain `stopped`/`idle` until their Phase 3 components
+publish events. USB DAP admission ignores Wi-Fi state. Authenticated NETWORK
+DAP admission requires USB to be absent and Wi-Fi to be online, while USB
+presence does not disable future network status, configuration, or OTA paths.
+USB attach conditionally revokes an idle NETWORK DAP owner. Ownership acquire
+and physical-operation begin revalidate versioned mode policy, so an attach
+racing either transaction rolls it back without a blocking cross-task lock;
+Wi-Fi-only changes are excluded from the USB policy version.
+OTA receiving and committed states reject new USB, NETWORK, and DIAGNOSTIC DAP
+owners. OTA entry also suspends the ownership arbiter until failure/abort or
+reboot after commit. Running-image confirmation still follows only the required
+local subsystem initialization and has no AP, DHCP, or internet dependency.
+
+`DAP_Connect` acquires its transport's DAP/SWD owner. USB may preempt an idle
+NETWORK owner after attach; it does not tear down an in-flight operation or a
+DIAGNOSTIC owner. Other owner conflicts fail without driving that owner's bus.
+Disconnect, USB detach, stale USB sessions, and OTA write entry release
+ownership; release also leaves SWDIO high impedance and nRESET deasserted.
+Every new owner starts with an SWD Line Reset. The Debug Shell `swd-idcode`
+command acquires the internal DIAGNOSTIC owner for its complete transaction and
+reports `busy` when USB or NETWORK already owns SWD. NETWORK remains reserved
+for a later network transport and is not exposed by this stage.
 
 ## Persistent configuration
 
@@ -322,7 +342,7 @@ The other hardware-independent tests use the same pattern:
 ```sh
 for suite in \
     bootloader_artifact ota_layout board config_store device_identity voltage_monitor swd_protocol \
-    dap_ownership dap_backend dap_protocol dap_service \
+    dap_ownership mode_state dap_backend dap_protocol dap_service \
     dap_ota dap_stream ota_manager app_main target_uart usb_descriptors project_version \
     debug_shell_config_status debug_shell_identity debug_shell_input \
     debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update wired_hil; do
@@ -336,9 +356,10 @@ These tests prove GPIO ordering, bootloader artifact-contract validation,
 versioned configuration validation, commit-before-publish behavior, serialized
 concurrent writes, fake-NVS restart recovery, selective configuration clearing,
 safe configuration-status command behavior, ADC scaling, SWD transaction
-framing, DAP owner transitions and physical-backend
-release calls, CMSIS-DAP and OTA command framing, OTA state transitions, stale
-USB-frame recovery, interleaved USB/NETWORK DAP routing, stale-session response
+framing, DAP owner transitions and physical-backend release calls, unified
+USB/Wi-Fi/provisioning/OTA mode transitions and DAP admission, CMSIS-DAP and OTA
+command framing, OTA state transitions, stale USB-frame recovery, interleaved
+USB/NETWORK DAP routing, stale-session response
 suppression, bounded queue failures, host update ordering, UART line-coding
 mapping, both compile-time USB descriptor variants, bounded shell input, the
 bounded SWD IDCODE command flow, debug TX completion state, host tools, and

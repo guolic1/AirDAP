@@ -43,6 +43,7 @@ typedef enum {
     AIRDAP_DAP_SERVICE_BUSY,
     AIRDAP_DAP_SERVICE_STALE_SESSION,
     AIRDAP_DAP_SERVICE_QUEUE_FULL,
+    AIRDAP_DAP_SERVICE_UNAUTHENTICATED,
 } airdap_dap_service_result_t;
 
 typedef struct {
@@ -60,8 +61,11 @@ esp_err_t airdap_dap_service_init(
     const char *serial_number,
     const char *firmware_version);
 
+/* NETWORK callers must set authenticated only after validating the outer
+ * transport session. USB callers may leave it false. */
 airdap_dap_service_result_t airdap_dap_service_session_open(
     airdap_dap_transport_t transport,
+    bool authenticated,
     airdap_dap_session_id_t *session);
 
 airdap_dap_service_result_t airdap_dap_service_session_close(

@@ -8,6 +8,7 @@
 #include "airdap_dap.h"
 #include "airdap_dap_ownership.h"
 #include "airdap_dap_protocol.h"
+#include "airdap_mode_state.h"
 #include "airdap_swd.h"
 #include "esp_err.h"
 
@@ -234,6 +235,9 @@ int main(void)
         .generation = 1U,
     };
 
+    airdap_mode_state_init();
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED) ==
+        AIRDAP_MODE_STATE_OK);
     assert(airdap_dap_init("ADP-TEST", "test-version") == ESP_OK);
     assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
 
@@ -293,28 +297,61 @@ int main(void)
     assert(response[1] == 0U);
     assert(target_reset_calls == target_reset_calls_before);
     assert(process(connect, sizeof(connect), response) == 2U);
-    assert(response[1] == AIRDAP_DAP_PORT_DISABLED);
-    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NETWORK);
-    assert(release_io_calls == 1U && release_reset_calls == 1U);
-    assert(ota_disconnect_calls == 3U);
+    assert(response[1] == AIRDAP_DAP_PORT_SWD);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_USB);
+    assert_line_reset(3U);
+    assert(release_io_calls == 2U && release_reset_calls == 2U);
+    assert(ota_disconnect_calls == 2U);
 
     assert(airdap_dap_ownership_release(&network_claim) ==
-        AIRDAP_DAP_OWNERSHIP_OK);
-    assert(release_io_calls == 2U && release_reset_calls == 2U);
+        AIRDAP_DAP_OWNERSHIP_NOT_OWNER);
+    assert(process(disconnect, sizeof(disconnect), response) == 2U);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
+    assert(release_io_calls == 3U && release_reset_calls == 3U);
+    assert(ota_disconnect_calls == 3U);
+
+    assert(process_owner(
+        AIRDAP_DAP_OWNER_NETWORK,
+        connect,
+        sizeof(connect),
+        response) == 2U);
+    assert(response[1] == AIRDAP_DAP_PORT_DISABLED);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_DETACHED) ==
+        AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_WIFI_CONNECTING) ==
+        AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_WIFI_ONLINE) ==
+        AIRDAP_MODE_STATE_OK);
+    assert(process_owner(
+        AIRDAP_DAP_OWNER_NETWORK,
+        connect,
+        sizeof(connect),
+        response) == 2U);
+    assert(response[1] == AIRDAP_DAP_PORT_SWD);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NETWORK);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED) ==
+        AIRDAP_MODE_STATE_OK);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
+    assert(process(connect, sizeof(connect), response) == 2U);
+    assert(response[1] == AIRDAP_DAP_PORT_SWD);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_USB);
+    assert_line_reset(5U);
+    assert(process(disconnect, sizeof(disconnect), response) == 2U);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
 
     ota_debug_allowed = false;
     assert(process(connect, sizeof(connect), response) == 2U);
     assert(response[1] == AIRDAP_DAP_PORT_DISABLED);
     assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
-    assert_line_reset(2U);
+    assert_line_reset(5U);
 
     ota_debug_allowed = true;
     line_reset_result = ESP_FAIL;
     assert(process(connect, sizeof(connect), response) == 2U);
     assert(response[1] == AIRDAP_DAP_PORT_DISABLED);
     assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
-    assert_line_reset(3U);
-    assert(release_io_calls == 3U && release_reset_calls == 3U);
+    assert_line_reset(6U);
+    assert(release_io_calls == 6U && release_reset_calls == 6U);
 
     puts("DAP backend ownership tests passed");
     return 0;

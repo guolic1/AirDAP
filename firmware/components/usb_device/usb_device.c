@@ -9,6 +9,7 @@
 #include "airdap_dap_service.h"
 #include "airdap_dap_stream.h"
 #include "airdap_device_identity.h"
+#include "airdap_mode_state.h"
 #if CONFIG_AIRDAP_DEBUG_SHELL
 #include "airdap_debug_shell.h"
 #endif
@@ -69,6 +70,7 @@ static void open_usb_session(void)
     const airdap_dap_service_result_t result =
         airdap_dap_service_session_open(
             AIRDAP_DAP_TRANSPORT_USB,
+            false,
             &session);
     if (result == AIRDAP_DAP_SERVICE_OK) {
         atomic_store(&usb_session, session);
@@ -107,10 +109,21 @@ static void usb_event_callback(tinyusb_event_t *event, void *argument)
 {
     (void) argument;
     if (event->id == TINYUSB_EVENT_ATTACHED) {
+        const airdap_mode_state_result_t result =
+            airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED);
+        if (result != AIRDAP_MODE_STATE_OK) {
+            ESP_LOGE(TAG, "Unable to publish USB attach: %u", (unsigned) result);
+            return;
+        }
         open_usb_session();
     } else if (event->id == TINYUSB_EVENT_DETACHED) {
         airdap_dap_stream_init(&dap_stream);
         close_usb_session();
+        const airdap_mode_state_result_t result =
+            airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_DETACHED);
+        if (result != AIRDAP_MODE_STATE_OK) {
+            ESP_LOGE(TAG, "Unable to publish USB detach: %u", (unsigned) result);
+        }
 #if CONFIG_AIRDAP_DEBUG_SHELL
         airdap_debug_shell_disconnected();
 #endif
@@ -124,6 +137,15 @@ static void enqueue_dap_request(
 {
     (void) context;
     if (atomic_load(&usb_session) == 0U && tud_vendor_mounted()) {
+        const airdap_mode_state_result_t mode_result =
+            airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED);
+        if (mode_result != AIRDAP_MODE_STATE_OK) {
+            ESP_LOGE(
+                TAG,
+                "Unable to publish mounted USB state: %u",
+                (unsigned) mode_result);
+            return;
+        }
         open_usb_session();
     }
     const airdap_dap_session_id_t session = atomic_load(&usb_session);

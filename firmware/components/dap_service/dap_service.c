@@ -247,6 +247,7 @@ esp_err_t airdap_dap_service_init(
 
 airdap_dap_service_result_t airdap_dap_service_session_open(
     airdap_dap_transport_t transport,
+    bool authenticated,
     airdap_dap_session_id_t *session)
 {
     if (!valid_transport(transport) || session == NULL) {
@@ -254,6 +255,9 @@ airdap_dap_service_result_t airdap_dap_service_session_open(
     }
     if (!atomic_load(&initialized)) {
         return AIRDAP_DAP_SERVICE_INVALID_STATE;
+    }
+    if (transport == AIRDAP_DAP_TRANSPORT_NETWORK && !authenticated) {
+        return AIRDAP_DAP_SERVICE_UNAUTHENTICATED;
     }
 
     if (!session_lock(transport)) {
