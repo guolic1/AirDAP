@@ -184,6 +184,64 @@ static void test_stale_claim_cannot_cross_same_owner_reacquire(void)
         AIRDAP_DAP_OWNERSHIP_OK);
 }
 
+static void test_suspend_blocks_new_owners_until_resume(void)
+{
+    airdap_dap_ownership_claim_t usb_claim = {0};
+    airdap_dap_ownership_claim_t network_claim = {0};
+    airdap_dap_ownership_operation_t operation = {0};
+
+    assert(airdap_dap_ownership_acquire(
+        AIRDAP_DAP_OWNER_USB,
+        &usb_claim) == AIRDAP_DAP_OWNERSHIP_OK);
+    assert(airdap_dap_ownership_operation_begin(&usb_claim, &operation) ==
+        AIRDAP_DAP_OWNERSHIP_OK);
+    assert(airdap_dap_ownership_suspend() == AIRDAP_DAP_OWNERSHIP_BUSY);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_USB);
+    airdap_dap_ownership_operation_end(&operation);
+
+    assert(airdap_dap_ownership_suspend() == AIRDAP_DAP_OWNERSHIP_OK);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
+    assert(airdap_dap_ownership_acquire(
+        AIRDAP_DAP_OWNER_NETWORK,
+        &network_claim) == AIRDAP_DAP_OWNERSHIP_BUSY);
+    assert(airdap_dap_ownership_resume() == AIRDAP_DAP_OWNERSHIP_OK);
+
+    assert(airdap_dap_ownership_acquire(
+        AIRDAP_DAP_OWNER_NETWORK,
+        &network_claim) == AIRDAP_DAP_OWNERSHIP_OK);
+    assert(airdap_dap_ownership_release(&network_claim) ==
+        AIRDAP_DAP_OWNERSHIP_OK);
+    assert(airdap_dap_ownership_resume() == AIRDAP_DAP_OWNERSHIP_OK);
+}
+
+static void test_conditional_revoke_never_releases_a_different_owner(void)
+{
+    airdap_dap_ownership_claim_t claim = {0};
+    airdap_dap_ownership_operation_t operation = {0};
+    const size_t events_before = fake.event_count;
+
+    assert(airdap_dap_ownership_acquire(
+        AIRDAP_DAP_OWNER_NETWORK,
+        &claim) == AIRDAP_DAP_OWNERSHIP_OK);
+    assert(airdap_dap_ownership_revoke_owner(AIRDAP_DAP_OWNER_USB) ==
+        AIRDAP_DAP_OWNERSHIP_NOT_OWNER);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NETWORK);
+    assert(fake.event_count == events_before + 1U);
+
+    assert(airdap_dap_ownership_operation_begin(&claim, &operation) ==
+        AIRDAP_DAP_OWNERSHIP_OK);
+    assert(airdap_dap_ownership_revoke_owner(AIRDAP_DAP_OWNER_NETWORK) ==
+        AIRDAP_DAP_OWNERSHIP_BUSY);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NETWORK);
+    airdap_dap_ownership_operation_end(&operation);
+
+    assert(airdap_dap_ownership_revoke_owner(AIRDAP_DAP_OWNER_NETWORK) ==
+        AIRDAP_DAP_OWNERSHIP_OK);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
+    assert(fake.event_count == events_before + 2U);
+    assert(fake.events[events_before + 1U] == EVENT_RELEASE_PINS);
+}
+
 static void test_backend_failures_leave_the_bus_unowned(void)
 {
     const size_t events_before = fake.event_count;
@@ -233,6 +291,8 @@ int main(void)
     test_disconnect_timeout_ota_and_diagnostic_contention();
     test_active_operation_blocks_release_and_revoke();
     test_stale_claim_cannot_cross_same_owner_reacquire();
+    test_suspend_blocks_new_owners_until_resume();
+    test_conditional_revoke_never_releases_a_different_owner();
     test_backend_failures_leave_the_bus_unowned();
     puts("DAP ownership tests passed");
     return 0;

@@ -7,6 +7,7 @@
 enum {
     OWNERSHIP_STATE_TRANSITION = AIRDAP_DAP_OWNER_DIAGNOSTIC + 1,
     OWNERSHIP_STATE_OFFLINE,
+    OWNERSHIP_STATE_SUSPENDED,
     OWNERSHIP_STATE_UNINITIALIZED,
     OWNERSHIP_CONTROL_STATE_MASK = 0x7U,
     OWNERSHIP_CONTROL_ACTIVE = 1U << 3,
@@ -60,6 +61,9 @@ static airdap_dap_ownership_result_t claim_failure_result(
     if (state == OWNERSHIP_STATE_UNINITIALIZED) {
         return AIRDAP_DAP_OWNERSHIP_INVALID_STATE;
     }
+    if (state == OWNERSHIP_STATE_SUSPENDED) {
+        return AIRDAP_DAP_OWNERSHIP_BUSY;
+    }
     if (state == OWNERSHIP_STATE_TRANSITION ||
         (state == (unsigned int) claim->owner &&
          control_generation(control) == claim->generation &&
@@ -69,7 +73,9 @@ static airdap_dap_ownership_result_t claim_failure_result(
     return AIRDAP_DAP_OWNERSHIP_NOT_OWNER;
 }
 
-static airdap_dap_ownership_result_t release_pins(unsigned int generation)
+static airdap_dap_ownership_result_t release_pins(
+    unsigned int generation,
+    unsigned int released_state)
 {
     const bool released = ownership_backend.release_pins(
         ownership_backend.context);
@@ -77,7 +83,7 @@ static airdap_dap_ownership_result_t release_pins(unsigned int generation)
         &ownership_control,
         make_control(
             generation,
-            released ? AIRDAP_DAP_OWNER_NONE : OWNERSHIP_STATE_OFFLINE));
+            released ? released_state : OWNERSHIP_STATE_OFFLINE));
     return released
         ? AIRDAP_DAP_OWNERSHIP_OK
         : AIRDAP_DAP_OWNERSHIP_OFFLINE;
@@ -132,6 +138,9 @@ airdap_dap_ownership_result_t airdap_dap_ownership_acquire(
     if (state == OWNERSHIP_STATE_UNINITIALIZED) {
         return AIRDAP_DAP_OWNERSHIP_INVALID_STATE;
     }
+    if (state == OWNERSHIP_STATE_SUSPENDED) {
+        return AIRDAP_DAP_OWNERSHIP_BUSY;
+    }
     if (state != AIRDAP_DAP_OWNER_NONE) {
         return AIRDAP_DAP_OWNERSHIP_BUSY;
     }
@@ -153,6 +162,9 @@ airdap_dap_ownership_result_t airdap_dap_ownership_acquire(
         if (observed_state == OWNERSHIP_STATE_UNINITIALIZED) {
             return AIRDAP_DAP_OWNERSHIP_INVALID_STATE;
         }
+        if (observed_state == OWNERSHIP_STATE_SUSPENDED) {
+            return AIRDAP_DAP_OWNERSHIP_BUSY;
+        }
         return AIRDAP_DAP_OWNERSHIP_BUSY;
     }
 
@@ -164,7 +176,7 @@ airdap_dap_ownership_result_t airdap_dap_ownership_acquire(
     }
 
     if (!ownership_backend.line_reset(ownership_backend.context)) {
-        (void) release_pins(generation);
+        (void) release_pins(generation, AIRDAP_DAP_OWNER_NONE);
         return AIRDAP_DAP_OWNERSHIP_OFFLINE;
     }
 
@@ -194,7 +206,7 @@ airdap_dap_ownership_result_t airdap_dap_ownership_release(
         return claim_failure_result(expected, claim);
     }
 
-    return release_pins(claim->generation);
+    return release_pins(claim->generation, AIRDAP_DAP_OWNER_NONE);
 }
 
 airdap_dap_ownership_result_t airdap_dap_ownership_operation_begin(
@@ -277,5 +289,123 @@ airdap_dap_ownership_result_t airdap_dap_ownership_revoke(void)
         }
         return AIRDAP_DAP_OWNERSHIP_BUSY;
     }
-    return release_pins(generation);
+    return release_pins(generation, AIRDAP_DAP_OWNER_NONE);
+}
+
+airdap_dap_ownership_result_t airdap_dap_ownership_revoke_owner(
+    airdap_dap_owner_t owner)
+{
+    if (!is_owner((unsigned int) owner)) {
+        return AIRDAP_DAP_OWNERSHIP_INVALID_ARGUMENT;
+    }
+
+    unsigned int current = atomic_load(&ownership_control);
+    const unsigned int state = control_state(current);
+    if (state == OWNERSHIP_STATE_OFFLINE) {
+        return AIRDAP_DAP_OWNERSHIP_OFFLINE;
+    }
+    if (state == OWNERSHIP_STATE_UNINITIALIZED) {
+        return AIRDAP_DAP_OWNERSHIP_INVALID_STATE;
+    }
+    if (state == OWNERSHIP_STATE_TRANSITION ||
+        state == OWNERSHIP_STATE_SUSPENDED) {
+        return AIRDAP_DAP_OWNERSHIP_BUSY;
+    }
+    if (state != (unsigned int) owner) {
+        return AIRDAP_DAP_OWNERSHIP_NOT_OWNER;
+    }
+    if ((current & OWNERSHIP_CONTROL_ACTIVE) != 0U) {
+        return AIRDAP_DAP_OWNERSHIP_BUSY;
+    }
+
+    const unsigned int generation = control_generation(current);
+    if (!atomic_compare_exchange_strong(
+        &ownership_control,
+        &current,
+        make_control(generation, OWNERSHIP_STATE_TRANSITION))) {
+        const unsigned int observed_state = control_state(current);
+        if (observed_state == OWNERSHIP_STATE_OFFLINE) {
+            return AIRDAP_DAP_OWNERSHIP_OFFLINE;
+        }
+        if (observed_state == OWNERSHIP_STATE_UNINITIALIZED) {
+            return AIRDAP_DAP_OWNERSHIP_INVALID_STATE;
+        }
+        if (observed_state == (unsigned int) owner ||
+            observed_state == OWNERSHIP_STATE_TRANSITION ||
+            observed_state == OWNERSHIP_STATE_SUSPENDED) {
+            return AIRDAP_DAP_OWNERSHIP_BUSY;
+        }
+        return AIRDAP_DAP_OWNERSHIP_NOT_OWNER;
+    }
+    return release_pins(generation, AIRDAP_DAP_OWNER_NONE);
+}
+
+airdap_dap_ownership_result_t airdap_dap_ownership_suspend(void)
+{
+    unsigned int current = atomic_load(&ownership_control);
+    for (;;) {
+        const unsigned int state = control_state(current);
+        if (state == OWNERSHIP_STATE_SUSPENDED) {
+            return AIRDAP_DAP_OWNERSHIP_OK;
+        }
+        if (state == OWNERSHIP_STATE_OFFLINE) {
+            return AIRDAP_DAP_OWNERSHIP_OFFLINE;
+        }
+        if (state == OWNERSHIP_STATE_UNINITIALIZED) {
+            return AIRDAP_DAP_OWNERSHIP_INVALID_STATE;
+        }
+        if (state == OWNERSHIP_STATE_TRANSITION ||
+            (current & OWNERSHIP_CONTROL_ACTIVE) != 0U) {
+            return AIRDAP_DAP_OWNERSHIP_BUSY;
+        }
+
+        const unsigned int generation = control_generation(current);
+        if (state == AIRDAP_DAP_OWNER_NONE) {
+            if (atomic_compare_exchange_weak(
+                &ownership_control,
+                &current,
+                make_control(generation, OWNERSHIP_STATE_SUSPENDED))) {
+                return AIRDAP_DAP_OWNERSHIP_OK;
+            }
+            continue;
+        }
+        if (!is_owner(state)) {
+            return AIRDAP_DAP_OWNERSHIP_BUSY;
+        }
+        if (!atomic_compare_exchange_weak(
+            &ownership_control,
+            &current,
+            make_control(generation, OWNERSHIP_STATE_TRANSITION))) {
+            continue;
+        }
+        return release_pins(generation, OWNERSHIP_STATE_SUSPENDED);
+    }
+}
+
+airdap_dap_ownership_result_t airdap_dap_ownership_resume(void)
+{
+    unsigned int current = atomic_load(&ownership_control);
+    for (;;) {
+        const unsigned int state = control_state(current);
+        if (state == AIRDAP_DAP_OWNER_NONE) {
+            return AIRDAP_DAP_OWNERSHIP_OK;
+        }
+        if (state == OWNERSHIP_STATE_OFFLINE) {
+            return AIRDAP_DAP_OWNERSHIP_OFFLINE;
+        }
+        if (state == OWNERSHIP_STATE_UNINITIALIZED) {
+            return AIRDAP_DAP_OWNERSHIP_INVALID_STATE;
+        }
+        if (state != OWNERSHIP_STATE_SUSPENDED) {
+            return AIRDAP_DAP_OWNERSHIP_BUSY;
+        }
+
+        const unsigned int generation = control_generation(current);
+        if (atomic_compare_exchange_weak(
+            &ownership_control,
+            &current,
+            make_control(generation, AIRDAP_DAP_OWNER_NONE))) {
+            return AIRDAP_DAP_OWNERSHIP_OK;
+        }
+    }
 }
