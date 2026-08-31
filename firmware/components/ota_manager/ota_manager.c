@@ -5,6 +5,7 @@
 
 #include "airdap_dap_ownership.h"
 #include "airdap_device_identity.h"
+#include "airdap_mode_state.h"
 #include "airdap_ota.h"
 #include "esp_err.h"
 #include "esp_ota_ops.h"
@@ -33,17 +34,44 @@ static void reset_session(void)
     session.state = OTA_SESSION_IDLE;
 }
 
-void airdap_ota_initialize(void)
+static bool restore_idle_mode(airdap_mode_event_t event)
 {
+    const airdap_mode_state_result_t mode_result =
+        airdap_mode_state_transition(event);
+    if (mode_result != AIRDAP_MODE_STATE_OK) {
+        return false;
+    }
+    const airdap_dap_ownership_result_t ownership_result =
+        airdap_dap_ownership_resume();
+    return ownership_result == AIRDAP_DAP_OWNERSHIP_OK;
+}
+
+esp_err_t airdap_ota_initialize(void)
+{
+    esp_err_t abort_error = ESP_OK;
     if (session.state == OTA_SESSION_RECEIVING) {
-        (void) esp_ota_abort(session.handle);
+        abort_error = esp_ota_abort(session.handle);
     }
     reset_session();
+    if (airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_RESET) !=
+        AIRDAP_MODE_STATE_OK) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const airdap_dap_ownership_result_t ownership_result =
+        airdap_dap_ownership_resume();
+    if (ownership_result != AIRDAP_DAP_OWNERSHIP_OK &&
+        ownership_result != AIRDAP_DAP_OWNERSHIP_INVALID_STATE) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return abort_error;
 }
 
 bool airdap_ota_debug_allowed(void)
 {
-    return session.state == OTA_SESSION_IDLE;
+    airdap_mode_snapshot_t mode;
+    return session.state == OTA_SESSION_IDLE &&
+        airdap_mode_state_get(&mode) == AIRDAP_MODE_STATE_OK &&
+        mode.ota == AIRDAP_OTA_IDLE;
 }
 
 airdap_ota_status_t airdap_ota_get_info(airdap_ota_info_t *info)
@@ -86,12 +114,24 @@ airdap_ota_status_t airdap_ota_begin(uint32_t image_size)
         return AIRDAP_OTA_STATUS_INVALID_SIZE;
     }
 
+    if (airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_STARTED) !=
+        AIRDAP_MODE_STATE_OK) {
+        return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
+    }
+
     const airdap_dap_ownership_result_t ownership_result =
-        airdap_dap_ownership_revoke();
+        airdap_dap_ownership_suspend();
     if (ownership_result == AIRDAP_DAP_OWNERSHIP_BUSY) {
-        return AIRDAP_OTA_STATUS_INVALID_STATE;
+        return airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_FAILED) ==
+            AIRDAP_MODE_STATE_OK
+            ? AIRDAP_OTA_STATUS_INVALID_STATE
+            : AIRDAP_OTA_STATUS_INTERNAL_ERROR;
     }
     if (ownership_result != AIRDAP_DAP_OWNERSHIP_OK) {
+        if (airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_FAILED) !=
+            AIRDAP_MODE_STATE_OK) {
+            return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
+        }
         return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
     }
 
@@ -100,6 +140,7 @@ airdap_ota_status_t airdap_ota_begin(uint32_t image_size)
         if (handle != 0U) {
             (void) esp_ota_abort(handle);
         }
+        (void) restore_idle_mode(AIRDAP_MODE_EVENT_OTA_FAILED);
         return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
     }
 
@@ -131,9 +172,13 @@ airdap_ota_status_t airdap_ota_write(
     }
 
     if (esp_ota_write(session.handle, data, size) != ESP_OK) {
-        (void) esp_ota_abort(session.handle);
+        if (esp_ota_abort(session.handle) != ESP_OK) {
+            return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
+        }
         reset_session();
-        return AIRDAP_OTA_STATUS_WRITE_FAILED;
+        return restore_idle_mode(AIRDAP_MODE_EVENT_OTA_FAILED)
+            ? AIRDAP_OTA_STATUS_WRITE_FAILED
+            : AIRDAP_OTA_STATUS_INTERNAL_ERROR;
     }
 
     session.written_size += (uint32_t) size;
@@ -154,11 +199,15 @@ airdap_ota_status_t airdap_ota_commit(void)
     const esp_ota_handle_t handle = session.handle;
     if (esp_ota_end(handle) != ESP_OK) {
         reset_session();
-        return AIRDAP_OTA_STATUS_VALIDATION_FAILED;
+        return restore_idle_mode(AIRDAP_MODE_EVENT_OTA_FAILED)
+            ? AIRDAP_OTA_STATUS_VALIDATION_FAILED
+            : AIRDAP_OTA_STATUS_INTERNAL_ERROR;
     }
     if (esp_ota_set_boot_partition(partition) != ESP_OK) {
         reset_session();
-        return AIRDAP_OTA_STATUS_ACTIVATION_FAILED;
+        return restore_idle_mode(AIRDAP_MODE_EVENT_OTA_FAILED)
+            ? AIRDAP_OTA_STATUS_ACTIVATION_FAILED
+            : AIRDAP_OTA_STATUS_INTERNAL_ERROR;
     }
 
     session.partition = partition;
@@ -166,6 +215,10 @@ airdap_ota_status_t airdap_ota_commit(void)
     session.expected_size = 0U;
     session.written_size = 0U;
     session.state = OTA_SESSION_COMMITTED;
+    if (airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_COMMITTED) !=
+        AIRDAP_MODE_STATE_OK) {
+        return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
+    }
     return AIRDAP_OTA_STATUS_OK;
 }
 
@@ -179,8 +232,11 @@ airdap_ota_status_t airdap_ota_abort(void)
     }
 
     const esp_err_t error = esp_ota_abort(session.handle);
+    if (error != ESP_OK) {
+        return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
+    }
     reset_session();
-    return error == ESP_OK
+    return restore_idle_mode(AIRDAP_MODE_EVENT_OTA_ABORTED)
         ? AIRDAP_OTA_STATUS_OK
         : AIRDAP_OTA_STATUS_INTERNAL_ERROR;
 }

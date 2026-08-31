@@ -9,6 +9,7 @@
 #include "esp_err.h"
 
 typedef enum {
+    CALL_MODE_STATE_INITIALIZE,
     CALL_OTA_INITIALIZE,
     CALL_BOARD_INITIALIZE,
     CALL_DEVICE_IDENTITY_INITIALIZE,
@@ -20,7 +21,7 @@ typedef enum {
     CALL_OTA_CONFIRM,
 } call_t;
 
-static call_t calls[9];
+static call_t calls[10];
 static size_t call_count;
 
 static void record(call_t call)
@@ -29,9 +30,15 @@ static void record(call_t call)
     calls[call_count++] = call;
 }
 
-void airdap_ota_initialize(void)
+void airdap_mode_state_init(void)
+{
+    record(CALL_MODE_STATE_INITIALIZE);
+}
+
+esp_err_t airdap_ota_initialize(void)
 {
     record(CALL_OTA_INITIALIZE);
+    return ESP_OK;
 }
 
 esp_err_t airdap_board_init_safe(void)
@@ -91,6 +98,7 @@ void app_main(void);
 int main(void)
 {
     static const call_t expected[] = {
+        CALL_MODE_STATE_INITIALIZE,
         CALL_OTA_INITIALIZE,
         CALL_BOARD_INITIALIZE,
         CALL_DEVICE_IDENTITY_INITIALIZE,
