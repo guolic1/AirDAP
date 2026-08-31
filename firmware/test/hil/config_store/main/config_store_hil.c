@@ -12,6 +12,12 @@
 
 static const char tag[] = "config_store_hil";
 static const char fixture_name[] = "AirDAP HIL fixture";
+static const char stage_write_message[] =
+    "STAGE_WRITE_OK: remove board power now";
+static const char stage_clear_message[] =
+    "STAGE_CLEAR_OK: remove board power now";
+static const char pass_message[] =
+    "PASS: restore and selective clear survived hard power cycles";
 static const uint8_t wifi_fixture[] = {0x10, 0x20, 0x30};
 static const uint8_t pairing_fixture[] = {0x40, 0x50};
 static const uint8_t auth_fixture[] = {0x60, 0x70, 0x80, 0x90};
@@ -39,10 +45,11 @@ static bool blob_matches(
         memcmp(output, expected, expected_size) == 0;
 }
 
-static void wait_for_power_cycle(void)
+static void repeat_status_until_power_cycle(const char *message)
 {
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(1000));
+        ESP_LOGI(tag, "%s", message);
     }
 }
 
@@ -70,8 +77,8 @@ void app_main(void)
             auth_fixture,
             sizeof(auth_fixture)));
         ESP_ERROR_CHECK(airdap_config_store_set_provisioned(true));
-        ESP_LOGW(tag, "STAGE_WRITE_OK: remove board power now");
-        wait_for_power_cycle();
+        ESP_LOGW(tag, "%s", stage_write_message);
+        repeat_status_until_power_cycle(stage_write_message);
     }
 
     require(strcmp(friendly_name, fixture_name) == 0,
@@ -100,8 +107,8 @@ void app_main(void)
         ESP_ERROR_CHECK(airdap_config_store_clear(
             AIRDAP_CONFIG_CLEAR_WIFI_CREDENTIALS |
             AIRDAP_CONFIG_CLEAR_PAIRING_RECORD));
-        ESP_LOGW(tag, "STAGE_CLEAR_OK: remove board power now");
-        wait_for_power_cycle();
+        ESP_LOGW(tag, "%s", stage_clear_message);
+        repeat_status_until_power_cycle(stage_clear_message);
     }
 
     size_t cleared_size = 0U;
@@ -122,8 +129,6 @@ void app_main(void)
         "auth fixture was removed by selective clear");
     ESP_ERROR_CHECK(airdap_config_store_get_status(&status));
     require(!status.provisioned, "selective clear did not reset provisioning");
-    ESP_LOGI(
-        tag,
-        "PASS: restore and selective clear survived hard power cycles");
-    wait_for_power_cycle();
+    ESP_LOGI(tag, "%s", pass_message);
+    repeat_status_until_power_cycle(pass_message);
 }
