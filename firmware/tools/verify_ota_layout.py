@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify AirDAP's persistent 16 MiB A/B application layout contract."""
+"""Verify AirDAP's persistent 8 MiB A/B application layout contract."""
 
 from __future__ import annotations
 
@@ -12,13 +12,13 @@ from pathlib import Path
 from typing import NamedTuple
 
 
-FLASH_SIZE = 16 * 1024 * 1024
+FLASH_SIZE = 8 * 1024 * 1024
 REQUIRED_PARTITIONS = {
     "nvs": ("data", "nvs", 0x9000, 0x6000),
     "otadata": ("data", "ota", 0xF000, 0x2000),
     "phy_init": ("data", "phy", 0x11000, 0x1000),
-    "ota_0": ("app", "ota_0", 0x20000, 0x400000),
-    "ota_1": ("app", "ota_1", 0x420000, 0x400000),
+    "ota_0": ("app", "ota_0", 0x20000, 0x3F0000),
+    "ota_1": ("app", "ota_1", 0x410000, 0x3F0000),
 }
 
 _UNSET_CONFIG = re.compile(r"^# (CONFIG_[A-Z0-9_]+) is not set$")
@@ -113,14 +113,14 @@ def _require_config(
 def validate_config(config: Mapping[str, str | None]) -> None:
     _require_config(
         config,
-        "CONFIG_ESPTOOLPY_FLASHSIZE_16MB",
+        "CONFIG_ESPTOOLPY_FLASHSIZE_8MB",
         "y",
-        "configured flash size selection for the 16 MiB module",
+        "configured flash size selection for the 8 MiB module",
     )
     _require_config(
         config,
         "CONFIG_ESPTOOLPY_FLASHSIZE",
-        '"16MB"',
+        '"8MB"',
         "configured flash size string",
     )
     _require_config(
@@ -183,7 +183,7 @@ def validate_layout(partitions: Sequence[Partition]) -> None:
         end = partition.offset + partition.size
         if end > FLASH_SIZE:
             raise VerificationError(
-                f"partition {partition.name} ends beyond 16 MiB flash"
+                f"partition {partition.name} ends beyond 8 MiB flash"
             )
         if previous is not None and partition.offset < previous.offset + previous.size:
             raise VerificationError(
@@ -217,7 +217,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("AirDAP OTA layout verification passed")
     print(f"  partition table: {args.partition_table.resolve()}")
     print(f"  sdkconfig: {args.sdkconfig.resolve()}")
-    print("  flash: 16 MiB; ota_0: 4 MiB; ota_1: 4 MiB; rollback: enabled")
+    print("  flash: 8 MiB; ota_0: 4032 KiB; ota_1: 4032 KiB; rollback: enabled")
     return 0
 
 

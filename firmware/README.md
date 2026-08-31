@@ -59,7 +59,7 @@ ELF, that `call_start_cpu0()` calls `bootloader_before_init()` before
 the 9-second RTC watchdog, and full application image validation remain
 enabled.
 
-The build also verifies the fixed 16 MiB OTA layout and rollback configuration.
+The build also verifies the fixed 8 MiB OTA layout and rollback configuration.
 That gate can be rerun directly:
 
 ```sh
@@ -94,8 +94,8 @@ and current device ID are both `ADP-` followed by the full 12 uppercase MAC
 digits. Its 128-bit UUID is the first 16 bytes of
 `SHA-256("AirDAP" || eFuse base MAC)`. VID `0x303A` and PID `0x4021` are
 development identifiers; product firmware must use identifiers the project is
-authorized to ship. The checked-in layout is for the confirmed 16 MiB module
-and provides two 4 MiB OTA application slots. Secure Boot, Flash Encryption,
+authorized to ship. The checked-in layout is for the confirmed 8 MiB module
+and provides two 4032 KiB OTA application slots. Secure Boot, Flash Encryption,
 authenticated updates, and networking remain deferred.
 
 The firmware version is the single tag pointing directly at the built commit.
@@ -159,7 +159,7 @@ Flash Encryption, and provisioning process are approved and verified.
 ## Development USB OTA
 
 The first rollout from the former single-`factory` layout requires one complete
-serial flash. This installs the 16 MiB flash header, bootloader rollback
+serial flash. This installs the 8 MiB flash header, bootloader rollback
 support, partition table, initial OTA metadata, and the application in
 `ota_0`:
 
