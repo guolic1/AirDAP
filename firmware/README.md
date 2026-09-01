@@ -87,6 +87,8 @@ not part of this repository. The application currently provides:
 - DAP/SWD ownership arbitration for USB, network, and internal diagnostics;
 - a unified runtime mode state for USB presence, Wi-Fi, provisioning, OTA,
   and the current DAP owner;
+- a Wi-Fi station manager with DHCP-gated online state and bounded reconnect
+  backoff;
 - a bounded transport-independent DAP service with session-safe response
   routing for USB and future network sessions;
 - target reset, power/status GPIO, VTref, and USB VBUS monitoring.
@@ -98,7 +100,8 @@ digits. Its 128-bit UUID is the first 16 bytes of
 development identifiers; product firmware must use identifiers the project is
 authorized to ship. The checked-in layout is for the confirmed 8 MiB module
 and provides two 4032 KiB OTA application slots. Secure Boot, Flash Encryption,
-authenticated updates, and networking remain deferred.
+authenticated updates, authenticated network services, and BLE provisioning
+remain deferred.
 
 The firmware version is the single tag pointing directly at the built commit.
 When that commit has no tag, the version is its seven-character Git hash. A
@@ -158,9 +161,9 @@ transport identifier remains internal at this stage and no network listener is
 exposed.
 
 The mode state publishes orthogonal USB, Wi-Fi, provisioning, OTA, and live DAP
-owner fields. USB attach/detach and OTA lifecycle events are wired today;
-Wi-Fi and provisioning remain `stopped`/`idle` until their Phase 3 components
-publish events. USB DAP admission ignores Wi-Fi state. Authenticated NETWORK
+owner fields. USB attach/detach, Wi-Fi station, and OTA lifecycle events are
+wired today; provisioning remains `idle` until its later Phase 3 component
+publishes events. USB DAP admission ignores Wi-Fi state. Authenticated NETWORK
 DAP admission requires USB to be absent and Wi-Fi to be online, while USB
 presence does not disable future network status, configuration, or OTA paths.
 USB attach conditionally revokes an idle NETWORK DAP owner. Ownership acquire
@@ -171,6 +174,50 @@ OTA receiving and committed states reject new USB, NETWORK, and DIAGNOSTIC DAP
 owners. OTA entry also suspends the ownership arbiter until failure/abort or
 reboot after commit. Running-image confirmation still follows only the required
 local subsystem initialization and has no AP, DHCP, or internet dependency.
+
+## Wi-Fi station manager
+
+`config_store` remains the sole owner of global NVS initialization. The Wi-Fi
+manager starts only after USB initialization and OTA running-image confirmation;
+it never calls `nvs_flash_init()` or `nvs_flash_erase()`. Station credentials use
+a versioned, length-delimited encoding in the existing Wi-Fi credential slot,
+and the ESP-IDF Wi-Fi driver's credential storage is set to RAM so this slot is
+the canonical persisted copy.
+
+A station link is still reported as `connecting`. Only
+`IP_EVENT_STA_GOT_IP`, after DHCP succeeds, publishes `online`. Authentication
+and handshake failures are reported separately from AP loss and other temporary
+disconnects. Both use application-managed exponential retry delays starting at
+1 second and capped at 60 seconds. A committed credential update cancels any
+pending retry, resets the delay, disconnects the previous attempt if needed,
+and applies the latest committed credentials immediately. SSIDs and passwords
+are never logged.
+
+The project pins `espressif/network_provisioning` 1.2.4 for the later BLE
+provisioning slice and explicitly enables protocomm Security 2. BLE transport,
+PoP injection, provisioning-window behavior, and custom pairing endpoints are
+not part of the station-manager slice.
+
+For development-board Wi-Fi validation, use a dedicated test AP and never a
+production credential. The HIL console accepts credentials at runtime so they
+do not enter Git, build metadata, or command-line history:
+
+```sh
+cd firmware/test/hil/wifi_manager
+idf.py set-target esp32s3
+idf.py -p <airdap-programming-port> flash monitor
+```
+
+Run `set`, provide a deliberately wrong password, and confirm an
+`authentication failed` log followed by increasing retry intervals. Run `set`
+again with the correct password; `status` must become `online` without waiting
+for the old retry. Power off the test AP and confirm a `temporarily disconnected`
+log and `disconnected` status, then restore it and confirm automatic recovery to
+`online`. Run `clear` afterward. This workflow flashes a HIL application and
+therefore requires explicit authorization for the selected board. It replaces
+the standard AirDAP partition table/application until the normal firmware is
+flashed again. A host test or firmware build does not replace these RF,
+association, and DHCP observations.
 
 `DAP_Connect` acquires its transport's DAP/SWD owner. USB may preempt an idle
 NETWORK owner after attach; it does not tear down an in-flight operation or a
@@ -373,7 +420,7 @@ The other hardware-independent tests use the same pattern:
 for suite in \
     bootloader_artifact ota_layout board config_store device_identity voltage_monitor swd_protocol \
     dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame \
-    dap_ota dap_stream ota_manager app_main target_uart usb_descriptors project_version \
+    dap_ota dap_stream ota_manager app_main wifi_manager target_uart usb_descriptors project_version \
     debug_shell_config_status debug_shell_identity debug_shell_input \
     debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
@@ -386,7 +433,9 @@ These tests prove GPIO ordering, bootloader artifact-contract validation,
 versioned configuration validation, commit-before-publish behavior, serialized
 concurrent writes, fake-NVS restart recovery, selective configuration clearing,
 safe configuration-status command behavior, ADC scaling, SWD transaction
-framing, DAP owner transitions and physical-backend release calls, unified
+framing, Wi-Fi credential encoding, wrong-password classification, DHCP-gated
+online state, bounded reconnect backoff, configuration-change recovery, DAP
+owner transitions and physical-backend release calls, unified
 USB/Wi-Fi/provisioning/OTA mode transitions and DAP admission, CMSIS-DAP and OTA
 command framing, OTA state transitions, stale USB-frame recovery, interleaved
 USB/NETWORK DAP routing, AirDAP frame golden vectors and sequence rules,
