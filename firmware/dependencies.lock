@@ -1,4 +1,14 @@
 dependencies:
+  espressif/cjson:
+    component_hash: e788323270d90738662d66fffa910bfe1fba019bba087f01557e70c40485b469
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 1.7.19~2
   espressif/esp_tinyusb:
     component_hash: 9a73a76a6bc17907f6e523342ff6b1e440023e8aac2c11f4691212106ec24e66
     dependencies:
@@ -19,6 +29,22 @@ dependencies:
     - esp32h4
     - esp32s31
     version: 2.2.1
+  espressif/network_provisioning:
+    component_hash: 72d27784e3daf807418a34fb00be136ec50c6db49d989ce981d22e031fc0e7f8
+    dependencies:
+    - name: espressif/cjson
+      registry_url: https://components.espressif.com
+      require: private
+      rules:
+      - if: idf_version >= 6.0
+      version: ^1.7.19
+    - name: idf
+      require: private
+      version: '>=5.1'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.2.4
   espressif/tinyusb:
     component_hash: a40b7f67df6ac254a4afd96c6401cc56f2059ae747d6d7e66b568bca53ad0edc
     dependencies:
@@ -41,7 +67,8 @@ dependencies:
     version: 6.1.0
 direct_dependencies:
 - espressif/esp_tinyusb
+- espressif/network_provisioning
 - espressif/tinyusb
-manifest_hash: 93986603c929d5981403db0f1dd4102d25779283e3e5e235abcd332b2f9c7080
+manifest_hash: b81d23eef666beb843a9cd0cd6c290f443419b26037c6855c48497d683eb285e
 target: esp32s3
 version: 3.0.0
