@@ -4,6 +4,7 @@
 
 #include "airdap_dap_ownership.h"
 #include "airdap_debug_shell_swd_probe.h"
+#include "airdap_mode_state.h"
 
 static bool is_space(char character)
 {
@@ -115,24 +116,34 @@ airdap_debug_shell_swd_probe_status_t airdap_debug_shell_swd_probe(
     }
 
     airdap_dap_ownership_claim_t claim = {0};
-    const airdap_dap_ownership_result_t acquire_result =
-        airdap_dap_ownership_acquire(AIRDAP_DAP_OWNER_DIAGNOSTIC, &claim);
-    if (acquire_result == AIRDAP_DAP_OWNERSHIP_BUSY ||
-        acquire_result == AIRDAP_DAP_OWNERSHIP_ALREADY_OWNER) {
+    const airdap_mode_dap_result_t acquire_result =
+        airdap_mode_state_dap_acquire(
+            AIRDAP_DAP_OWNER_DIAGNOSTIC,
+            true,
+            &claim);
+    if (acquire_result == AIRDAP_MODE_DAP_BUSY) {
         return AIRDAP_DEBUG_SHELL_SWD_PROBE_BUSY;
     }
-    if (acquire_result != AIRDAP_DAP_OWNERSHIP_OK) {
-        result->operation_error = (int) acquire_result;
+    if (acquire_result != AIRDAP_MODE_DAP_ALLOWED) {
+        result->operation_error = (int) AIRDAP_DAP_OWNERSHIP_OFFLINE;
         return AIRDAP_DEBUG_SHELL_SWD_PROBE_OWNERSHIP_FAILED;
     }
 
     airdap_dap_ownership_operation_t operation = {0};
-    const airdap_dap_ownership_result_t begin_result =
-        airdap_dap_ownership_operation_begin(&claim, &operation);
-    if (begin_result != AIRDAP_DAP_OWNERSHIP_OK) {
-        result->operation_error = (int) begin_result;
+    const airdap_mode_dap_result_t begin_result =
+        airdap_mode_state_dap_operation_begin(
+            AIRDAP_DAP_OWNER_DIAGNOSTIC,
+            true,
+            &claim,
+            &operation);
+    if (begin_result != AIRDAP_MODE_DAP_ALLOWED) {
+        result->operation_error = begin_result == AIRDAP_MODE_DAP_BUSY
+            ? (int) AIRDAP_DAP_OWNERSHIP_BUSY
+            : (int) AIRDAP_DAP_OWNERSHIP_OFFLINE;
         result->release_error = (int) airdap_dap_ownership_release(&claim);
-        return AIRDAP_DEBUG_SHELL_SWD_PROBE_OWNERSHIP_FAILED;
+        return begin_result == AIRDAP_MODE_DAP_BUSY
+            ? AIRDAP_DEBUG_SHELL_SWD_PROBE_BUSY
+            : AIRDAP_DEBUG_SHELL_SWD_PROBE_OWNERSHIP_FAILED;
     }
 
     if (probe_cancelled(backend)) {

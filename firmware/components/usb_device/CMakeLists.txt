@@ -14,6 +14,7 @@ set(usb_device_private_requires
     esp_timer
     freertos
     log
+    mode_state
     swd_engine
     target_uart
     voltage_monitor

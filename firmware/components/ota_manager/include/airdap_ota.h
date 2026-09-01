@@ -36,7 +36,7 @@ typedef struct {
     char running_version[AIRDAP_OTA_VERSION_CAPACITY + 1U];
 } airdap_ota_info_t;
 
-void airdap_ota_initialize(void);
+esp_err_t airdap_ota_initialize(void);
 bool airdap_ota_debug_allowed(void);
 
 airdap_ota_status_t airdap_ota_get_info(airdap_ota_info_t *info);

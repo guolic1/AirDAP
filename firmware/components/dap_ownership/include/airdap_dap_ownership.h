@@ -64,6 +64,15 @@ void airdap_dap_ownership_operation_end(
 /* Releases the current owner for device-wide transitions such as OTA writes. */
 airdap_dap_ownership_result_t airdap_dap_ownership_revoke(void);
 
+/* Releases only the named owner. A concurrent owner change is never revoked. */
+airdap_dap_ownership_result_t airdap_dap_ownership_revoke_owner(
+    airdap_dap_owner_t owner);
+
+/* Atomically blocks new owners and releases the current owner. A suspended
+ * arbiter remains blocked until resume and is used across an OTA write. */
+airdap_dap_ownership_result_t airdap_dap_ownership_suspend(void);
+airdap_dap_ownership_result_t airdap_dap_ownership_resume(void);
+
 #ifdef __cplusplus
 }
 #endif

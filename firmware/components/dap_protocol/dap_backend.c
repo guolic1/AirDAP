@@ -7,6 +7,7 @@
 #include "airdap_dap_ownership.h"
 #include "airdap_dap_ota.h"
 #include "airdap_dap_protocol.h"
+#include "airdap_mode_state.h"
 #include "airdap_ota.h"
 #include "airdap_swd.h"
 #include "esp_rom_sys.h"
@@ -69,9 +70,11 @@ static bool begin_operation(
     dap_transport_context_t *transport,
     airdap_dap_ownership_operation_t *operation)
 {
-    return airdap_dap_ownership_operation_begin(
+    return airdap_mode_state_dap_operation_begin(
+        transport->owner,
+        true,
         &transport->claim,
-        operation) == AIRDAP_DAP_OWNERSHIP_OK;
+        operation) == AIRDAP_MODE_DAP_ALLOWED;
 }
 
 static bool backend_connect(void *context)
@@ -80,12 +83,12 @@ static bool backend_connect(void *context)
     if (!airdap_ota_debug_allowed()) {
         return false;
     }
-    const airdap_dap_ownership_result_t result =
-        airdap_dap_ownership_acquire(
-            transport->owner,
-            &transport->claim);
-    return result == AIRDAP_DAP_OWNERSHIP_OK ||
-        result == AIRDAP_DAP_OWNERSHIP_ALREADY_OWNER;
+    /* NETWORK packets reach this backend only through an authenticated
+     * dap_service session. */
+    return airdap_mode_state_dap_acquire(
+        transport->owner,
+        true,
+        &transport->claim) == AIRDAP_MODE_DAP_ALLOWED;
 }
 
 static void backend_disconnect(void *context)

@@ -305,13 +305,20 @@ static void test_interleaved_transport_routing(
 
     assert(airdap_dap_service_session_open(
         AIRDAP_DAP_TRANSPORT_USB,
+        false,
         usb_session) == AIRDAP_DAP_SERVICE_OK);
     assert(airdap_dap_service_session_open(
         AIRDAP_DAP_TRANSPORT_NETWORK,
+        false,
+        network_session) == AIRDAP_DAP_SERVICE_UNAUTHENTICATED);
+    assert(airdap_dap_service_session_open(
+        AIRDAP_DAP_TRANSPORT_NETWORK,
+        true,
         network_session) == AIRDAP_DAP_SERVICE_OK);
     assert(*usb_session != 0U && *network_session != 0U);
     assert(airdap_dap_service_session_open(
         AIRDAP_DAP_TRANSPORT_USB,
+        false,
         usb_session) == AIRDAP_DAP_SERVICE_BUSY);
 
     assert(airdap_dap_service_submit(
@@ -370,6 +377,7 @@ static void test_closed_inflight_response_is_not_delivered(
 
     assert(airdap_dap_service_session_open(
         AIRDAP_DAP_TRANSPORT_USB,
+        false,
         usb_session) == AIRDAP_DAP_SERVICE_OK);
     assert(*usb_session != old_session);
     const uint8_t new_request[] = {0x31U};
@@ -414,6 +422,7 @@ static void test_closed_queued_request_is_discarded(
         old_session) == AIRDAP_DAP_SERVICE_OK);
     assert(airdap_dap_service_session_open(
         AIRDAP_DAP_TRANSPORT_NETWORK,
+        true,
         network_session) == AIRDAP_DAP_SERVICE_OK);
     const uint8_t new_request[] = {0x41U};
     assert(airdap_dap_service_submit(
@@ -561,6 +570,7 @@ static void test_close_waits_for_started_callback(
 
     assert(airdap_dap_service_session_open(
         AIRDAP_DAP_TRANSPORT_USB,
+        false,
         usb_session) == AIRDAP_DAP_SERVICE_OK);
 }
 

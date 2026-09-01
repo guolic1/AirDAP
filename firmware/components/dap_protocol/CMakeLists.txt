@@ -3,5 +3,5 @@ idf_component_register(
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "private_include"
     REQUIRES dap_ownership esp_common
-    PRIV_REQUIRES board esp_rom ota_manager swd_engine
+    PRIV_REQUIRES board esp_rom mode_state ota_manager swd_engine
 )

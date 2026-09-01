@@ -7,6 +7,7 @@
 
 #include "airdap_dap_ownership.h"
 #include "airdap_device_identity.h"
+#include "airdap_mode_state.h"
 #include "airdap_ota.h"
 #include "esp_err.h"
 #include "esp_ota_ops.h"
@@ -60,6 +61,13 @@ static bool ownership_release_succeeds;
 static unsigned ownership_line_reset_calls;
 static unsigned ownership_release_calls;
 
+static airdap_mode_ota_state_t mode_ota_state(void)
+{
+    airdap_mode_snapshot_t state;
+    assert(airdap_mode_state_get(&state) == AIRDAP_MODE_STATE_OK);
+    return state.ota;
+}
+
 static void reset_fakes(void)
 {
     begin_result = ESP_OK;
@@ -86,7 +94,7 @@ static void reset_fakes(void)
     ownership_release_succeeds = true;
     ownership_line_reset_calls = 0U;
     ownership_release_calls = 0U;
-    airdap_ota_initialize();
+    assert(airdap_ota_initialize() == ESP_OK);
 }
 
 static bool ownership_line_reset(void *context)
@@ -99,6 +107,7 @@ static bool ownership_line_reset(void *context)
 static bool ownership_release_pins(void *context)
 {
     (void) context;
+    assert(mode_ota_state() == AIRDAP_OTA_RECEIVING);
     ++ownership_release_calls;
     return ownership_release_succeeds;
 }
@@ -138,6 +147,11 @@ esp_err_t esp_ota_begin(
     assert(partition == &update_partition);
     assert(out_handle != NULL);
     assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
+    assert(mode_ota_state() == AIRDAP_OTA_RECEIVING);
+    airdap_dap_ownership_claim_t blocked_claim = {0};
+    assert(airdap_dap_ownership_acquire(
+        AIRDAP_DAP_OWNER_NETWORK,
+        &blocked_claim) == AIRDAP_DAP_OWNERSHIP_BUSY);
     ++begin_calls;
     begun_size = image_size;
     *out_handle = UPDATE_HANDLE;
@@ -224,6 +238,7 @@ static void test_successful_sequential_update_commits_then_reboots(void)
         AIRDAP_DAP_OWNERSHIP_OK);
     assert(airdap_ota_begin(100U) == AIRDAP_OTA_STATUS_OK);
     assert(!airdap_ota_debug_allowed());
+    assert(mode_ota_state() == AIRDAP_OTA_RECEIVING);
     assert(ownership_line_reset_calls == 1U);
     assert(ownership_release_calls == 1U);
     assert(begin_calls == 1U && begun_size == 100U);
@@ -236,6 +251,7 @@ static void test_successful_sequential_update_commits_then_reboots(void)
     assert(write_calls == 2U && last_write_size == sizeof(second));
 
     assert(airdap_ota_commit() == AIRDAP_OTA_STATUS_OK);
+    assert(mode_ota_state() == AIRDAP_OTA_READY_TO_REBOOT);
     assert(end_calls == 1U);
     assert(activate_calls == 1U && activated_partition == &update_partition);
     assert(airdap_ota_reboot() == AIRDAP_OTA_STATUS_OK);
@@ -273,6 +289,7 @@ static void test_rejects_invalid_sizes_offsets_and_arguments(void)
         AIRDAP_OTA_STATUS_INVALID_SIZE);
     assert(write_calls == 0U);
     assert(airdap_ota_abort() == AIRDAP_OTA_STATUS_OK);
+    assert(mode_ota_state() == AIRDAP_OTA_IDLE);
 }
 
 static void test_begin_requires_successful_owner_revoke(void)
@@ -290,6 +307,7 @@ static void test_begin_requires_successful_owner_revoke(void)
         &operation) == AIRDAP_DAP_OWNERSHIP_OK);
     assert(airdap_ota_begin(32U) == AIRDAP_OTA_STATUS_INVALID_STATE);
     assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_USB);
+    assert(mode_ota_state() == AIRDAP_OTA_IDLE);
     assert(ownership_release_calls == 0U && begin_calls == 0U);
     assert(airdap_ota_debug_allowed());
 
@@ -319,6 +337,7 @@ static void test_begin_fails_if_physical_release_fails(void)
         &network_claim) ==
         AIRDAP_DAP_OWNERSHIP_OFFLINE);
     assert(airdap_ota_debug_allowed());
+    assert(mode_ota_state() == AIRDAP_OTA_IDLE);
 }
 
 static void test_begin_failure_releases_handle_created_by_idf(void)
@@ -330,6 +349,7 @@ static void test_begin_failure_releases_handle_created_by_idf(void)
     assert(begin_calls == 1U);
     assert(abort_calls == 1U && last_handle == UPDATE_HANDLE);
     assert(airdap_ota_debug_allowed());
+    assert(mode_ota_state() == AIRDAP_OTA_IDLE);
 }
 
 static void test_partial_commit_can_receive_remaining_bytes(void)
@@ -358,6 +378,7 @@ static void test_write_or_validation_failure_never_activates(void)
     write_result = ESP_FAIL;
     assert(airdap_ota_write(0U, data, sizeof(data), &next_offset) ==
         AIRDAP_OTA_STATUS_WRITE_FAILED);
+    assert(mode_ota_state() == AIRDAP_OTA_IDLE);
     assert(abort_calls == 1U && activate_calls == 0U);
     assert(airdap_ota_commit() == AIRDAP_OTA_STATUS_INVALID_STATE);
 
@@ -367,6 +388,7 @@ static void test_write_or_validation_failure_never_activates(void)
         AIRDAP_OTA_STATUS_OK);
     end_result = ESP_ERR_OTA_VALIDATE_FAILED;
     assert(airdap_ota_commit() == AIRDAP_OTA_STATUS_VALIDATION_FAILED);
+    assert(mode_ota_state() == AIRDAP_OTA_IDLE);
     assert(activate_calls == 0U);
 
     reset_fakes();
@@ -375,6 +397,7 @@ static void test_write_or_validation_failure_never_activates(void)
         AIRDAP_OTA_STATUS_OK);
     activate_result = ESP_FAIL;
     assert(airdap_ota_commit() == AIRDAP_OTA_STATUS_ACTIVATION_FAILED);
+    assert(mode_ota_state() == AIRDAP_OTA_IDLE);
     assert(airdap_ota_reboot() == AIRDAP_OTA_STATUS_INVALID_STATE);
     assert(!restarted);
 }
@@ -390,7 +413,51 @@ static void test_abort_and_disconnect_release_only_live_sessions(void)
     airdap_ota_handle_disconnect();
     assert(abort_calls == 1U);
     assert(airdap_ota_debug_allowed());
+    assert(mode_ota_state() == AIRDAP_OTA_IDLE);
     assert(airdap_ota_commit() == AIRDAP_OTA_STATUS_INVALID_STATE);
+}
+
+static void test_abort_failure_keeps_debug_blocked_until_retry_succeeds(void)
+{
+    airdap_dap_ownership_claim_t claim = {0};
+
+    reset_fakes();
+    assert(airdap_ota_begin(32U) == AIRDAP_OTA_STATUS_OK);
+    abort_result = ESP_FAIL;
+    assert(airdap_ota_abort() == AIRDAP_OTA_STATUS_INTERNAL_ERROR);
+    assert(abort_calls == 1U);
+    assert(mode_ota_state() == AIRDAP_OTA_RECEIVING);
+    assert(!airdap_ota_debug_allowed());
+    assert(airdap_dap_ownership_acquire(
+        AIRDAP_DAP_OWNER_NETWORK,
+        &claim) == AIRDAP_DAP_OWNERSHIP_BUSY);
+
+    abort_result = ESP_OK;
+    assert(airdap_ota_abort() == AIRDAP_OTA_STATUS_OK);
+    assert(abort_calls == 2U);
+    assert(mode_ota_state() == AIRDAP_OTA_IDLE);
+    assert(airdap_ota_debug_allowed());
+}
+
+static void test_write_abort_failure_keeps_debug_blocked(void)
+{
+    static const uint8_t data[8] = {0U};
+    uint32_t next_offset = 0U;
+
+    reset_fakes();
+    assert(airdap_ota_begin(sizeof(data)) == AIRDAP_OTA_STATUS_OK);
+    write_result = ESP_FAIL;
+    abort_result = ESP_FAIL;
+    assert(airdap_ota_write(0U, data, sizeof(data), &next_offset) ==
+        AIRDAP_OTA_STATUS_INTERNAL_ERROR);
+    assert(abort_calls == 1U);
+    assert(mode_ota_state() == AIRDAP_OTA_RECEIVING);
+    assert(!airdap_ota_debug_allowed());
+
+    abort_result = ESP_OK;
+    assert(airdap_ota_abort() == AIRDAP_OTA_STATUS_OK);
+    assert(mode_ota_state() == AIRDAP_OTA_IDLE);
+    assert(airdap_ota_debug_allowed());
 }
 
 static void test_pending_image_is_confirmed_only_when_requested(void)
@@ -419,6 +486,7 @@ int main(void)
         .line_reset = ownership_line_reset,
         .release_pins = ownership_release_pins,
     };
+    airdap_mode_state_init();
     assert(airdap_dap_ownership_initialize(&ownership_backend) ==
         AIRDAP_DAP_OWNERSHIP_OK);
 
@@ -430,6 +498,8 @@ int main(void)
     test_partial_commit_can_receive_remaining_bytes();
     test_write_or_validation_failure_never_activates();
     test_abort_and_disconnect_release_only_live_sessions();
+    test_abort_failure_keeps_debug_blocked_until_retry_succeeds();
+    test_write_abort_failure_keeps_debug_blocked();
     test_pending_image_is_confirmed_only_when_requested();
     test_begin_fails_if_physical_release_fails();
 

@@ -1,5 +1,5 @@
 idf_component_register(
     SRCS "app_main.c"
-    PRIV_REQUIRES board config_store device_identity esp_common log ota_manager swd_engine usb_device voltage_monitor
+    PRIV_REQUIRES board config_store device_identity esp_common log mode_state ota_manager swd_engine usb_device voltage_monitor
     INCLUDE_DIRS ""
 )

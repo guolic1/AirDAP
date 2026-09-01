@@ -5,6 +5,7 @@
 #include "airdap_board.h"
 #include "airdap_config_store.h"
 #include "airdap_device_identity.h"
+#include "airdap_mode_state.h"
 #include "airdap_ota.h"
 #include "airdap_swd.h"
 #include "airdap_usb.h"
@@ -22,7 +23,8 @@ void app_main(void)
 {
     airdap_voltage_reading_t voltage;
 
-    airdap_ota_initialize();
+    airdap_mode_state_init();
+    ESP_ERROR_CHECK(airdap_ota_initialize());
     ESP_ERROR_CHECK(airdap_board_init_safe());
     ESP_ERROR_CHECK(airdap_device_identity_init());
     ESP_ERROR_CHECK(airdap_config_store_init());

@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "airdap_dap_ownership.h"
+#include "airdap_mode_state.h"
 #include "airdap_debug_shell_swd_probe.h"
 
 enum {
@@ -397,6 +398,23 @@ static void test_release_failure_is_not_hidden(void)
         before.release_pins_calls + 1U);
 }
 
+static void test_ota_blocks_diagnostic_owner(void)
+{
+    fake_swd_t fake = {0};
+    const airdap_debug_shell_swd_backend_t backend = make_backend(&fake);
+    airdap_debug_shell_swd_probe_result_t result;
+    const ownership_counts_t before = ownership_counts();
+
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_STARTED) ==
+        AIRDAP_MODE_STATE_OK);
+    assert(airdap_debug_shell_swd_probe("100", &backend, &result) ==
+        AIRDAP_DEBUG_SHELL_SWD_PROBE_BUSY);
+    assert(ownership_fake.line_reset_calls == before.line_reset_calls);
+    assert(ownership_fake.release_pins_calls == before.release_pins_calls);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_ABORTED) ==
+        AIRDAP_MODE_STATE_OK);
+}
+
 int main(void)
 {
     ownership_fake.release_pins_success = true;
@@ -407,6 +425,9 @@ int main(void)
     };
     assert(airdap_dap_ownership_initialize(&ownership_backend) ==
         AIRDAP_DAP_OWNERSHIP_OK);
+    airdap_mode_state_init();
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED) ==
+        AIRDAP_MODE_STATE_OK);
 
     test_existing_owners_block_probe_without_touching_swd();
     test_probe_blocks_revoke_and_releases_diagnostic_owner();
@@ -421,5 +442,6 @@ int main(void)
     test_raw_invalid_ack_is_reported();
     test_bad_idcode_parity_is_reported();
     test_release_failure_is_not_hidden();
+    test_ota_blocks_diagnostic_owner();
     return 0;
 }
