@@ -19,9 +19,10 @@ typedef enum {
     CALL_VOLTAGE_READ,
     CALL_USB_INITIALIZE,
     CALL_OTA_CONFIRM,
+    CALL_WIFI_MANAGER_START,
 } call_t;
 
-static call_t calls[10];
+static call_t calls[11];
 static size_t call_count;
 
 static void record(call_t call)
@@ -93,6 +94,12 @@ esp_err_t airdap_ota_confirm_running_image(void)
     return ESP_OK;
 }
 
+esp_err_t airdap_wifi_manager_start(void)
+{
+    record(CALL_WIFI_MANAGER_START);
+    return ESP_FAIL;
+}
+
 void app_main(void);
 
 int main(void)
@@ -108,6 +115,7 @@ int main(void)
         CALL_VOLTAGE_READ,
         CALL_USB_INITIALIZE,
         CALL_OTA_CONFIRM,
+        CALL_WIFI_MANAGER_START,
     };
 
     app_main();

@@ -10,6 +10,7 @@
 #include "airdap_swd.h"
 #include "airdap_usb.h"
 #include "airdap_voltage_monitor.h"
+#include "airdap_wifi_manager.h"
 #include "esp_err.h"
 #include "esp_log.h"
 
@@ -33,6 +34,11 @@ void app_main(void)
     ESP_ERROR_CHECK(airdap_voltage_monitor_read(&voltage));
     ESP_ERROR_CHECK(airdap_usb_init());
     ESP_ERROR_CHECK(airdap_ota_confirm_running_image());
+
+    const esp_err_t wifi_error = airdap_wifi_manager_start();
+    if (wifi_error != ESP_OK) {
+        ESP_LOGW(TAG, "Wi-Fi unavailable: %s", esp_err_to_name(wifi_error));
+    }
 
     ESP_LOGI(
         TAG,
