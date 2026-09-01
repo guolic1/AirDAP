@@ -76,6 +76,9 @@ bool airdap_wifi_state_machine_step(
             machine->link_connected = true;
         }
         break;
+    case AIRDAP_WIFI_SM_EVENT_LINK_DISCONNECTED:
+        machine->link_connected = false;
+        break;
     case AIRDAP_WIFI_SM_EVENT_GOT_IP:
         if (machine->state == AIRDAP_WIFI_SM_CONNECTING &&
             machine->link_connected) {

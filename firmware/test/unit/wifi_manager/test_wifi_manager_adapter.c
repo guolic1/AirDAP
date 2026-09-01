@@ -340,7 +340,6 @@ int main(void)
     assert(wifi_set_config_count == 1U);
     assert(wifi_connect_count == 1U);
 
-    emit_wifi_event(WIFI_EVENT_STA_CONNECTED, WIFI_REASON_UNSPECIFIED);
     credentials = make_credentials("second-ap", "second-password");
     assert(airdap_wifi_manager_set_credentials(&credentials) == ESP_OK);
     dispatch_next_posted_event();
@@ -348,6 +347,7 @@ int main(void)
     assert(wifi_disconnect_count == 1U);
 
     const size_t transitions_before_old_ip = mode_transition_count;
+    emit_wifi_event(WIFI_EVENT_STA_CONNECTED, WIFI_REASON_UNSPECIFIED);
     emit_ip_event(IP_EVENT_STA_GOT_IP);
     assert(mode_transition_count == transitions_before_old_ip);
 

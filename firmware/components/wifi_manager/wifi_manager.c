@@ -274,11 +274,14 @@ static void handle_wifi_event(int32_t event_id, void *event_data)
     case WIFI_EVENT_STA_CONNECTED:
         connection_in_progress = false;
         link_active = true;
-        handle_state_event(AIRDAP_WIFI_SM_EVENT_LINK_CONNECTED);
+        if (!reconfiguration_pending) {
+            handle_state_event(AIRDAP_WIFI_SM_EVENT_LINK_CONNECTED);
+        }
         break;
     case WIFI_EVENT_STA_DISCONNECTED: {
         connection_in_progress = false;
         link_active = false;
+        handle_state_event(AIRDAP_WIFI_SM_EVENT_LINK_DISCONNECTED);
         if (reconfiguration_pending) {
             reconfiguration_pending = false;
             configure_and_connect();
