@@ -13,6 +13,7 @@ target_include_directories(
     device_identity_test
     PRIVATE
         fake_include
+        ../../../components/airdap_frame/include
         ../../../components/device_identity/include
         ../../../components/device_identity/private_include
 )

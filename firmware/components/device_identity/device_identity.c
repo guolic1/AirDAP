@@ -6,6 +6,7 @@
 
 #include "airdap_device_identity.h"
 #include "airdap_device_identity_internal.h"
+#include "airdap_frame.h"
 #include "esp_app_desc.h"
 #include "esp_mac.h"
 #include "psa/crypto.h"
@@ -13,6 +14,11 @@
 enum {
     SHA256_SIZE = 32,
 };
+
+_Static_assert(
+    (unsigned int) AIRDAP_DEVICE_PROTOCOL_VERSION ==
+        (unsigned int) AIRDAP_FRAME_PROTOCOL_VERSION,
+    "device identity and AirDAP frame protocol versions must match");
 
 static const uint8_t product_namespace[] = {'A', 'i', 'r', 'D', 'A', 'P'};
 static airdap_device_identity_t device_identity;

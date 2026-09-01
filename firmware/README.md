@@ -108,6 +108,36 @@ and is reported consistently by OTA, CMSIS-DAP product firmware information,
 and the debug shell. Use a clean build or `idf.py reconfigure` after adding or
 removing a tag.
 
+AirDAP frame protocol v1 uses a fixed 20-byte header with the fields `magic`,
+`version`, `type`, `flags`, `session_id`, `sequence`, `payload_length`, and
+`reserved` in that order. The magic bytes are `ADAP`; every multi-byte field is
+in network byte order. The eight message types are `HELLO`, `AUTH`,
+`DAP_REQUEST`, `DAP_RESPONSE`, `CONTROL_REQUEST`, `CONTROL_RESPONSE`,
+`KEEPALIVE`, and `ERROR`. V1 requires `flags` and `reserved` to be zero, limits
+all payloads to 4096 bytes, and further limits `DAP_REQUEST` to 508 bytes.
+
+Session IDs and sequences reserve zero, start at one, increment by one, and
+wrap from `UINT32_MAX` to one. Requests must arrive at the next expected
+sequence; duplicates, stale values, and values ahead of the expected sequence
+are distinct errors, using half-range serial-number comparison across wrap. A
+response must repeat its request's session ID and
+sequence. `DAP_REQUEST`/`CONTROL_REQUEST` map to their corresponding response
+types; `HELLO`, `AUTH`, and `KEEPALIVE` use the same type in both directions;
+`ERROR` may answer any request type.
+
+Wire error codes are stable 16-bit network-order values: `0x0001` truncated,
+`0x0002` payload too large, `0x0003` unsupported version, `0x0004` unsupported
+type, `0x0005` invalid magic, `0x0006` invalid flags, `0x0007` invalid
+reserved, `0x0010` session mismatch, `0x0011` duplicate sequence, `0x0012`
+stale sequence, `0x0013` out-of-order sequence, `0x0014` response mismatch,
+`0x0020` busy, `0x0021` unauthenticated, `0x0022` timeout, and `0x00FF`
+internal. An `ERROR` payload is exactly one such 16-bit code. The frame decoder
+distinguishes incomplete input from an invalid frame. A timed-out sequence
+remains consumed: a retry uses the next sequence and the transport must discard
+the late response. The component implements only framing and session/sequence
+checks; it does not create a socket, authentication mechanism, timer, or DAP
+worker.
+
 CMSIS-DAP uses 512-byte internal buffers and advertises a 508-byte packet
 limit. At full-speed USB this keeps the largest response from ending on an
 exact 64-byte endpoint boundary, so TinyUSB cannot leave an automatic ZLP for
@@ -342,7 +372,7 @@ The other hardware-independent tests use the same pattern:
 ```sh
 for suite in \
     bootloader_artifact ota_layout board config_store device_identity voltage_monitor swd_protocol \
-    dap_ownership mode_state dap_backend dap_protocol dap_service \
+    dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame \
     dap_ota dap_stream ota_manager app_main target_uart usb_descriptors project_version \
     debug_shell_config_status debug_shell_identity debug_shell_input \
     debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update wired_hil; do
@@ -359,8 +389,9 @@ safe configuration-status command behavior, ADC scaling, SWD transaction
 framing, DAP owner transitions and physical-backend release calls, unified
 USB/Wi-Fi/provisioning/OTA mode transitions and DAP admission, CMSIS-DAP and OTA
 command framing, OTA state transitions, stale USB-frame recovery, interleaved
-USB/NETWORK DAP routing, stale-session response
-suppression, bounded queue failures, host update ordering, UART line-coding
+USB/NETWORK DAP routing, AirDAP frame golden vectors and sequence rules,
+stale-session response suppression, bounded queue failures, host update
+ordering, UART line-coding
 mapping, both compile-time USB descriptor variants, bounded shell input, the
 bounded SWD IDCODE command flow, debug TX completion state, host tools, and
 wired HIL helper's protocol checks. They do not prove USB enumeration, real NVS
