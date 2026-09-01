@@ -46,6 +46,10 @@ static void test_link_connection_is_not_online_until_ip(void)
     assert(effects.connect);
     assert(effects.publish_state);
 
+    effects = step(&machine, AIRDAP_WIFI_SM_EVENT_GOT_IP);
+    assert(machine.state == AIRDAP_WIFI_SM_CONNECTING);
+    assert(!effects.publish_state);
+
     effects = step(&machine, AIRDAP_WIFI_SM_EVENT_LINK_CONNECTED);
     assert(machine.state == AIRDAP_WIFI_SM_CONNECTING);
     assert(!effects.publish_state);
@@ -56,6 +60,28 @@ static void test_link_connection_is_not_online_until_ip(void)
     assert(effects.published_state == AIRDAP_WIFI_SM_ONLINE);
     assert(machine.last_failure == AIRDAP_WIFI_FAILURE_NONE);
     assert(machine.retry_delay_ms == 0U);
+}
+
+static void test_lost_ip_revokes_online_until_dhcp_recovers(void)
+{
+    airdap_wifi_state_machine_t machine;
+    airdap_wifi_state_machine_init(&machine, true);
+    (void) step(&machine, AIRDAP_WIFI_SM_EVENT_STA_STARTED);
+    (void) step(&machine, AIRDAP_WIFI_SM_EVENT_LINK_CONNECTED);
+    (void) step(&machine, AIRDAP_WIFI_SM_EVENT_GOT_IP);
+
+    airdap_wifi_sm_effects_t effects = step(
+        &machine,
+        AIRDAP_WIFI_SM_EVENT_LOST_IP);
+    assert(machine.state == AIRDAP_WIFI_SM_CONNECTING);
+    assert(machine.last_failure == AIRDAP_WIFI_FAILURE_TRANSIENT);
+    assert(effects.publish_state);
+    assert(effects.published_state == AIRDAP_WIFI_SM_CONNECTING);
+    assert(effects.retry_after_ms == 0U);
+
+    effects = step(&machine, AIRDAP_WIFI_SM_EVENT_GOT_IP);
+    assert(machine.state == AIRDAP_WIFI_SM_ONLINE);
+    assert(effects.published_state == AIRDAP_WIFI_SM_ONLINE);
 }
 
 static void test_wrong_password_is_distinct_and_backed_off(void)
@@ -145,7 +171,7 @@ static void test_configuration_update_resets_backoff_and_reconnects_now(void)
     (void) step(&machine, AIRDAP_WIFI_SM_EVENT_AUTHENTICATION_FAILED);
     assert(machine.retry_delay_ms > AIRDAP_WIFI_RETRY_INITIAL_DELAY_MS);
 
-    const airdap_wifi_sm_effects_t effects = step(
+    airdap_wifi_sm_effects_t effects = step(
         &machine,
         AIRDAP_WIFI_SM_EVENT_CONFIGURATION_UPDATED);
 
@@ -155,6 +181,10 @@ static void test_configuration_update_resets_backoff_and_reconnects_now(void)
     assert(effects.cancel_retry);
     assert(effects.reconfigure);
     assert(effects.publish_state);
+
+    effects = step(&machine, AIRDAP_WIFI_SM_EVENT_GOT_IP);
+    assert(machine.state == AIRDAP_WIFI_SM_CONNECTING);
+    assert(!effects.publish_state);
 }
 
 static void test_ap_recovery_returns_online_and_resets_backoff(void)
@@ -168,6 +198,7 @@ static void test_ap_recovery_returns_online_and_resets_backoff(void)
         &machine,
         AIRDAP_WIFI_SM_EVENT_RETRY_EXPIRED);
     assert(effects.connect);
+    (void) step(&machine, AIRDAP_WIFI_SM_EVENT_LINK_CONNECTED);
     effects = step(&machine, AIRDAP_WIFI_SM_EVENT_GOT_IP);
 
     assert(machine.state == AIRDAP_WIFI_SM_ONLINE);
@@ -252,6 +283,7 @@ int main(void)
 {
     test_no_configuration_stays_stopped();
     test_link_connection_is_not_online_until_ip();
+    test_lost_ip_revokes_online_until_dhcp_recovers();
     test_wrong_password_is_distinct_and_backed_off();
     test_connect_start_failure_is_transient_and_retried();
     test_esp_wifi_wrong_password_reasons_are_classified();

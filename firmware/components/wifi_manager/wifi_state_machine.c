@@ -33,6 +33,7 @@ static void handle_failure(
     }
     machine->state = AIRDAP_WIFI_SM_DISCONNECTED;
     machine->last_failure = failure;
+    machine->link_connected = false;
     machine->retry_delay_ms = next_retry_delay(machine->retry_delay_ms);
     effects->retry_after_ms = machine->retry_delay_ms;
     publish(effects, AIRDAP_WIFI_SM_DISCONNECTED);
@@ -65,18 +66,31 @@ bool airdap_wifi_state_machine_step(
         if (machine->has_configuration &&
             machine->state == AIRDAP_WIFI_SM_STOPPED) {
             machine->state = AIRDAP_WIFI_SM_CONNECTING;
+            machine->link_connected = false;
             effects->connect = true;
             publish(effects, AIRDAP_WIFI_SM_CONNECTING);
         }
         break;
     case AIRDAP_WIFI_SM_EVENT_LINK_CONNECTED:
+        if (machine->state == AIRDAP_WIFI_SM_CONNECTING) {
+            machine->link_connected = true;
+        }
         break;
     case AIRDAP_WIFI_SM_EVENT_GOT_IP:
-        if (machine->state == AIRDAP_WIFI_SM_CONNECTING) {
+        if (machine->state == AIRDAP_WIFI_SM_CONNECTING &&
+            machine->link_connected) {
             machine->state = AIRDAP_WIFI_SM_ONLINE;
             machine->last_failure = AIRDAP_WIFI_FAILURE_NONE;
             machine->retry_delay_ms = 0U;
             publish(effects, AIRDAP_WIFI_SM_ONLINE);
+        }
+        break;
+    case AIRDAP_WIFI_SM_EVENT_LOST_IP:
+        if (machine->state == AIRDAP_WIFI_SM_ONLINE &&
+            machine->link_connected) {
+            machine->state = AIRDAP_WIFI_SM_CONNECTING;
+            machine->last_failure = AIRDAP_WIFI_FAILURE_TRANSIENT;
+            publish(effects, AIRDAP_WIFI_SM_CONNECTING);
         }
         break;
     case AIRDAP_WIFI_SM_EVENT_AUTHENTICATION_FAILED:
@@ -93,6 +107,7 @@ bool airdap_wifi_state_machine_step(
         if (machine->has_configuration &&
             machine->state == AIRDAP_WIFI_SM_DISCONNECTED) {
             machine->state = AIRDAP_WIFI_SM_CONNECTING;
+            machine->link_connected = false;
             effects->connect = true;
             publish(effects, AIRDAP_WIFI_SM_CONNECTING);
         }
@@ -102,6 +117,7 @@ bool airdap_wifi_state_machine_step(
         machine->state = AIRDAP_WIFI_SM_CONNECTING;
         machine->last_failure = AIRDAP_WIFI_FAILURE_NONE;
         machine->retry_delay_ms = 0U;
+        machine->link_connected = false;
         effects->cancel_retry = true;
         effects->reconfigure = true;
         publish(effects, AIRDAP_WIFI_SM_CONNECTING);
@@ -111,6 +127,7 @@ bool airdap_wifi_state_machine_step(
         machine->state = AIRDAP_WIFI_SM_STOPPED;
         machine->last_failure = AIRDAP_WIFI_FAILURE_NONE;
         machine->retry_delay_ms = 0U;
+        machine->link_connected = false;
         effects->cancel_retry = true;
         effects->disconnect = true;
         publish(effects, AIRDAP_WIFI_SM_STOPPED);

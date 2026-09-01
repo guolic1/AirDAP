@@ -187,11 +187,12 @@ the canonical persisted copy.
 A station link is still reported as `connecting`. Only
 `IP_EVENT_STA_GOT_IP`, after DHCP succeeds, publishes `online`. Authentication
 and handshake failures are reported separately from AP loss and other temporary
-disconnects. Both use application-managed exponential retry delays starting at
-1 second and capped at 60 seconds. A committed credential update cancels any
-pending retry, resets the delay, disconnects the previous attempt if needed,
-and applies the latest committed credentials immediately. SSIDs and passwords
-are never logged.
+disconnects. Losing the station IP immediately returns the state to `connecting`
+until DHCP recovers. Both disconnect classes use application-managed
+exponential retry delays starting at 1 second and capped at 60 seconds. A
+committed credential update cancels any pending retry, resets the delay,
+disconnects the previous attempt if needed, and applies the latest committed
+credentials immediately. SSIDs and passwords are never logged.
 
 The project pins `espressif/network_provisioning` 1.2.4 for the later BLE
 provisioning slice and explicitly enables protocomm Security 2. BLE transport,
@@ -434,8 +435,9 @@ versioned configuration validation, commit-before-publish behavior, serialized
 concurrent writes, fake-NVS restart recovery, selective configuration clearing,
 safe configuration-status command behavior, ADC scaling, SWD transaction
 framing, Wi-Fi credential encoding, wrong-password classification, DHCP-gated
-online state, bounded reconnect backoff, configuration-change recovery, DAP
-owner transitions and physical-backend release calls, unified
+online state, IP-loss handling, bounded reconnect backoff, actual timer/driver
+coordination, configuration-change event ordering and recovery, DAP owner
+transitions and physical-backend release calls, unified
 USB/Wi-Fi/provisioning/OTA mode transitions and DAP admission, CMSIS-DAP and OTA
 command framing, OTA state transitions, stale USB-frame recovery, interleaved
 USB/NETWORK DAP routing, AirDAP frame golden vectors and sequence rules,

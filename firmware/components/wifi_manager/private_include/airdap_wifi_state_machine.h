@@ -25,6 +25,7 @@ typedef enum {
     AIRDAP_WIFI_SM_EVENT_STA_STARTED = 0,
     AIRDAP_WIFI_SM_EVENT_LINK_CONNECTED,
     AIRDAP_WIFI_SM_EVENT_GOT_IP,
+    AIRDAP_WIFI_SM_EVENT_LOST_IP,
     AIRDAP_WIFI_SM_EVENT_AUTHENTICATION_FAILED,
     AIRDAP_WIFI_SM_EVENT_TRANSIENT_DISCONNECT,
     AIRDAP_WIFI_SM_EVENT_CONNECT_FAILED,
@@ -38,6 +39,7 @@ typedef struct {
     airdap_wifi_failure_t last_failure;
     uint32_t retry_delay_ms;
     bool has_configuration;
+    bool link_connected;
 } airdap_wifi_state_machine_t;
 
 typedef struct {

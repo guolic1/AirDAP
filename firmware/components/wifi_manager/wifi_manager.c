@@ -328,8 +328,12 @@ static void event_handler(
     (void) argument;
     if (event_base == WIFI_EVENT) {
         handle_wifi_event(event_id, event_data);
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        handle_state_event(AIRDAP_WIFI_SM_EVENT_GOT_IP);
+    } else if (event_base == IP_EVENT) {
+        if (event_id == IP_EVENT_STA_GOT_IP) {
+            handle_state_event(AIRDAP_WIFI_SM_EVENT_GOT_IP);
+        } else if (event_id == IP_EVENT_STA_LOST_IP) {
+            handle_state_event(AIRDAP_WIFI_SM_EVENT_LOST_IP);
+        }
     } else if (event_base == AIRDAP_WIFI_INTERNAL_EVENT) {
         if (event_id == AIRDAP_WIFI_INTERNAL_RETRY) {
             handle_state_event(AIRDAP_WIFI_SM_EVENT_RETRY_EXPIRED);
@@ -368,7 +372,7 @@ static void cleanup_failed_start(void)
     if (ip_event_instance != NULL) {
         (void) esp_event_handler_instance_unregister(
             IP_EVENT,
-            IP_EVENT_STA_GOT_IP,
+            ESP_EVENT_ANY_ID,
             ip_event_instance);
         ip_event_instance = NULL;
     }
@@ -467,7 +471,7 @@ esp_err_t airdap_wifi_manager_start(void)
             &wifi_event_instance)) != ESP_OK ||
         (error = esp_event_handler_instance_register(
             IP_EVENT,
-            IP_EVENT_STA_GOT_IP,
+            ESP_EVENT_ANY_ID,
             event_handler,
             NULL,
             &ip_event_instance)) != ESP_OK ||
