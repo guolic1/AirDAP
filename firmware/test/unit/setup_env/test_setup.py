@@ -230,6 +230,66 @@ class SetupTests(unittest.TestCase):
             commands,
         )
 
+    def test_downloaded_managed_checkout_rejects_unexpected_commit(self) -> None:
+        idf_path = self.root / "managed" / "esp-idf"
+        commands: list[list[str]] = []
+
+        def fake_run(
+            command: list[str],
+            *,
+            cwd: Path | None = None,
+            env: dict[str, str] | None = None,
+            capture_output: bool = False,
+        ) -> str | None:
+            del cwd, env, capture_output
+            commands.append(command)
+            if command[:2] == ["git", "clone"]:
+                make_fake_idf(Path(command[-1]))
+            elif command[-2:] == ["rev-parse", "HEAD"]:
+                return "0" * 40
+            return None
+
+        with self.assertRaisesRegex(self.setup.SetupError, "expected"):
+            self.setup.install_managed_environment(
+                idf_path,
+                self.root / "managed",
+                run_command=fake_run,
+            )
+
+        self.assertFalse(idf_path.exists())
+        self.assertFalse(
+            any("idf_tools.py" in " ".join(command) for command in commands)
+        )
+
+    def test_existing_managed_checkout_rejects_unexpected_commit(self) -> None:
+        idf_path = make_fake_idf(self.root / "managed" / "esp-idf")
+        commands: list[list[str]] = []
+
+        def fake_run(
+            command: list[str],
+            *,
+            cwd: Path | None = None,
+            env: dict[str, str] | None = None,
+            capture_output: bool = False,
+        ) -> str | None:
+            del cwd, env, capture_output
+            commands.append(command)
+            if command[-2:] == ["rev-parse", "HEAD"]:
+                return "0" * 40
+            return None
+
+        with self.assertRaisesRegex(self.setup.SetupError, "expected"):
+            self.setup.install_managed_environment(
+                idf_path,
+                self.root / "managed",
+                run_command=fake_run,
+            )
+
+        self.assertFalse(any("submodule" in command for command in commands))
+        self.assertFalse(
+            any("idf_tools.py" in " ".join(command) for command in commands)
+        )
+
     def test_cli_accepts_zero_or_one_path_argument(self) -> None:
         parser = self.setup.make_parser()
 

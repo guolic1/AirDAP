@@ -205,18 +205,24 @@ class GetEnvironmentTests(unittest.TestCase):
                 "-ExecutionPolicy",
                 "Bypass",
                 "-Command",
-                f". '{escaped_script}'; Write-Output $env:IDF_TOOLS_PATH",
+                f". '{escaped_script}'; Write-Output $env:IDF_TOOLS_PATH; "
+                "if (Test-Path Env:IDF_PYTHON_ENV_PATH) { "
+                "Write-Output $env:IDF_PYTHON_ENV_PATH } else { "
+                "Write-Output '<unset>' }",
             ],
             check=False,
             text=True,
             capture_output=True,
+            env={**os.environ, "IDF_PYTHON_ENV_PATH": "C:\\stale\\python"},
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
+        output_lines = result.stdout.strip().splitlines()
         self.assertEqual(
-            result.stdout.strip().splitlines()[-1].casefold(),
+            output_lines[-2].casefold(),
             expected_tools_path.casefold(),
         )
+        self.assertEqual(output_lines[-1], "<unset>")
 
     @staticmethod
     def _powershell_path(path: Path, executable: str) -> str:
