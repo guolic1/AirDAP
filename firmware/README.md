@@ -16,12 +16,50 @@ safe states before ESP-IDF initializes and validates the application image:
 
 ## Build
 
-Activate an ESP-IDF environment, then run:
+AirDAP keeps its ESP-IDF tools and Python environment in the ignored
+`firmware/.airdap-env/` directory. Python 3.10 or newer must be available on
+the host. The default setup also requires Git and network access the first
+time it downloads the pinned ESP-IDF v6.1.0 source and its tools.
+
+On Linux, configure the environment once and activate it in the current Bash
+shell:
 
 ```sh
 cd firmware
+python3 tools/setup.py
+. ./get_env.sh
 idf.py build
 ```
+
+On Windows x64, use PowerShell:
+
+```powershell
+Set-Location firmware
+python tools/setup.py
+. .\get_env.ps1
+idf.py build
+```
+
+If ESP-IDF v6.1.0 source is already present, pass its directory to avoid
+downloading another copy. AirDAP still installs the matching ESP32-S3 tools
+and Python packages under `firmware/.airdap-env/`, so later activation does
+not depend on another ESP-IDF installation's tool state:
+
+```sh
+python3 tools/setup.py /path/to/esp-idf
+```
+
+```powershell
+python tools/setup.py C:\path\to\esp-idf
+```
+
+Both setup modes save the selected source directory in
+`firmware/.airdap-env/idf-path.txt`. In each new terminal, run only
+`. ./get_env.sh` on Linux or `. .\get_env.ps1` in PowerShell before using the
+normal `idf.py` command. The activation scripts must be sourced so they can
+update the current shell. `setup.py` configures the environment only; it does
+not build or flash the firmware. If a default download is interrupted while
+fetching ESP-IDF submodules, run `setup.py` again to resume it.
 
 The default build keeps the debug shell disabled and preserves the existing
 CMSIS-DAP plus target-UART CDC layout. To build a separate debug variant with
@@ -436,7 +474,7 @@ The other hardware-independent tests use the same pattern:
 
 ```sh
 for suite in \
-    bootloader_artifact ota_layout board config_store device_identity voltage_monitor swd_protocol \
+    bootloader_artifact ota_layout setup_env board config_store device_identity voltage_monitor swd_protocol \
     dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame \
     dap_ota dap_stream ota_manager app_main wifi_manager target_uart usb_descriptors project_version \
     debug_shell_config_status debug_shell_identity debug_shell_input debug_shell_wifi \
