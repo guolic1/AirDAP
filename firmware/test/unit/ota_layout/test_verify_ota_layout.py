@@ -17,6 +17,7 @@ VALID_PARTITIONS = """
 nvs,      data, nvs,     0x9000,   0x6000,
 otadata,  data, ota,     0xF000,   0x2000,
 phy_init, data, phy,     0x11000,  0x1000,
+sec2_keys,data, nvs,     0x12000,  0x3000,    readonly
 ota_0,    app,  ota_0,   0x20000,  0x3F0000,
 ota_1,    app,  ota_1,   0x410000, 0x3F0000,
 """
@@ -28,6 +29,8 @@ CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+# CONFIG_ESP_WIFI_NVS_ENABLED is not set
+CONFIG_LOG_MAXIMUM_LEVEL=3
 """
 
 
@@ -64,6 +67,30 @@ class OtaLayoutTests(unittest.TestCase):
                         verify_ota_layout.parse_sdkconfig("\n".join(lines))
                     )
 
+    def test_rejects_wifi_driver_persistence_or_verbose_build_logs(self) -> None:
+        for old, new, message in (
+            (
+                "# CONFIG_ESP_WIFI_NVS_ENABLED is not set",
+                "CONFIG_ESP_WIFI_NVS_ENABLED=y",
+                "credential persistence",
+            ),
+            (
+                "CONFIG_LOG_MAXIMUM_LEVEL=3",
+                "CONFIG_LOG_MAXIMUM_LEVEL=4",
+                "at or below INFO",
+            ),
+        ):
+            with self.subTest(new=new):
+                with self.assertRaisesRegex(
+                    verify_ota_layout.VerificationError,
+                    message,
+                ):
+                    verify_ota_layout.validate_config(
+                        verify_ota_layout.parse_sdkconfig(
+                            VALID_CONFIG.replace(old, new)
+                        )
+                    )
+
     def test_rejects_factory_or_missing_ota_partition(self) -> None:
         with self.assertRaisesRegex(verify_ota_layout.VerificationError, "factory"):
             verify_ota_layout.validate_layout(
@@ -97,6 +124,7 @@ class OtaLayoutTests(unittest.TestCase):
             ("0x20000,  0x3F0000", "0x30000,  0x3F0000", "ota_0"),
             ("0x410000, 0x3F0000", "0x410000, 0x3E0000", "ota_1"),
             ("0xF000,   0x2000", "0xE000,   0x2000", "otadata"),
+            ("0x12000,  0x3000", "0x12000,  0x4000", "sec2_keys"),
         ):
             with self.subTest(new=new):
                 with self.assertRaisesRegex(
@@ -107,6 +135,21 @@ class OtaLayoutTests(unittest.TestCase):
                         verify_ota_layout.parse_partition_csv(
                             VALID_PARTITIONS.replace(old, new)
                         )
+                    )
+
+    def test_rejects_missing_or_writable_security2_partition(self) -> None:
+        security_row = "sec2_keys,data, nvs,     0x12000,  0x3000,    readonly\n"
+        for text, message in (
+            (VALID_PARTITIONS.replace(security_row, ""), "sec2_keys"),
+            (VALID_PARTITIONS.replace("readonly", ""), "readonly"),
+        ):
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(
+                    verify_ota_layout.VerificationError,
+                    message,
+                ):
+                    verify_ota_layout.validate_layout(
+                        verify_ota_layout.parse_partition_csv(text)
                     )
 
     def test_rejects_overlap_and_flash_overflow_for_extra_partitions(self) -> None:
