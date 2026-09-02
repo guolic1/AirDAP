@@ -16,6 +16,7 @@ typedef struct {
     size_t output_length;
     char executed[EXECUTED_CAPACITY][AIRDAP_DEBUG_SHELL_LINE_CAPACITY];
     size_t executed_count;
+    size_t cancel_count;
 } capture_t;
 
 static void capture_write(const char *data, size_t length, void *context)
@@ -34,6 +35,12 @@ static void capture_execute(const char *line, void *context)
     assert(strlen(line) < sizeof(capture->executed[0]));
     strcpy(capture->executed[capture->executed_count], line);
     ++capture->executed_count;
+}
+
+static void capture_cancel(void *context)
+{
+    capture_t *capture = context;
+    ++capture->cancel_count;
 }
 
 static const char *complete_command(
@@ -68,8 +75,93 @@ static airdap_debug_shell_input_callbacks_t make_callbacks(capture_t *capture)
     return (airdap_debug_shell_input_callbacks_t) {
         .write = capture_write,
         .execute = capture_execute,
+        .cancel = capture_cancel,
         .context = capture,
     };
+}
+
+static void consume_text(
+    airdap_debug_shell_input_t *input,
+    const char *text,
+    const airdap_debug_shell_input_callbacks_t *callbacks);
+
+static void test_secret_input_is_not_echoed_or_saved(void)
+{
+    airdap_debug_shell_input_t input;
+    capture_t capture = {0};
+    const airdap_debug_shell_input_callbacks_t callbacks = make_callbacks(&capture);
+
+    airdap_debug_shell_input_init(&input);
+    assert(airdap_debug_shell_input_set_mode(
+        &input,
+        AIRDAP_DEBUG_SHELL_INPUT_SECRET,
+        "Password: "));
+    consume_text(&input, "not-for-output\n", &callbacks);
+
+    assert(capture.executed_count == 1U);
+    assert(strcmp(capture.executed[0], "not-for-output") == 0);
+    assert(strstr(capture.output, "not-for-output") == NULL);
+    assert(strcmp(capture.output, "\nPassword: ") == 0);
+    assert(input.history_count == 0U);
+    for (size_t index = 0U; index < sizeof(input.line); ++index) {
+        assert(input.line[index] == '\0');
+    }
+}
+
+static void test_secret_input_accepts_empty_line_and_hides_background_redraw(void)
+{
+    airdap_debug_shell_input_t input;
+    capture_t capture = {0};
+    const airdap_debug_shell_input_callbacks_t callbacks = make_callbacks(&capture);
+    static const char background[] = "background log\n";
+
+    airdap_debug_shell_input_init(&input);
+    assert(airdap_debug_shell_input_set_mode(
+        &input,
+        AIRDAP_DEBUG_SHELL_INPUT_SECRET,
+        "Password: "));
+    consume_text(&input, "hidden", &callbacks);
+    airdap_debug_shell_input_write_background(
+        &input,
+        background,
+        sizeof(background) - 1U,
+        &callbacks);
+    assert(strstr(capture.output, "hidden") == NULL);
+
+    consume_text(&input, "\n", &callbacks);
+    assert(capture.executed_count == 1U);
+    assert(strcmp(capture.executed[0], "hidden") == 0);
+
+    capture.output_length = 0U;
+    capture.output[0] = '\0';
+    consume_text(&input, "\n", &callbacks);
+    assert(capture.executed_count == 2U);
+    assert(strcmp(capture.executed[1], "") == 0);
+    assert(strcmp(capture.output, "\nPassword: ") == 0);
+}
+
+static void test_ctrl_c_leaves_secret_mode_and_scrubs_input(void)
+{
+    airdap_debug_shell_input_t input;
+    capture_t capture = {0};
+    const airdap_debug_shell_input_callbacks_t callbacks = make_callbacks(&capture);
+    static const uint8_t bytes[] = {'s', 'e', 'c', 'r', 'e', 't', 0x03U};
+
+    airdap_debug_shell_input_init(&input);
+    assert(airdap_debug_shell_input_set_mode(
+        &input,
+        AIRDAP_DEBUG_SHELL_INPUT_SECRET,
+        "Password: "));
+    airdap_debug_shell_input_consume(&input, bytes, sizeof(bytes), &callbacks);
+
+    assert(capture.executed_count == 0U);
+    assert(capture.cancel_count == 1U);
+    assert(strstr(capture.output, "secret") == NULL);
+    assert(strcmp(capture.output, "^C\nairdap> ") == 0);
+    assert(input.mode == AIRDAP_DEBUG_SHELL_INPUT_COMMAND);
+    for (size_t index = 0U; index < sizeof(input.line); ++index) {
+        assert(input.line[index] == '\0');
+    }
 }
 
 static void consume_text(
@@ -447,6 +539,9 @@ static void test_color_keeps_background_log_bytes_unstyled(void)
 
 int main(void)
 {
+    test_secret_input_is_not_echoed_or_saved();
+    test_secret_input_accepts_empty_line_and_hides_background_redraw();
+    test_ctrl_c_leaves_secret_mode_and_scrubs_input();
     test_split_line_and_crlf();
     test_edit_cancel_and_control_filter();
     test_overflow_newline_reports_and_recovers();

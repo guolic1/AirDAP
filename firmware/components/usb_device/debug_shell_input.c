@@ -4,7 +4,7 @@
 
 #include "airdap_debug_shell_input.h"
 
-static const char prompt[] = "airdap> ";
+static const char default_prompt[] = "airdap> ";
 static const char ansi_reset[] = "\x1b[0m";
 static const char ansi_red[] = "\x1b[31m";
 static const char ansi_cyan[] = "\x1b[36m";
@@ -23,6 +23,13 @@ static void write_text(
     callbacks->write(text, strlen(text), callbacks->context);
 }
 
+static void discard_write(const char *data, size_t length, void *context)
+{
+    (void) data;
+    (void) length;
+    (void) context;
+}
+
 static void write_styled_text(
     const airdap_debug_shell_input_callbacks_t *callbacks,
     const char *style,
@@ -39,15 +46,16 @@ static void write_styled_text(
 }
 
 static void write_prompt(
+    const airdap_debug_shell_input_t *input,
     const airdap_debug_shell_input_callbacks_t *callbacks)
 {
-    write_styled_text(callbacks, ansi_cyan, prompt);
+    write_styled_text(callbacks, ansi_cyan, input->prompt);
 }
 
 static void reset_editor(airdap_debug_shell_input_t *input)
 {
-    input->line[0] = '\0';
-    input->draft[0] = '\0';
+    memset(input->line, 0, sizeof(input->line));
+    memset(input->draft, 0, sizeof(input->draft));
     input->length = 0U;
     input->cursor = 0U;
     input->history_offset = 0U;
@@ -95,7 +103,8 @@ static void write_repeated(
     size_t count,
     const airdap_debug_shell_input_callbacks_t *callbacks)
 {
-    char output[AIRDAP_DEBUG_SHELL_LINE_CAPACITY + sizeof(prompt)];
+    char output[
+        AIRDAP_DEBUG_SHELL_LINE_CAPACITY + AIRDAP_DEBUG_SHELL_PROMPT_CAPACITY];
 
     if (count == 0U) {
         return;
@@ -105,13 +114,16 @@ static void write_repeated(
 }
 
 static void clear_rendered_line(
+    const airdap_debug_shell_input_t *input,
     size_t line_length,
     const airdap_debug_shell_input_callbacks_t *callbacks)
 {
+    const size_t rendered_line_length =
+        input->mode == AIRDAP_DEBUG_SHELL_INPUT_SECRET ? 0U : line_length;
     write_text(callbacks, "\r");
     write_repeated(
         ' ',
-        sizeof(prompt) - 1U + line_length,
+        strlen(input->prompt) + rendered_line_length,
         callbacks);
     write_text(callbacks, "\r");
 }
@@ -121,12 +133,14 @@ static void render_line(
     size_t erased_line_length,
     const airdap_debug_shell_input_callbacks_t *callbacks)
 {
-    clear_rendered_line(erased_line_length, callbacks);
-    write_prompt(callbacks);
-    if (input->length > 0U) {
+    clear_rendered_line(input, erased_line_length, callbacks);
+    write_prompt(input, callbacks);
+    if (input->mode != AIRDAP_DEBUG_SHELL_INPUT_SECRET && input->length > 0U) {
         callbacks->write(input->line, input->length, callbacks->context);
     }
-    write_repeated('\b', input->length - input->cursor, callbacks);
+    if (input->mode != AIRDAP_DEBUG_SHELL_INPUT_SECRET) {
+        write_repeated('\b', input->length - input->cursor, callbacks);
+    }
 }
 
 static void replace_line(
@@ -257,7 +271,7 @@ static void complete_command(
                     match_index,
                     callbacks->context);
         } while (completion != NULL);
-        write_prompt(callbacks);
+        write_prompt(input, callbacks);
         if (input->length > 0U) {
             callbacks->write(input->line, input->length, callbacks->context);
         }
@@ -370,10 +384,14 @@ static void handle_navigation_key(
 {
     switch (key) {
     case 'A':
-        recall_history(input, true, callbacks);
+        if (input->mode == AIRDAP_DEBUG_SHELL_INPUT_COMMAND) {
+            recall_history(input, true, callbacks);
+        }
         break;
     case 'B':
-        recall_history(input, false, callbacks);
+        if (input->mode == AIRDAP_DEBUG_SHELL_INPUT_COMMAND) {
+            recall_history(input, false, callbacks);
+        }
         break;
     case 'C':
         move_cursor_right(input, callbacks);
@@ -479,21 +497,29 @@ static void finish_line(
     airdap_debug_shell_input_t *input,
     const airdap_debug_shell_input_callbacks_t *callbacks)
 {
-    move_cursor_end(input, callbacks);
+    const airdap_debug_shell_input_mode_t submitted_mode = input->mode;
+    if (submitted_mode == AIRDAP_DEBUG_SHELL_INPUT_SECRET) {
+        input->cursor = input->length;
+    } else {
+        move_cursor_end(input, callbacks);
+    }
     write_text(callbacks, "\n");
     if (input->discarding) {
         write_styled_text(
             callbacks,
             ansi_red,
             "error: command line too long\n");
-    } else if (input->length > 0U) {
+    } else if (input->length > 0U ||
+               submitted_mode != AIRDAP_DEBUG_SHELL_INPUT_COMMAND) {
         input->line[input->length] = '\0';
-        add_history(input);
+        if (submitted_mode == AIRDAP_DEBUG_SHELL_INPUT_COMMAND) {
+            add_history(input);
+        }
         callbacks->execute(input->line, callbacks->context);
     }
 
     reset_editor(input);
-    write_prompt(callbacks);
+    write_prompt(input, callbacks);
 }
 
 void airdap_debug_shell_input_init(airdap_debug_shell_input_t *input)
@@ -502,6 +528,31 @@ void airdap_debug_shell_input_init(airdap_debug_shell_input_t *input)
         return;
     }
     memset(input, 0, sizeof(*input));
+    (void) airdap_debug_shell_input_set_mode(
+        input,
+        AIRDAP_DEBUG_SHELL_INPUT_COMMAND,
+        NULL);
+}
+
+bool airdap_debug_shell_input_set_mode(
+    airdap_debug_shell_input_t *input,
+    airdap_debug_shell_input_mode_t mode,
+    const char *prompt)
+{
+    if (input == NULL || mode > AIRDAP_DEBUG_SHELL_INPUT_SECRET) {
+        return false;
+    }
+    const char *selected_prompt = mode == AIRDAP_DEBUG_SHELL_INPUT_COMMAND
+        ? default_prompt
+        : prompt;
+    if (selected_prompt == NULL ||
+        strlen(selected_prompt) >= sizeof(input->prompt)) {
+        return false;
+    }
+    memset(input->prompt, 0, sizeof(input->prompt));
+    memcpy(input->prompt, selected_prompt, strlen(selected_prompt));
+    input->mode = mode;
+    return true;
 }
 
 void airdap_debug_shell_input_consume(
@@ -515,8 +566,15 @@ void airdap_debug_shell_input_consume(
         return;
     }
 
+    airdap_debug_shell_input_callbacks_t hidden_callbacks = *callbacks;
+    hidden_callbacks.write = discard_write;
+
     for (size_t index = 0U; index < length; ++index) {
         const uint8_t byte = data[index];
+        const airdap_debug_shell_input_callbacks_t *editor_callbacks =
+            input->mode == AIRDAP_DEBUG_SHELL_INPUT_SECRET
+            ? &hidden_callbacks
+            : callbacks;
 
         if (input->skip_lf) {
             input->skip_lf = false;
@@ -532,10 +590,19 @@ void airdap_debug_shell_input_consume(
         }
 
         if (byte == 0x03U) {
-            move_cursor_end(input, callbacks);
+            if (input->mode != AIRDAP_DEBUG_SHELL_INPUT_SECRET) {
+                move_cursor_end(input, callbacks);
+            }
             reset_editor(input);
+            if (callbacks->cancel != NULL) {
+                callbacks->cancel(callbacks->context);
+            }
+            (void) airdap_debug_shell_input_set_mode(
+                input,
+                AIRDAP_DEBUG_SHELL_INPUT_COMMAND,
+                NULL);
             write_text(callbacks, "^C\n");
-            write_prompt(callbacks);
+            write_prompt(input, callbacks);
             continue;
         }
 
@@ -543,12 +610,14 @@ void airdap_debug_shell_input_consume(
             continue;
         }
 
-        if (consume_escape_sequence(input, byte, callbacks)) {
+        if (consume_escape_sequence(input, byte, editor_callbacks)) {
             continue;
         }
 
         if (byte == '\t') {
-            complete_command(input, callbacks);
+            if (input->mode == AIRDAP_DEBUG_SHELL_INPUT_COMMAND) {
+                complete_command(input, callbacks);
+            }
             continue;
         }
 
@@ -560,7 +629,7 @@ void airdap_debug_shell_input_consume(
                     --input->cursor;
                     --input->length;
                     input->line[input->length] = '\0';
-                    write_text(callbacks, "\b \b");
+                    write_text(editor_callbacks, "\b \b");
                     continue;
                 }
                 memmove(
@@ -569,7 +638,7 @@ void airdap_debug_shell_input_consume(
                     input->length - input->cursor + 1U);
                 --input->cursor;
                 --input->length;
-                render_line(input, previous_length, callbacks);
+                render_line(input, previous_length, editor_callbacks);
             }
             continue;
         }
@@ -593,7 +662,7 @@ void airdap_debug_shell_input_consume(
             input->line[input->cursor] = (char) byte;
             ++input->cursor;
             ++input->length;
-            render_line(input, previous_length, callbacks);
+            render_line(input, previous_length, editor_callbacks);
             continue;
         }
 
@@ -601,7 +670,10 @@ void airdap_debug_shell_input_consume(
         ++input->cursor;
         ++input->length;
         input->line[input->length] = '\0';
-        callbacks->write((const char *) &byte, 1U, callbacks->context);
+        editor_callbacks->write(
+            (const char *) &byte,
+            1U,
+            editor_callbacks->context);
     }
 }
 
@@ -616,14 +688,16 @@ void airdap_debug_shell_input_write_background(
         return;
     }
 
-    clear_rendered_line(input->length, callbacks);
+    clear_rendered_line(input, input->length, callbacks);
     callbacks->write(data, length, callbacks->context);
     if (data[length - 1U] != '\n') {
         write_text(callbacks, "\n");
     }
-    write_prompt(callbacks);
-    if (input->length > 0U) {
+    write_prompt(input, callbacks);
+    if (input->mode != AIRDAP_DEBUG_SHELL_INPUT_SECRET && input->length > 0U) {
         callbacks->write(input->line, input->length, callbacks->context);
     }
-    write_repeated('\b', input->length - input->cursor, callbacks);
+    if (input->mode != AIRDAP_DEBUG_SHELL_INPUT_SECRET) {
+        write_repeated('\b', input->length - input->cursor, callbacks);
+    }
 }
