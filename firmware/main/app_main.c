@@ -3,6 +3,7 @@
 #include "sdkconfig.h"
 
 #include "airdap_board.h"
+#include "airdap_ble_provisioning.h"
 #include "airdap_config_store.h"
 #include "airdap_device_identity.h"
 #include "airdap_discovery.h"
@@ -13,6 +14,7 @@
 #include "airdap_voltage_monitor.h"
 #include "airdap_wifi_manager.h"
 #include "esp_err.h"
+#include "esp_event.h"
 #include "esp_log.h"
 
 #if !CONFIG_IDF_TARGET_ESP32S3
@@ -35,6 +37,7 @@ void app_main(void)
     ESP_ERROR_CHECK(airdap_voltage_monitor_read(&voltage));
     ESP_ERROR_CHECK(airdap_usb_init());
     ESP_ERROR_CHECK(airdap_ota_confirm_running_image());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     const esp_err_t wifi_error = airdap_wifi_manager_start();
     if (wifi_error != ESP_OK) {
@@ -45,6 +48,11 @@ void app_main(void)
             ESP_LOGW(TAG, "mDNS discovery unavailable: %s",
                 esp_err_to_name(discovery_error));
         }
+    }
+    const esp_err_t provisioning_error = airdap_ble_provisioning_start();
+    if (provisioning_error != ESP_OK) {
+        ESP_LOGW(TAG, "BLE provisioning unavailable: %s",
+            esp_err_to_name(provisioning_error));
     }
 
     ESP_LOGI(

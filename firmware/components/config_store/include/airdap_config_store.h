@@ -61,6 +61,10 @@ esp_err_t airdap_config_store_set_blob(
     airdap_config_slot_t slot,
     const void *data,
     size_t data_size);
+/* Atomically publishes successful Wi-Fi provisioning with its credential blob. */
+esp_err_t airdap_config_store_commit_network_provisioning(
+    const void *wifi_credentials,
+    size_t wifi_credentials_size);
 esp_err_t airdap_config_store_clear(airdap_config_clear_flags_t flags);
 
 #ifdef __cplusplus

@@ -351,6 +351,34 @@ static void test_failed_writes_do_not_publish_or_commit_candidates(void)
     assert(open_calls == close_calls);
 }
 
+static void test_network_provisioning_commit_is_atomic(void)
+{
+    static const uint8_t replacement_credentials[] = {0x31, 0x32, 0x33};
+    const unsigned commits_before = commit_calls;
+
+    assert(airdap_config_store_set_provisioned(false) == ESP_OK);
+    const airdap_config_store_record_t before = durable_record;
+
+    commit_result = ESP_FAIL;
+    assert(airdap_config_store_commit_network_provisioning(
+        replacement_credentials,
+        sizeof(replacement_credentials)) == ESP_FAIL);
+    commit_result = ESP_OK;
+    assert(memcmp(&durable_record, &before, sizeof(before)) == 0);
+
+    assert(airdap_config_store_commit_network_provisioning(
+        replacement_credentials,
+        sizeof(replacement_credentials)) == ESP_OK);
+    assert(commit_calls == commits_before + 3U);
+    assert(durable_record.provisioned == 1U);
+    assert(durable_record.slots[AIRDAP_CONFIG_SLOT_WIFI_CREDENTIALS].length ==
+        sizeof(replacement_credentials));
+    assert(memcmp(
+        durable_record.slots[AIRDAP_CONFIG_SLOT_WIFI_CREDENTIALS].data,
+        replacement_credentials,
+        sizeof(replacement_credentials)) == 0);
+}
+
 static void test_selective_clear_preserves_unselected_fields(void)
 {
     const unsigned commits_before = commit_calls;
@@ -583,6 +611,7 @@ int main(void)
     test_initialization_error_and_recovery_boundaries();
     test_committed_configuration_is_readable();
     test_failed_writes_do_not_publish_or_commit_candidates();
+    test_network_provisioning_commit_is_atomic();
     test_selective_clear_preserves_unselected_fields();
     test_concurrent_writes_are_serialized();
     test_public_api_restores_committed_state_after_reboot();

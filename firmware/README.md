@@ -142,6 +142,8 @@ not part of this repository. The application currently provides:
 - a Wi-Fi station manager with DHCP-gated online state and bounded reconnect
   backoff;
 - mDNS discovery on the station interface after DHCP succeeds;
+- an on-demand BLE provisioning window using protocomm Security 2 and
+  development credentials injected through a dedicated NVS partition;
 - a bounded transport-independent DAP service with session-safe response
   routing for USB and future network sessions;
 - target reset, power/status GPIO, VTref, and USB VBUS monitoring.
@@ -153,8 +155,8 @@ digits. Its 128-bit UUID is the first 16 bytes of
 development identifiers; product firmware must use identifiers the project is
 authorized to ship. The checked-in layout is for the confirmed 8 MiB module
 and provides two 4032 KiB OTA application slots. Secure Boot, Flash Encryption,
-authenticated updates, authenticated network services, and BLE provisioning
-remain deferred.
+authenticated updates, authenticated network services, and a production
+credential lifecycle remain deferred.
 
 The firmware version is the single tag pointing directly at the built commit.
 When that commit has no tag, the version is its seven-character Git hash. A
@@ -214,10 +216,10 @@ transport identifier remains internal at this stage and no network listener is
 exposed.
 
 The mode state publishes orthogonal USB, Wi-Fi, provisioning, OTA, and live DAP
-owner fields. USB attach/detach, Wi-Fi station, and OTA lifecycle events are
-wired today; provisioning remains `idle` until its later Phase 3 component
-publishes events. USB DAP admission ignores Wi-Fi state. Authenticated NETWORK
-DAP admission requires USB to be absent and Wi-Fi to be online, while USB
+owner fields. USB attach/detach, Wi-Fi station, BLE provisioning, and OTA
+lifecycle events are wired today. USB DAP admission ignores Wi-Fi state.
+Authenticated NETWORK DAP admission requires USB to be absent and Wi-Fi to be
+online, while USB
 presence does not disable future network status, configuration, or OTA paths.
 USB attach conditionally revokes an idle NETWORK DAP owner. Ownership acquire
 and physical-operation begin revalidate versioned mode policy, so an attach
@@ -234,8 +236,10 @@ local subsystem initialization and has no AP, DHCP, or internet dependency.
 manager starts only after USB initialization and OTA running-image confirmation;
 it never calls `nvs_flash_init()` or `nvs_flash_erase()`. Station credentials use
 a versioned, length-delimited encoding in the existing Wi-Fi credential slot,
-and the ESP-IDF Wi-Fi driver's credential storage is set to RAM so this slot is
-the canonical persisted copy.
+and `CONFIG_ESP_WIFI_NVS_ENABLED` is disabled. Driver storage is also selected
+as RAM for normal operation, so neither ordinary reconnects nor the upstream
+provisioning manager can persist a second copy; this slot remains the canonical
+persisted value.
 
 A station link is still reported as `connecting`. Only
 `IP_EVENT_STA_GOT_IP`, after DHCP succeeds, publishes `online`. Authentication
@@ -247,10 +251,13 @@ committed credential update cancels any pending retry, resets the delay,
 disconnects the previous attempt if needed, and applies the latest committed
 credentials immediately. SSIDs and passwords are never logged.
 
-The project pins `espressif/network_provisioning` 1.2.4 for the later BLE
-provisioning slice and explicitly enables protocomm Security 2. BLE transport,
-PoP injection, provisioning-window behavior, and custom pairing endpoints are
-not part of the station-manager slice.
+The project pins `espressif/network_provisioning` 1.2.4 and enables BLE plus
+protocomm Security 2. While a window is active, the upstream manager exclusively
+controls Wi-Fi association; AirDAP's reconnect state machine resumes only after
+the provisioning manager ends and then reapplies the canonical configuration.
+A failed, cancelled, or timed-out attempt restores the previously committed
+configuration. The custom pairing and authenticated network-service endpoints
+remain later work.
 
 For development-board Wi-Fi validation, use a dedicated test AP and never a
 production credential. The HIL console accepts credentials at runtime so they
@@ -306,6 +313,78 @@ Follow [`test/hil/mdns.md`](test/hil/mdns.md) to validate live announcements,
 address replacement, offline withdrawal, and firmware-version consistency from
 Linux and Windows. This RF and LAN boundary cannot be established by the host
 unit test or firmware build.
+
+## BLE Security 2 provisioning
+
+BLE is disabled during normal operation. Hold `BOOT_KEY` (GPIO0) for three
+seconds to open a 120-second provisioning window. Holding it for three seconds
+again while the window is active cancels the attempt. The BLE service name is
+the shared `ADP-<12 uppercase MAC digits>` device ID. A successful Wi-Fi/DHCP
+check atomically commits the new credentials and marks the device provisioned.
+The service remains available long enough for the client to query that success,
+then the upstream 30-second auto-stop ends BLE and releases its resources.
+Failure leaves the window open for another client attempt; cancel and timeout
+stop BLE and restore the previously committed Wi-Fi configuration.
+
+Hold `BOOT_KEY` for ten seconds to clear Wi-Fi credentials plus the reserved
+pairing and network-authentication slots. Firmware waits until GPIO0 is
+released before restarting, so the restart does not intentionally enter the
+ROM download mode. This reset does not erase the separately injected Security
+2 verifier; after restart the device can open a fresh provisioning window.
+
+The development Security 2 username is the fixed, non-secret value `airdap`.
+Create a device-local salt and SRP verifier with an interactively entered test
+PoP after activating ESP-IDF:
+
+```sh
+cd firmware
+python tools/airdap-sec2-credentials.py /absolute/private/path/sec2_keys.bin
+```
+
+The PoP is read without echo, requires a private terminal, and is not accepted
+on the command line. The tool uses ESP-IDF's NVS partition generator and prints
+only `SEC2_CREDENTIAL_FINGERPRINT=<SHA-256>`. On POSIX, temporary inputs and the
+final image use mode `0600`; on Windows, place the output in a private NTFS
+directory whose ACL grants access only to the intended user. Keep the image and
+PoP outside Git, logs, tickets, and shared build artifacts. To inject the image,
+first install a normal build containing the current partition table, then run
+the following only against the explicitly selected development board:
+
+```sh
+python "$IDF_PATH/components/partition_table/parttool.py" \
+    --port <airdap-programming-port> \
+    write_partition \
+    --partition-name sec2_keys \
+    --input /absolute/private/path/sec2_keys.bin \
+    --ignore-readonly
+```
+
+The `--ignore-readonly` option permits the manufacturing-style write to the
+partition that application firmware can only open read-only. A normal
+application update and the ten-second network reset preserve this partition;
+an erase-flash operation does not. The generator rejects output anywhere in the
+current worktree or its common Git repository; an ignored build directory is
+not an acceptable private location. At provisioning-window startup, compare
+the logged fingerprint with the generator output. The salt, verifier, PoP,
+SSID, and Wi-Fi password are never logged by AirDAP.
+
+For a development client, omit both Security 2 and Wi-Fi passwords from the
+command line so the Espressif tool prompts for them:
+
+```sh
+python managed_components/espressif__network_provisioning/tool/esp_prov/esp_prov.py \
+    --transport ble \
+    --service_name ADP-001122334455 \
+    --sec_ver 2 \
+    --sec2_username airdap
+```
+
+The checked-in firmware does not enable Flash Encryption. A read-only SRP
+verifier avoids storing the plaintext PoP but is still credential material,
+so this injection flow is for development and HIL only, not a production key
+lifecycle. Follow [`test/hil/ble_provisioning.md`](test/hil/ble_provisioning.md)
+before relying on BLE lifecycle, RF behavior, Wi-Fi association, persistence,
+or the GPIO0 reset guard on hardware.
 
 `DAP_Connect` acquires its transport's DAP/SWD owner. USB may preempt an idle
 NETWORK owner after attach; it does not tear down an in-flight operation or a
@@ -525,7 +604,8 @@ The other hardware-independent tests use the same pattern:
 for suite in \
     bootloader_artifact ota_layout setup_env board config_store device_identity voltage_monitor swd_protocol \
     dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame discovery \
-    dap_ota dap_stream ota_manager app_main wifi_manager target_uart usb_descriptors project_version \
+    dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning sec2_credentials \
+    target_uart usb_descriptors project_version \
     debug_shell_config_status debug_shell_identity debug_shell_input debug_shell_wifi \
     debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
@@ -540,7 +620,10 @@ concurrent writes, fake-NVS restart recovery, selective configuration clearing,
 safe configuration-status command behavior, ADC scaling, SWD transaction
 framing, Wi-Fi credential encoding, wrong-password classification, DHCP-gated
 online state, IP-loss handling, bounded reconnect backoff, actual timer/driver
-coordination, configuration-change event ordering and recovery, DAP owner
+coordination, configuration-change event ordering and recovery, Security 2
+salt/verifier generation against a golden vector, private NVS image handling,
+provisioning-button thresholds, BLE window cleanup, atomic provisioning commit,
+and reset-after-release behavior, DAP owner
 transitions and physical-backend release calls, unified
 USB/Wi-Fi/provisioning/OTA mode transitions and DAP admission, CMSIS-DAP and OTA
 command framing, mDNS identity/TXT formatting and IP-driven publish/refresh/
@@ -551,7 +634,8 @@ ordering, UART line-coding
 mapping, both compile-time USB descriptor variants, bounded shell input, the
 bounded SWD IDCODE command flow, debug TX completion state, host tools, and
 wired HIL helper's protocol checks. They do not prove USB enumeration, real NVS
-power-loss persistence or purge behavior, physical OTA persistence, bootloader
-rollback on a board, or electrical SWD timing.
+power-loss persistence or purge behavior, BLE enumeration or radio lifetime,
+real Wi-Fi provisioning, physical OTA persistence, bootloader rollback on a
+board, or electrical SWD timing.
 Follow `test/hil/wired.md` on a populated AirDAP board before marking roadmap
 Stage 1 complete.

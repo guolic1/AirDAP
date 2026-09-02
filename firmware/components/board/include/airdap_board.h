@@ -22,6 +22,9 @@ esp_err_t airdap_target_power_get_active(bool *active);
 /* GPIO41 drives an inverting transistor: high asserts target nRESET. */
 esp_err_t airdap_target_reset_set_asserted(bool asserted);
 
+/* BOOT_KEY is active low and doubles as the ROM download-mode strap. */
+esp_err_t airdap_boot_key_get_pressed(bool *pressed);
+
 #ifdef __cplusplus
 }
 #endif
