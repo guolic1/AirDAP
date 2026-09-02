@@ -524,6 +524,10 @@ class AirDapShellTests(unittest.TestCase):
         with self.assertRaisesRegex(airdap_shell.ShellError, "last"):
             airdap_shell.validate_command_sequence(["restart", "status"])
 
+    def test_wifi_set_is_interactive_only(self) -> None:
+        with self.assertRaisesRegex(airdap_shell.ShellError, "interactive"):
+            airdap_shell.validate_command_sequence(["wifi set"])
+
 
 if __name__ == "__main__":
     unittest.main()

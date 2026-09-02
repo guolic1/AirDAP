@@ -108,6 +108,7 @@ static void test_command_registry_has_only_supported_commands(void)
         "identity",
         "config-status",
         "status",
+        "wifi",
         "swd-idcode",
         "restart",
     };

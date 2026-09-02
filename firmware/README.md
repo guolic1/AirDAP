@@ -353,8 +353,17 @@ run non-interactively:
 
 ```sh
 python tools/airdap-shell.py \
-    -c help -c identity -c config-status -c status -c "swd-idcode 100"
+    -c help -c identity -c config-status -c status -c "wifi status" \
+    -c "swd-idcode 100"
 ```
+
+`wifi set` is interactive-only so credentials cannot be supplied through shell
+command history or `-c` process arguments. It first prompts for an SSID and then
+for a password; password input is not echoed, is not added to shell history,
+and is scrubbed from the input/session buffers after submission or Ctrl-C.
+SSID input accepts 1–32 printable ASCII bytes and password input accepts 0–64;
+an empty password selects an open network. Use `wifi status` afterward: only a
+DHCP-confirmed connection reports `wifi=online`.
 
 `--color auto` is the default: it enables ANSI colors for an interactive TTY
 and keeps `-c` command output plain for scripts. Use `--color always` to force
@@ -376,6 +385,11 @@ Ctrl-C, Tab, and ANSI navigation sequences. Available commands are:
 - `config-status` — print only the configuration schema and provisioning state;
   credential values are never included;
 - `status` — print `target_mv`, `usb_vbus_mv`, `uptime_ms`, and `free_heap`;
+- `wifi status` — print `wifi=stopped`, `disconnected`, `connecting`, or
+  `online` without displaying credentials;
+- `wifi set` — interactively replace the stored SSID and password, reset
+  reconnect backoff, and reconnect immediately;
+- `wifi clear` — remove stored Wi-Fi credentials and stop reconnect attempts;
 - `swd-idcode [clock_khz]` — reset the SWD line, select SWD, and read the
   target DP IDCODE at 100 kHz by default; accepted clocks are 100–10,000 kHz;
 - `restart` — wait for the acknowledgement transfer to complete, then restart
@@ -393,9 +407,12 @@ current input, and cursor after printing it. Mirroring uses a bounded queue and
 may drop burst logs instead of blocking application tasks. ROM, bootloader,
 early application messages, and direct standard output are not captured by the
 Vendor interface. The shell is intended for physically connected development
-systems: it has no authentication and exposes only a bounded, read-only SWD DP
-IDCODE diagnostic. It deliberately provides no arbitrary DP/AP access, target
-memory access, programming, persistent history, or dynamic log-control commands.
+systems: it has no authentication, and anyone with access to it can replace or
+clear persistent Wi-Fi credentials. The current development profile does not
+enable Flash Encryption, so those credentials remain plaintext at rest. The
+shell provides only bounded diagnostics and Wi-Fi credential management; it
+deliberately provides no arbitrary DP/AP access, target memory access,
+programming, persistent history, or dynamic log-control commands.
 
 ## Host unit tests
 
@@ -422,7 +439,7 @@ for suite in \
     bootloader_artifact ota_layout board config_store device_identity voltage_monitor swd_protocol \
     dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame \
     dap_ota dap_stream ota_manager app_main wifi_manager target_uart usb_descriptors project_version \
-    debug_shell_config_status debug_shell_identity debug_shell_input \
+    debug_shell_config_status debug_shell_identity debug_shell_input debug_shell_wifi \
     debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
     cmake --build "build-host/$suite"

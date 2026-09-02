@@ -5,9 +5,10 @@ menu "AirDAP USB device"
         default n
         help
             Add a Vendor-specific Bulk interface for AirDAP firmware
-            diagnostics. The shell provides help, status, and restart commands
-            and mirrors ESP logs after the host starts a session. Set TinyUSB
-            Vendor Interface Count to 2 when enabling this option. The
+            diagnostics. The shell provides device status, Wi-Fi credential
+            management, and restart commands, and mirrors ESP logs after the
+            host starts a session. Set TinyUSB Vendor Interface Count to 2 when
+            enabling this option. The
             checked-in sdkconfig.debug-shell.defaults profile sets both values
             for reproducible debug builds.
 

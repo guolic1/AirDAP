@@ -277,9 +277,15 @@ def _is_restart_command(command: str) -> bool:
     return [word for word in command.split(" ") if word] == ["restart"]
 
 
+def _is_interactive_wifi_set(command: str) -> bool:
+    return [word for word in command.split(" ") if word] == ["wifi", "set"]
+
+
 def validate_command_sequence(commands: Sequence[str]) -> None:
     for index, command in enumerate(commands):
         _encode_command(command)
+        if _is_interactive_wifi_set(command):
+            raise ShellError("wifi set is interactive and cannot be used with -c")
         if _is_restart_command(command) and index != len(commands) - 1:
             raise ShellError("restart must be the last command in a -c sequence")
 

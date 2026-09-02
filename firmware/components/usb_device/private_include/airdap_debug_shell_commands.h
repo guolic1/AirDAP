@@ -8,6 +8,7 @@
         "Show safe persistent-config status", \
         config_status_command) \
     X("status", "Show voltages, uptime, and free heap", status_command) \
+    X("wifi", "Manage Wi-Fi credentials and show state", wifi_command) \
     X( \
         "swd-idcode", \
         "Read the target DP IDCODE [clock_khz]", \

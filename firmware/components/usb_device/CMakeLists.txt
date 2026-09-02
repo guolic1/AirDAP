@@ -18,6 +18,7 @@ set(usb_device_private_requires
     swd_engine
     target_uart
     voltage_monitor
+    wifi_manager
 )
 
 if(CONFIG_AIRDAP_DEBUG_SHELL)
@@ -32,6 +33,7 @@ if(CONFIG_AIRDAP_DEBUG_SHELL)
         "debug_shell_input.c"
         "debug_shell_swd_probe.c"
         "debug_shell_tx_state.c"
+        "debug_shell_wifi.c"
     )
 endif()
 
