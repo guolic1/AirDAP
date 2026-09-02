@@ -5,6 +5,7 @@
 #include "airdap_board.h"
 #include "airdap_config_store.h"
 #include "airdap_device_identity.h"
+#include "airdap_discovery.h"
 #include "airdap_mode_state.h"
 #include "airdap_ota.h"
 #include "airdap_swd.h"
@@ -38,6 +39,12 @@ void app_main(void)
     const esp_err_t wifi_error = airdap_wifi_manager_start();
     if (wifi_error != ESP_OK) {
         ESP_LOGW(TAG, "Wi-Fi unavailable: %s", esp_err_to_name(wifi_error));
+    } else {
+        const esp_err_t discovery_error = airdap_discovery_start();
+        if (discovery_error != ESP_OK) {
+            ESP_LOGW(TAG, "mDNS discovery unavailable: %s",
+                esp_err_to_name(discovery_error));
+        }
     }
 
     ESP_LOGI(

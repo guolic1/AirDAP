@@ -20,10 +20,13 @@ typedef enum {
     CALL_USB_INITIALIZE,
     CALL_OTA_CONFIRM,
     CALL_WIFI_MANAGER_START,
+    CALL_DISCOVERY_START,
 } call_t;
 
-static call_t calls[11];
+static call_t calls[12];
 static size_t call_count;
+static esp_err_t wifi_start_result;
+static esp_err_t discovery_start_result;
 
 static void record(call_t call)
 {
@@ -97,12 +100,18 @@ esp_err_t airdap_ota_confirm_running_image(void)
 esp_err_t airdap_wifi_manager_start(void)
 {
     record(CALL_WIFI_MANAGER_START);
-    return ESP_FAIL;
+    return wifi_start_result;
+}
+
+esp_err_t airdap_discovery_start(void)
+{
+    record(CALL_DISCOVERY_START);
+    return discovery_start_result;
 }
 
 void app_main(void);
 
-int main(void)
+static void test_wifi_failure_does_not_start_discovery(void)
 {
     static const call_t expected[] = {
         CALL_MODE_STATE_INITIALIZE,
@@ -118,12 +127,48 @@ int main(void)
         CALL_WIFI_MANAGER_START,
     };
 
+    wifi_start_result = ESP_FAIL;
+    discovery_start_result = ESP_OK;
     app_main();
 
     assert(call_count == sizeof(expected) / sizeof(expected[0]));
     for (size_t index = 0U; index < call_count; ++index) {
         assert(calls[index] == expected[index]);
     }
+}
+
+static void test_discovery_starts_after_wifi_and_does_not_block_startup(void)
+{
+    static const call_t expected[] = {
+        CALL_MODE_STATE_INITIALIZE,
+        CALL_OTA_INITIALIZE,
+        CALL_BOARD_INITIALIZE,
+        CALL_DEVICE_IDENTITY_INITIALIZE,
+        CALL_CONFIG_STORE_INITIALIZE,
+        CALL_VOLTAGE_INITIALIZE,
+        CALL_SWD_INITIALIZE,
+        CALL_VOLTAGE_READ,
+        CALL_USB_INITIALIZE,
+        CALL_OTA_CONFIRM,
+        CALL_WIFI_MANAGER_START,
+        CALL_DISCOVERY_START,
+    };
+
+    call_count = 0U;
+    wifi_start_result = ESP_OK;
+    discovery_start_result = ESP_FAIL;
+    app_main();
+
+    assert(call_count == sizeof(expected) / sizeof(expected[0]));
+    for (size_t index = 0U; index < call_count; ++index) {
+        assert(calls[index] == expected[index]);
+    }
+}
+
+int main(void)
+{
+    test_wifi_failure_does_not_start_discovery();
+    test_discovery_starts_after_wifi_and_does_not_block_startup();
     puts("app_main initialization-order test passed");
     return 0;
 }

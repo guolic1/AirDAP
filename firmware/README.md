@@ -89,6 +89,7 @@ not part of this repository. The application currently provides:
   and the current DAP owner;
 - a Wi-Fi station manager with DHCP-gated online state and bounded reconnect
   backoff;
+- mDNS discovery on the station interface after DHCP succeeds;
 - a bounded transport-independent DAP service with session-safe response
   routing for USB and future network sessions;
 - target reset, power/status GPIO, VTref, and USB VBUS monitoring.
@@ -219,6 +220,40 @@ therefore requires explicit authorization for the selected board. It replaces
 the standard AirDAP partition table/application until the normal firmware is
 flashed again. A host test or firmware build does not replace these RF,
 association, and DHCP observations.
+
+## mDNS discovery
+
+After the Wi-Fi station obtains an IP address, AirDAP publishes one
+`_airdap._tcp.local` service on TCP port 3260. The stable hostname is
+`airdap-<12 lowercase MAC digits>.local`, and the service instance is the
+shared `ADP-<12 uppercase MAC digits>` device ID. The TXT record contains:
+
+```text
+id=ADP-001122334455
+proto=1
+fw=<exact tag or seven-character Git hash>
+cap=swd,uart,power,reset,ota
+state=idle
+dap_port=3260
+uart_port=3261
+```
+
+The identity, protocol version, firmware version, and capability selection all
+come from `device_identity`; discovery does not derive a second identity. A
+repeated `IP_EVENT_STA_GOT_IP`, including an address change, removes and adds
+the service again so the current address is announced. `IP_EVENT_STA_LOST_IP`
+removes the service locally. Host caches may retain an expired address for its
+TTL and are not evidence that the device is still advertising it.
+
+mDNS fields are unauthenticated hints. They contain no Wi-Fi or pairing secret
+and must never be used to authorize a connection. TCP ports 3260 and 3261 are
+the reserved AirDAP protocol ports; the authenticated DAP/control and target
+UART listeners remain deferred to their network-transport slices.
+
+Follow [`test/hil/mdns.md`](test/hil/mdns.md) to validate live announcements,
+address replacement, offline withdrawal, and firmware-version consistency from
+Linux and Windows. This RF and LAN boundary cannot be established by the host
+unit test or firmware build.
 
 `DAP_Connect` acquires its transport's DAP/SWD owner. USB may preempt an idle
 NETWORK owner after attach; it does not tear down an in-flight operation or a
@@ -437,7 +472,7 @@ The other hardware-independent tests use the same pattern:
 ```sh
 for suite in \
     bootloader_artifact ota_layout board config_store device_identity voltage_monitor swd_protocol \
-    dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame \
+    dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame discovery \
     dap_ota dap_stream ota_manager app_main wifi_manager target_uart usb_descriptors project_version \
     debug_shell_config_status debug_shell_identity debug_shell_input debug_shell_wifi \
     debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update wired_hil; do
@@ -456,7 +491,8 @@ online state, IP-loss handling, bounded reconnect backoff, actual timer/driver
 coordination, configuration-change event ordering and recovery, DAP owner
 transitions and physical-backend release calls, unified
 USB/Wi-Fi/provisioning/OTA mode transitions and DAP admission, CMSIS-DAP and OTA
-command framing, OTA state transitions, stale USB-frame recovery, interleaved
+command framing, mDNS identity/TXT formatting and IP-driven publish/refresh/
+withdraw behavior, OTA state transitions, stale USB-frame recovery, interleaved
 USB/NETWORK DAP routing, AirDAP frame golden vectors and sequence rules,
 stale-session response suppression, bounded queue failures, host update
 ordering, UART line-coding
