@@ -161,20 +161,46 @@ class SetupTests(unittest.TestCase):
         clone = commands[0][0]
         self.assertEqual(clone[:4], ["git", "clone", "--branch", "v6.1"])
         self.assertNotIn("--recursive", clone)
+        self.assertEqual(
+            self.setup.REQUIRED_IDF_SUBMODULES,
+            (
+                "components/bootloader/subproject/components/micro-ecc/micro-ecc",
+                "components/esp_phy/lib",
+                "components/esp_wifi/lib",
+                "components/heap/tlsf",
+                "components/lwip/lwip",
+                "components/mbedtls/mbedtls",
+                "components/protobuf-c/protobuf-c",
+            ),
+        )
         self.assertTrue(
             any(
                 command[:4]
                 == ["git", "-C", str(idf_path.resolve()), "submodule"]
-                and command[4:] == ["update", "--init", "--recursive", "--depth", "1"]
+                and command[4:]
+                == [
+                    "update",
+                    "--init",
+                    "--recursive",
+                    "--depth",
+                    "1",
+                    "--",
+                    *self.setup.REQUIRED_IDF_SUBMODULES,
+                ]
                 for command, _, _ in commands
             ),
             commands,
         )
 
         tool_commands = [command for command, _, _ in commands if "idf_tools.py" in " ".join(command)]
+        self.assertEqual(
+            self.setup.REQUIRED_IDF_TOOLS,
+            ("xtensa-esp-elf", "cmake", "ninja", "esp-rom-elfs"),
+        )
         self.assertTrue(
             any(
-                command[-4:] == ["--targets=esp32s3", "required", "cmake", "ninja"]
+                command[-5:]
+                == ["--targets=esp32s3", *self.setup.REQUIRED_IDF_TOOLS]
                 for command in tool_commands
             ),
             tool_commands,
@@ -226,6 +252,8 @@ class SetupTests(unittest.TestCase):
                 "--recursive",
                 "--depth",
                 "1",
+                "--",
+                *self.setup.REQUIRED_IDF_SUBMODULES,
             ],
             commands,
         )

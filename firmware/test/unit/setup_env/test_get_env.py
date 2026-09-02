@@ -79,20 +79,27 @@ class GetEnvironmentTests(unittest.TestCase):
             [
                 "bash",
                 "-c",
-                '. "$1" && printf "%s|%s\\n" "$IDF_TOOLS_PATH" "${IDF_PYTHON_ENV_PATH-unset}"',
+                '. "$1" && printf "%s|%s|%s|%s\\n" "$IDF_TOOLS_PATH" '
+                '"${IDF_PYTHON_ENV_PATH-unset}" "$IDF_SKIP_TOOLS_CHECK" '
+                '"${IDF_SKIP_CHECK_SUBMODULES-unset}"',
                 "bash",
                 str(self.firmware / "get_env.sh"),
             ],
             check=False,
             text=True,
             capture_output=True,
-            env={**os.environ, "IDF_PYTHON_ENV_PATH": "/stale/python"},
+            env={
+                **os.environ,
+                "IDF_PYTHON_ENV_PATH": "/stale/python",
+                "IDF_SKIP_TOOLS_CHECK": "stale",
+                "IDF_SKIP_CHECK_SUBMODULES": "stale",
+            },
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.stdout.strip().splitlines()[-1],
-            f"{state.resolve()}|unset",
+            f"{state.resolve()}|unset|1|unset",
         )
 
     def test_bash_sets_repository_tools_path_for_managed_idf(self) -> None:
@@ -106,7 +113,8 @@ class GetEnvironmentTests(unittest.TestCase):
             [
                 "bash",
                 "-c",
-                '. "$1" && printf "%s\\n" "$IDF_TOOLS_PATH"',
+                '. "$1" && printf "%s|%s|%s\\n" "$IDF_TOOLS_PATH" '
+                '"$IDF_SKIP_TOOLS_CHECK" "$IDF_SKIP_CHECK_SUBMODULES"',
                 "bash",
                 str(self.firmware / "get_env.sh"),
             ],
@@ -116,7 +124,10 @@ class GetEnvironmentTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip().splitlines()[-1], str(state.resolve()))
+        self.assertEqual(
+            result.stdout.strip().splitlines()[-1],
+            f"{state.resolve()}|1|1",
+        )
 
     def test_bash_rejects_missing_configuration(self) -> None:
         self.require_bash()
@@ -165,11 +176,20 @@ class GetEnvironmentTests(unittest.TestCase):
                 "-ExecutionPolicy",
                 "Bypass",
                 "-Command",
-                f". '{escaped_script}'; Write-Output $env:AIRDAP_TEST_ACTIVATED",
+                f". '{escaped_script}'; Write-Output $env:AIRDAP_TEST_ACTIVATED; "
+                "Write-Output $env:IDF_SKIP_TOOLS_CHECK; "
+                "if (Test-Path Env:IDF_SKIP_CHECK_SUBMODULES) { "
+                "Write-Output $env:IDF_SKIP_CHECK_SUBMODULES } else { "
+                "Write-Output '<unset>' }",
             ],
             check=False,
             text=True,
             capture_output=True,
+            env={
+                **os.environ,
+                "IDF_SKIP_TOOLS_CHECK": "stale",
+                "IDF_SKIP_CHECK_SUBMODULES": "stale",
+            },
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -177,10 +197,10 @@ class GetEnvironmentTests(unittest.TestCase):
             result.stdout.strip(),
             f"PowerShell produced no activation output; stderr={result.stderr!r}",
         )
-        self.assertEqual(
-            result.stdout.strip().splitlines()[-1].casefold(),
-            configured_path.casefold(),
-        )
+        output_lines = result.stdout.strip().splitlines()
+        self.assertEqual(output_lines[-3].casefold(), configured_path.casefold())
+        self.assertEqual(output_lines[-2], "1")
+        self.assertEqual(output_lines[-1], "<unset>")
 
     def test_powershell_sets_repository_tools_path_for_managed_idf_when_available(
         self,
@@ -208,21 +228,30 @@ class GetEnvironmentTests(unittest.TestCase):
                 f". '{escaped_script}'; Write-Output $env:IDF_TOOLS_PATH; "
                 "if (Test-Path Env:IDF_PYTHON_ENV_PATH) { "
                 "Write-Output $env:IDF_PYTHON_ENV_PATH } else { "
-                "Write-Output '<unset>' }",
+                "Write-Output '<unset>' }; "
+                "Write-Output $env:IDF_SKIP_TOOLS_CHECK; "
+                "Write-Output $env:IDF_SKIP_CHECK_SUBMODULES",
             ],
             check=False,
             text=True,
             capture_output=True,
-            env={**os.environ, "IDF_PYTHON_ENV_PATH": "C:\\stale\\python"},
+            env={
+                **os.environ,
+                "IDF_PYTHON_ENV_PATH": "C:\\stale\\python",
+                "IDF_SKIP_TOOLS_CHECK": "stale",
+                "IDF_SKIP_CHECK_SUBMODULES": "stale",
+            },
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         output_lines = result.stdout.strip().splitlines()
         self.assertEqual(
-            output_lines[-2].casefold(),
+            output_lines[-4].casefold(),
             expected_tools_path.casefold(),
         )
-        self.assertEqual(output_lines[-1], "<unset>")
+        self.assertEqual(output_lines[-3], "<unset>")
+        self.assertEqual(output_lines[-2], "1")
+        self.assertEqual(output_lines[-1], "1")
 
     @staticmethod
     def _powershell_path(path: Path, executable: str) -> str:

@@ -20,8 +20,27 @@ if (-not (Test-Path -LiteralPath $airdapExportScript -PathType Leaf)) {
 $airdapIdfPath = (Resolve-Path -LiteralPath $airdapIdfPath -ErrorAction Stop).ProviderPath
 $env:IDF_TOOLS_PATH = $airdapEnvironmentDir
 Remove-Item Env:IDF_PYTHON_ENV_PATH -ErrorAction SilentlyContinue
+$env:IDF_SKIP_TOOLS_CHECK = "1"
+
+$airdapManagedIdfPath = Join-Path $airdapEnvironmentDir "esp-idf"
+$airdapUsesManagedIdf = $false
+if (Test-Path -LiteralPath $airdapManagedIdfPath -PathType Container) {
+    $airdapManagedIdfPath = (
+        Resolve-Path -LiteralPath $airdapManagedIdfPath -ErrorAction Stop
+    ).ProviderPath
+    $airdapUsesManagedIdf = [StringComparer]::OrdinalIgnoreCase.Equals(
+        $airdapIdfPath,
+        $airdapManagedIdfPath
+    )
+}
+if ($airdapUsesManagedIdf) {
+    $env:IDF_SKIP_CHECK_SUBMODULES = "1"
+} else {
+    Remove-Item Env:IDF_SKIP_CHECK_SUBMODULES -ErrorAction SilentlyContinue
+}
 
 . $airdapExportScript
 
 Remove-Variable airdapFirmwareDir, airdapEnvironmentDir, airdapConfigFile
 Remove-Variable airdapConfigLines, airdapIdfPath, airdapExportScript
+Remove-Variable airdapManagedIdfPath, airdapUsesManagedIdf

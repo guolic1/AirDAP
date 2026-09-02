@@ -38,13 +38,21 @@ fi
 
 export IDF_TOOLS_PATH="${_airdap_environment_dir}"
 unset IDF_PYTHON_ENV_PATH
+export IDF_SKIP_TOOLS_CHECK=1
+
+_airdap_managed_idf_path="${_airdap_environment_dir}/esp-idf"
+if [[ "${_airdap_idf_path}" == "${_airdap_managed_idf_path}" ]]; then
+    export IDF_SKIP_CHECK_SUBMODULES=1
+else
+    unset IDF_SKIP_CHECK_SUBMODULES
+fi
 
 # shellcheck source=/dev/null
 . "${_airdap_export_script}"
 _airdap_status=$?
 
 unset _airdap_firmware_dir _airdap_environment_dir _airdap_config_file
-unset _airdap_config_lines _airdap_idf_path _airdap_export_script
+unset _airdap_config_lines _airdap_idf_path _airdap_export_script _airdap_managed_idf_path
 if [[ ${_airdap_status} -ne 0 ]]; then
     unset _airdap_status
     return 1

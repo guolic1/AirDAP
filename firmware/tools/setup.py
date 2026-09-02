@@ -21,6 +21,21 @@ DEFAULT_IDF_REPOSITORY = "https://github.com/espressif/esp-idf.git"
 DEFAULT_IDF_TAG = "v6.1"
 DEFAULT_IDF_COMMIT = "fff9895c82d744c7237be8847347bdd1b07c6643"
 REQUIRED_IDF_VERSION = (6, 1, 0)
+REQUIRED_IDF_SUBMODULES = (
+    "components/bootloader/subproject/components/micro-ecc/micro-ecc",
+    "components/esp_phy/lib",
+    "components/esp_wifi/lib",
+    "components/heap/tlsf",
+    "components/lwip/lwip",
+    "components/mbedtls/mbedtls",
+    "components/protobuf-c/protobuf-c",
+)
+REQUIRED_IDF_TOOLS = (
+    "xtensa-esp-elf",
+    "cmake",
+    "ninja",
+    "esp-rom-elfs",
+)
 
 _VERSION_PATTERN = re.compile(
     r"^set\(IDF_VERSION_(MAJOR|MINOR|PATCH)\s+([0-9]+)\)\s*$",
@@ -181,9 +196,7 @@ def install_idf_tools(
             str(idf_path),
             "install",
             "--targets=esp32s3",
-            "required",
-            "cmake",
-            "ninja",
+            *REQUIRED_IDF_TOOLS,
         ],
         env=environment,
     )
@@ -229,6 +242,8 @@ def install_managed_environment(
             "--recursive",
             "--depth",
             "1",
+            "--",
+            *REQUIRED_IDF_SUBMODULES,
         ]
     )
     install_idf_tools(idf_path, tools_path, run_command=run_command)
