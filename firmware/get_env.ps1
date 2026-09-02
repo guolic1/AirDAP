@@ -7,8 +7,17 @@ if (-not (Test-Path -LiteralPath $airdapConfigFile -PathType Leaf)) {
 }
 
 $airdapConfigLines = @(Get-Content -LiteralPath $airdapConfigFile -ErrorAction Stop)
-if ($airdapConfigLines.Count -ne 1 -or [string]::IsNullOrWhiteSpace($airdapConfigLines[0])) {
-    throw "get_env.ps1: $airdapConfigFile must contain exactly one ESP-IDF path"
+if ($airdapConfigLines.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace($airdapConfigLines[0])) {
+    # Configurations written before provenance was recorded used one line.
+    $airdapIdfMode = "legacy"
+} elseif (
+    $airdapConfigLines.Count -eq 2 -and
+    -not [string]::IsNullOrWhiteSpace($airdapConfigLines[0]) -and
+    $airdapConfigLines[1] -in @("managed", "external")
+) {
+    $airdapIdfMode = $airdapConfigLines[1]
+} else {
+    throw "get_env.ps1: $airdapConfigFile must contain an ESP-IDF path and managed/external mode"
 }
 
 $airdapIdfPath = $airdapConfigLines[0]
@@ -23,8 +32,8 @@ Remove-Item Env:IDF_PYTHON_ENV_PATH -ErrorAction SilentlyContinue
 $env:IDF_SKIP_TOOLS_CHECK = "1"
 
 $airdapManagedIdfPath = Join-Path $airdapEnvironmentDir "esp-idf"
-$airdapUsesManagedIdf = $false
-if (Test-Path -LiteralPath $airdapManagedIdfPath -PathType Container) {
+$airdapUsesManagedIdf = $airdapIdfMode -eq "managed"
+if ($airdapIdfMode -eq "legacy" -and (Test-Path -LiteralPath $airdapManagedIdfPath -PathType Container)) {
     $airdapManagedIdfPath = (
         Resolve-Path -LiteralPath $airdapManagedIdfPath -ErrorAction Stop
     ).ProviderPath
@@ -42,5 +51,5 @@ if ($airdapUsesManagedIdf) {
 . $airdapExportScript
 
 Remove-Variable airdapFirmwareDir, airdapEnvironmentDir, airdapConfigFile
-Remove-Variable airdapConfigLines, airdapIdfPath, airdapExportScript
+Remove-Variable airdapConfigLines, airdapIdfPath, airdapIdfMode, airdapExportScript
 Remove-Variable airdapManagedIdfPath, airdapUsesManagedIdf

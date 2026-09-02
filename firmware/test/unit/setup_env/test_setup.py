@@ -72,7 +72,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(configured, idf_path.resolve())
         self.assertEqual(
             config_file.read_text(encoding="utf-8"),
-            str(idf_path.resolve()) + "\n",
+            str(idf_path.resolve()) + "\nexternal\n",
         )
 
     def test_external_idf_path_must_be_version_6_1_0(self) -> None:
@@ -105,7 +105,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(configured, default_idf.resolve())
         self.assertEqual(
             config_file.read_text(encoding="utf-8"),
-            str(default_idf.resolve()) + "\n",
+            str(default_idf.resolve()) + "\nmanaged\n",
         )
 
     def test_failed_managed_install_preserves_previous_configuration(self) -> None:

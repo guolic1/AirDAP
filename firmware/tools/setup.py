@@ -21,6 +21,8 @@ DEFAULT_IDF_REPOSITORY = "https://github.com/espressif/esp-idf.git"
 DEFAULT_IDF_TAG = "v6.1"
 DEFAULT_IDF_COMMIT = "fff9895c82d744c7237be8847347bdd1b07c6643"
 REQUIRED_IDF_VERSION = (6, 1, 0)
+MANAGED_IDF_MODE = "managed"
+EXTERNAL_IDF_MODE = "external"
 REQUIRED_IDF_SUBMODULES = (
     "components/bootloader/subproject/components/micro-ecc/micro-ecc",
     "components/esp_phy/lib",
@@ -249,7 +251,9 @@ def install_managed_environment(
     install_idf_tools(idf_path, tools_path, run_command=run_command)
 
 
-def save_idf_path(idf_path: Path, config_file: Path) -> None:
+def save_idf_configuration(idf_path: Path, idf_mode: str, config_file: Path) -> None:
+    if idf_mode not in (MANAGED_IDF_MODE, EXTERNAL_IDF_MODE):
+        raise SetupError(f"invalid ESP-IDF configuration mode: {idf_mode}")
     config_file.parent.mkdir(parents=True, exist_ok=True)
     temporary_name: str | None = None
     try:
@@ -260,7 +264,7 @@ def save_idf_path(idf_path: Path, config_file: Path) -> None:
             prefix=f".{config_file.name}.",
             delete=False,
         ) as temporary:
-            temporary.write(str(idf_path.resolve()) + "\n")
+            temporary.write(f"{idf_path.resolve()}\n{idf_mode}\n")
             temporary_name = temporary.name
         os.replace(temporary_name, config_file)
         temporary_name = None
@@ -286,10 +290,12 @@ def configure_environment(
     if requested_idf_path is None:
         install_managed(default_idf_path, tools_path)
         configured = validate_idf_path(default_idf_path)
+        idf_mode = MANAGED_IDF_MODE
     else:
         configured = validate_idf_path(requested_idf_path)
         install_external(configured, tools_path)
-    save_idf_path(configured, config_file)
+        idf_mode = EXTERNAL_IDF_MODE
+    save_idf_configuration(configured, idf_mode, config_file)
     return configured
 
 

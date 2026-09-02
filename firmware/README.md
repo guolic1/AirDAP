@@ -58,13 +58,14 @@ python3 tools/setup.py /path/to/esp-idf
 python tools/setup.py C:\path\to\esp-idf
 ```
 
-Both setup modes save the selected source directory in
-`firmware/.airdap-env/idf-path.txt`. In each new terminal, run only
-`. ./get_env.sh` on Linux or `. .\get_env.ps1` in PowerShell before using the
-normal `idf.py` command. The activation scripts must be sourced so they can
-update the current shell. `setup.py` configures the environment only; it does
-not build or flash the firmware. If a default download is interrupted while
-fetching ESP-IDF submodules, run `setup.py` again to resume it.
+Both setup modes save the selected source directory and its managed/external
+provenance in `firmware/.airdap-env/idf-path.txt`. Existing one-line path files
+remain supported. In each new terminal, run only `. ./get_env.sh` on Linux or
+`. .\get_env.ps1` in PowerShell before using the normal `idf.py` command. The
+activation scripts must be sourced so they can update the current shell.
+`setup.py` configures the environment only; it does not build or flash the
+firmware. If a default download is interrupted while fetching ESP-IDF
+submodules, run `setup.py` again to resume it.
 
 The default managed checkout is intentionally scoped to this firmware. Its
 missing ESP-IDF submodules are not fetched automatically during a build, so

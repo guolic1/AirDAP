@@ -21,8 +21,16 @@ if [[ ! -f "${_airdap_config_file}" ]]; then
 fi
 
 mapfile -t _airdap_config_lines < "${_airdap_config_file}"
-if [[ ${#_airdap_config_lines[@]} -ne 1 || -z "${_airdap_config_lines[0]}" ]]; then
-    echo "get_env.sh: ${_airdap_config_file} must contain exactly one ESP-IDF path" >&2
+if [[ ${#_airdap_config_lines[@]} -eq 1 && -n "${_airdap_config_lines[0]}" ]]; then
+    # Configurations written before provenance was recorded used one line.
+    _airdap_idf_mode=legacy
+elif [[ ${#_airdap_config_lines[@]} -eq 2 \
+    && -n "${_airdap_config_lines[0]}" \
+    && ("${_airdap_config_lines[1]}" == managed \
+        || "${_airdap_config_lines[1]}" == external) ]]; then
+    _airdap_idf_mode="${_airdap_config_lines[1]}"
+else
+    echo "get_env.sh: ${_airdap_config_file} must contain an ESP-IDF path and managed/external mode" >&2
     unset _airdap_firmware_dir _airdap_environment_dir _airdap_config_file _airdap_config_lines
     return 1
 fi
@@ -41,10 +49,19 @@ unset IDF_PYTHON_ENV_PATH
 export IDF_SKIP_TOOLS_CHECK=1
 
 _airdap_managed_idf_path="${_airdap_environment_dir}/esp-idf"
-if [[ "${_airdap_idf_path}" == "${_airdap_managed_idf_path}" ]]; then
+if [[ "${_airdap_idf_mode}" == managed ]]; then
     export IDF_SKIP_CHECK_SUBMODULES=1
-else
+elif [[ "${_airdap_idf_mode}" == external ]]; then
     unset IDF_SKIP_CHECK_SUBMODULES
+else
+    if [[ -d "${_airdap_managed_idf_path}" ]]; then
+        _airdap_managed_idf_path=$(CDPATH= cd -- "${_airdap_managed_idf_path}" && pwd -P)
+    fi
+    if [[ "${_airdap_idf_path}" == "${_airdap_managed_idf_path}" ]]; then
+        export IDF_SKIP_CHECK_SUBMODULES=1
+    else
+        unset IDF_SKIP_CHECK_SUBMODULES
+    fi
 fi
 
 # shellcheck source=/dev/null
@@ -52,7 +69,8 @@ fi
 _airdap_status=$?
 
 unset _airdap_firmware_dir _airdap_environment_dir _airdap_config_file
-unset _airdap_config_lines _airdap_idf_path _airdap_export_script _airdap_managed_idf_path
+unset _airdap_config_lines _airdap_idf_path _airdap_idf_mode _airdap_export_script
+unset _airdap_managed_idf_path
 if [[ ${_airdap_status} -ne 0 ]]; then
     unset _airdap_status
     return 1
