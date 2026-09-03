@@ -17,7 +17,6 @@ REQUIRED_PARTITIONS = {
     "nvs": ("data", "nvs", 0x9000, 0x6000, frozenset()),
     "otadata": ("data", "ota", 0xF000, 0x2000, frozenset()),
     "phy_init": ("data", "phy", 0x11000, 0x1000, frozenset()),
-    "sec2_keys": ("data", "nvs", 0x12000, 0x3000, frozenset({"readonly"})),
     "ota_0": ("app", "ota_0", 0x20000, 0x3F0000, frozenset()),
     "ota_1": ("app", "ota_1", 0x410000, 0x3F0000, frozenset()),
 }

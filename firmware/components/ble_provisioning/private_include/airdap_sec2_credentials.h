@@ -5,6 +5,9 @@
 
 #include "esp_err.h"
 
+#define AIRDAP_SEC2_USERNAME "wifiprov"
+#define AIRDAP_SEC2_POP "abcd1234"
+
 enum {
     AIRDAP_SEC2_SALT_SIZE = 16,
     AIRDAP_SEC2_VERIFIER_SIZE = 384,

@@ -143,7 +143,7 @@ not part of this repository. The application currently provides:
   backoff;
 - mDNS discovery on the station interface after DHCP succeeds;
 - an on-demand BLE provisioning window using protocomm Security 2 and
-  development credentials injected through a dedicated NVS partition;
+  a public credential gated by physical button access;
 - a bounded transport-independent DAP service with session-safe response
   routing for USB and future network sessions;
 - target reset, power/status GPIO, VTref, and USB VBUS monitoring.
@@ -329,60 +329,42 @@ stop BLE and restore the previously committed Wi-Fi configuration.
 Hold `BOOT_KEY` for ten seconds to clear Wi-Fi credentials plus the reserved
 pairing and network-authentication slots. Firmware waits until GPIO0 is
 released before restarting, so the restart does not intentionally enter the
-ROM download mode. This reset does not erase the separately injected Security
-2 verifier; after restart the device can open a fresh provisioning window.
+ROM download mode. After restart the device can open a fresh provisioning
+window using the same public Security 2 credential.
 
-The development Security 2 username is the fixed, non-secret value `airdap`.
-Create a device-local salt and SRP verifier with an interactively entered test
-PoP after activating ESP-IDF:
+AirDAP intentionally uses Espressif's public Security 2 development credential:
+
+- username: `wifiprov`
+- PoP/password: `abcd1234`
+
+Its salt and SRP verifier are compiled into the application, so a normal build
+and flash require no credential-generation or injection step:
 
 ```sh
 cd firmware
-python tools/airdap-sec2-credentials.py /absolute/private/path/sec2_keys.bin
+idf.py build
+idf.py -p <airdap-programming-port> flash
 ```
 
-The PoP is read without echo, requires a private terminal, and is not accepted
-on the command line. The tool uses ESP-IDF's NVS partition generator and prints
-only `SEC2_CREDENTIAL_FINGERPRINT=<SHA-256>`. On POSIX, temporary inputs and the
-final image use mode `0600`; on Windows, place the output in a private NTFS
-directory whose ACL grants access only to the intended user. Keep the image and
-PoP outside Git, logs, tickets, and shared build artifacts. To inject the image,
-first install a normal build containing the current partition table, then run
-the following only against the explicitly selected development board:
-
-```sh
-python "$IDF_PATH/components/partition_table/parttool.py" \
-    --port <airdap-programming-port> \
-    write_partition \
-    --partition-name sec2_keys \
-    --input /absolute/private/path/sec2_keys.bin \
-    --ignore-readonly
-```
-
-The `--ignore-readonly` option permits the manufacturing-style write to the
-partition that application firmware can only open read-only. A normal
-application update and the ten-second network reset preserve this partition;
-an erase-flash operation does not. The generator rejects output anywhere in the
-current worktree or its common Git repository; an ignored build directory is
-not an acceptable private location. At provisioning-window startup, compare
-the logged fingerprint with the generator output. The salt, verifier, PoP,
-SSID, and Wi-Fi password are never logged by AirDAP.
-
-For a development client, omit both Security 2 and Wi-Fi passwords from the
-command line so the Espressif tool prompts for them:
+Run the Espressif client with the public credential; omit the Wi-Fi password so
+the client still prompts for that private value:
 
 ```sh
 python managed_components/espressif__network_provisioning/tool/esp_prov/esp_prov.py \
     --transport ble \
     --service_name ADP-001122334455 \
     --sec_ver 2 \
-    --sec2_username airdap
+    --sec2_username wifiprov \
+    --sec2_pwd abcd1234
 ```
 
-The checked-in firmware does not enable Flash Encryption. A read-only SRP
-verifier avoids storing the plaintext PoP but is still credential material,
-so this injection flow is for development and HIL only, not a production key
-lifecycle. Follow [`test/hil/ble_provisioning.md`](test/hil/ble_provisioning.md)
+Security 2 still encrypts and authenticates the BLE provisioning session, but
+the published PoP does not identify an owner. Physical access to hold
+`BOOT_KEY` for three seconds is therefore the only provisioning authorization
+boundary. Any nearby party that knows the public credential can race or replace
+Wi-Fi configuration while that window is open. This design is appropriate only
+where physical access to the button is trusted; it is not per-device
+authentication. Follow [`test/hil/ble_provisioning.md`](test/hil/ble_provisioning.md)
 before relying on BLE lifecycle, RF behavior, Wi-Fi association, persistence,
 or the GPIO0 reset guard on hardware.
 
@@ -604,7 +586,7 @@ The other hardware-independent tests use the same pattern:
 for suite in \
     bootloader_artifact ota_layout setup_env board config_store device_identity voltage_monitor swd_protocol \
     dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame discovery \
-    dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning sec2_credentials \
+    dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning \
     target_uart usb_descriptors project_version \
     debug_shell_config_status debug_shell_identity debug_shell_input debug_shell_wifi \
     debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update wired_hil; do
@@ -621,7 +603,7 @@ safe configuration-status command behavior, ADC scaling, SWD transaction
 framing, Wi-Fi credential encoding, wrong-password classification, DHCP-gated
 online state, IP-loss handling, bounded reconnect backoff, actual timer/driver
 coordination, configuration-change event ordering and recovery, Security 2
-salt/verifier generation against a golden vector, private NVS image handling,
+public-credential derivation against its published username and PoP,
 provisioning-button thresholds, BLE window cleanup, atomic provisioning commit,
 and reset-after-release behavior, DAP owner
 transitions and physical-backend release calls, unified

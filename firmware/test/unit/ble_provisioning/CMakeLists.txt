@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 project(airdap_ble_provisioning_test C)
 
 enable_testing()
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 add_executable(
     ble_provisioning_test
@@ -21,6 +22,11 @@ target_compile_features(ble_provisioning_test PRIVATE c_std_11)
 target_compile_options(ble_provisioning_test PRIVATE -Wall -Wextra -Werror -pedantic)
 
 add_test(NAME ble_provisioning_contract COMMAND ble_provisioning_test)
+add_test(
+    NAME ble_provisioning_public_security2_credential
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_public_sec2_credential.py
+)
 
 add_executable(
     ble_provisioning_adapter_test

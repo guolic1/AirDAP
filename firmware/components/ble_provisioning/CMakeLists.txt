@@ -6,5 +6,5 @@ idf_component_register(
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "private_include"
     REQUIRES esp_common
-    PRIV_REQUIRES board config_store device_identity esp_event esp_timer esp_wifi freertos log mode_state nvs_flash network_provisioning protocomm wifi_manager mbedtls
+    PRIV_REQUIRES board config_store device_identity esp_event esp_timer esp_wifi freertos log mode_state network_provisioning protocomm wifi_manager
 )

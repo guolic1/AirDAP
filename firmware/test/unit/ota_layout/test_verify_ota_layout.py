@@ -17,7 +17,6 @@ VALID_PARTITIONS = """
 nvs,      data, nvs,     0x9000,   0x6000,
 otadata,  data, ota,     0xF000,   0x2000,
 phy_init, data, phy,     0x11000,  0x1000,
-sec2_keys,data, nvs,     0x12000,  0x3000,    readonly
 ota_0,    app,  ota_0,   0x20000,  0x3F0000,
 ota_1,    app,  ota_1,   0x410000, 0x3F0000,
 """
@@ -124,7 +123,6 @@ class OtaLayoutTests(unittest.TestCase):
             ("0x20000,  0x3F0000", "0x30000,  0x3F0000", "ota_0"),
             ("0x410000, 0x3F0000", "0x410000, 0x3E0000", "ota_1"),
             ("0xF000,   0x2000", "0xE000,   0x2000", "otadata"),
-            ("0x12000,  0x3000", "0x12000,  0x4000", "sec2_keys"),
         ):
             with self.subTest(new=new):
                 with self.assertRaisesRegex(
@@ -135,21 +133,6 @@ class OtaLayoutTests(unittest.TestCase):
                         verify_ota_layout.parse_partition_csv(
                             VALID_PARTITIONS.replace(old, new)
                         )
-                    )
-
-    def test_rejects_missing_or_writable_security2_partition(self) -> None:
-        security_row = "sec2_keys,data, nvs,     0x12000,  0x3000,    readonly\n"
-        for text, message in (
-            (VALID_PARTITIONS.replace(security_row, ""), "sec2_keys"),
-            (VALID_PARTITIONS.replace("readonly", ""), "readonly"),
-        ):
-            with self.subTest(message=message):
-                with self.assertRaisesRegex(
-                    verify_ota_layout.VerificationError,
-                    message,
-                ):
-                    verify_ota_layout.validate_layout(
-                        verify_ota_layout.parse_partition_csv(text)
                     )
 
     def test_rejects_overlap_and_flash_overflow_for_extra_partitions(self) -> None:

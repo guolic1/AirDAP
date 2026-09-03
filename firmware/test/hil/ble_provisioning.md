@@ -4,35 +4,23 @@ Run this checklist only on an explicitly selected, recoverable development
 AirDAP and a dedicated test access point. Record the board revision, module
 ordering code, ESP-IDF version, firmware revision, AirDAP device ID, test AP,
 client OS/Bluetooth adapter, and the Security 2 credential fingerprint. Never
-record the PoP, Wi-Fi password, salt, verifier, or private NVS image.
+record the Wi-Fi password. The Security 2 username and PoP are intentionally
+public.
 
 This procedure writes flash and changes Wi-Fi configuration. Obtain approval
 for the selected board before running it. Host tests and a successful ESP-IDF
 build do not replace the RF, persistence, GPIO0, and restart observations.
 
-## 1. Install development Security 2 credentials
+## 1. Build the public Security 2 credential
 
-Activate ESP-IDF and build the standard firmware. Generate the credential
-image interactively; use a unique test-only PoP that is not used by any
-production system:
+Activate ESP-IDF and build the standard firmware. The public username
+`wifiprov`, PoP `abcd1234`, salt, and verifier are already compiled into the
+application; no credential image or injection step is required:
 
 ```sh
 cd firmware
 idf.py build
-python tools/airdap-sec2-credentials.py /absolute/private/path/sec2_keys.bin
-```
-
-Retain the printed fingerprint in the evidence record. Perform the baseline
-flash, then inject only the new read-only partition:
-
-```sh
 idf.py -p <airdap-programming-port> flash
-python "$IDF_PATH/components/partition_table/parttool.py" \
-    --port <airdap-programming-port> \
-    write_partition \
-    --partition-name sec2_keys \
-    --input /absolute/private/path/sec2_keys.bin \
-    --ignore-readonly
 ```
 
 Restart and monitor AirDAP. Confirm BLE is not advertising before a button
@@ -40,17 +28,20 @@ press. Hold `BOOT_KEY` for three seconds, release it, and confirm:
 
 - the `ADP-...` BLE service appears;
 - its name matches the USB/device identity;
-- the logged credential fingerprint exactly matches the generator output;
-- no salt, verifier, PoP, SSID, or password appears in logs.
+- the logged credential fingerprint is
+  `C5D2AA01B4DDA9A67CBE111D61B9F0CBBD3A9F7A7935E85E570A881C7EE03080`;
+- no SSID or Wi-Fi password appears in logs.
 
-Use the Espressif provisioning client without command-line passwords:
+Use the Espressif provisioning client with the public Security 2 credential;
+leave the Wi-Fi passphrase unset so it is prompted privately:
 
 ```sh
 python managed_components/espressif__network_provisioning/tool/esp_prov/esp_prov.py \
     --transport ble \
     --service_name <ADP-device-id> \
     --sec_ver 2 \
-    --sec2_username airdap
+    --sec2_username wifiprov \
+    --sec2_pwd abcd1234
 ```
 
 ## 2. Authentication failure and cancellation
@@ -73,7 +64,7 @@ alone is not evidence that the firmware stopped the BLE service.
 ## 4. First provisioning and reboot recovery
 
 If necessary, perform the ten-second reset from section 5 first. Open a window,
-enter the correct test PoP, select the dedicated test AP, and enter its password
+enter the public PoP, select the dedicated test AP, and enter its password
 interactively. Required observations:
 
 - the Security 2 session succeeds and Wi-Fi association reaches DHCP;
@@ -81,7 +72,7 @@ interactively. Required observations:
 - the client reports provisioning success before the service disappears;
 - BLE stops and releases its resources within 30 seconds after success;
 - a power cycle reconnects to the same AP without opening BLE;
-- a fresh three-second press can open a new window using the same injected
+- a fresh three-second press can open a new window using the same public
   Security 2 credential fingerprint.
 
 Repeat with an incorrect AP password before the successful attempt. Confirm the
@@ -89,7 +80,7 @@ failed candidate is not published. Reconnect the same client with `--reset` in
 addition to the Security 2 arguments above, then rerun without `--reset` and
 enter the correct AP credentials. Confirm the prior committed Wi-Fi
 configuration is restored on cancel/timeout and no credential value appears in
-logs.
+logs except the documented public fingerprint.
 
 ## 5. Ten-second network reset and GPIO0 release guard
 
@@ -102,9 +93,8 @@ normally rather than entering the ROM download mode. After restart:
 - the reserved pairing and network-authentication slots are absent;
 - BLE remains off until another three-second press;
 - the new window reports the same Security 2 credential fingerprint and
-  accepts the original test PoP.
+  accepts the public PoP.
 
-Finish by clearing the test Wi-Fi configuration. Securely delete the local PoP
-record and the repository-external `sec2_keys.bin` when the board no longer
-needs this HIL credential. If an erase-flash operation is used, the Security 2
-image must be injected again before BLE provisioning can start.
+Finish by clearing the test Wi-Fi configuration. Record that anyone within BLE
+range who knows the public credential can provision during a physically opened
+window; this test does not establish per-device owner authentication.
