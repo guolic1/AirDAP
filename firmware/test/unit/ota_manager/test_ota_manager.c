@@ -241,7 +241,7 @@ static void test_successful_sequential_update_commits_then_reboots(void)
     assert(mode_ota_state() == AIRDAP_OTA_RECEIVING);
     assert(ownership_line_reset_calls == 1U);
     assert(ownership_release_calls == 1U);
-    assert(begin_calls == 1U && begun_size == 100U);
+    assert(begin_calls == 1U && begun_size == OTA_WITH_SEQUENTIAL_WRITES);
     assert(airdap_ota_write(0U, first, sizeof(first), &next_offset) ==
         AIRDAP_OTA_STATUS_OK);
     assert(next_offset == 60U);

@@ -8,6 +8,8 @@
 
 typedef uint32_t esp_ota_handle_t;
 
+#define OTA_WITH_SEQUENTIAL_WRITES 0xfffffffeU
+
 typedef enum {
     ESP_OTA_IMG_NEW,
     ESP_OTA_IMG_PENDING_VERIFY,
