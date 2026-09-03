@@ -1,5 +1,6 @@
 /build/
 /build-*/
+/.airdap-env/
 /managed_components/
 __pycache__/
 *.py[cod]
