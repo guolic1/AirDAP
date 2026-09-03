@@ -44,6 +44,10 @@ python managed_components/espressif__network_provisioning/tool/esp_prov/esp_prov
     --sec2_pwd abcd1234
 ```
 
+After the client connects, confirm the device reports a negotiated ATT MTU of
+at least 409 bytes, so the 406-byte Security 2 session request fits in one
+characteristic write, and the request is not rejected with `Invalid PDU`.
+
 ## 2. Authentication failure and cancellation
 
 Open a new window and enter a deliberately incorrect PoP. Confirm the secure
