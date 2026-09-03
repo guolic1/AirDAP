@@ -25,6 +25,9 @@ MANAGED_IDF_MODE = "managed"
 EXTERNAL_IDF_MODE = "external"
 REQUIRED_IDF_SUBMODULES = (
     "components/bootloader/subproject/components/micro-ecc/micro-ecc",
+    "components/bt/controller/lib_esp32c3_family",
+    "components/bt/host/nimble/nimble",
+    "components/esp_coex/lib",
     "components/esp_phy/lib",
     "components/esp_wifi/lib",
     "components/heap/tlsf",

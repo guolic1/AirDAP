@@ -39,6 +39,7 @@ static bool started;
 static bool link_active;
 static bool connection_in_progress;
 static bool reconfiguration_pending;
+static bool provisioning_suspended;
 
 static void clear_bytes(void *data, size_t size)
 {
@@ -137,7 +138,10 @@ static esp_err_t configure_station_from_store(void)
     config.sta.failure_retry_cnt = 0U;
     config.sta.pmf_cfg.capable = true;
     config.sta.pmf_cfg.required = false;
-    error = esp_wifi_set_config(WIFI_IF_STA, &config);
+    error = esp_wifi_set_storage(WIFI_STORAGE_RAM);
+    if (error == ESP_OK) {
+        error = esp_wifi_set_config(WIFI_IF_STA, &config);
+    }
 
     clear_bytes(&config, sizeof(config));
     airdap_wifi_credentials_clear(&credentials);
@@ -148,7 +152,7 @@ static void handle_state_event(airdap_wifi_sm_event_t event);
 
 static void connect_now(void)
 {
-    if (connection_in_progress || link_active) {
+    if (provisioning_suspended || connection_in_progress || link_active) {
         return;
     }
     const esp_err_t error = esp_wifi_connect();
@@ -162,6 +166,9 @@ static void connect_now(void)
 
 static void configure_and_connect(void)
 {
+    if (provisioning_suspended) {
+        return;
+    }
     const esp_err_t error = configure_station_from_store();
     if (error != ESP_OK) {
         ESP_LOGW(TAG, "Wi-Fi configuration apply failed: %s", esp_err_to_name(error));
@@ -173,6 +180,9 @@ static void configure_and_connect(void)
 
 static void begin_reconfiguration(void)
 {
+    if (provisioning_suspended) {
+        return;
+    }
     if (reconfiguration_pending) {
         return;
     }
@@ -221,7 +231,7 @@ static void cancel_retry(void)
 
 static void schedule_retry(uint32_t delay_ms)
 {
-    if (retry_timer == NULL || delay_ms == 0U) {
+    if (provisioning_suspended || retry_timer == NULL || delay_ms == 0U) {
         return;
     }
     cancel_retry();
@@ -267,6 +277,19 @@ static void handle_state_event(airdap_wifi_sm_event_t event)
 
 static void handle_wifi_event(int32_t event_id, void *event_data)
 {
+    if (provisioning_suspended) {
+        if (event_id == WIFI_EVENT_STA_CONNECTED) {
+            connection_in_progress = false;
+            link_active = true;
+            publish_state(AIRDAP_WIFI_SM_CONNECTING);
+        } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+            connection_in_progress = false;
+            link_active = false;
+            publish_state(AIRDAP_WIFI_SM_DISCONNECTED);
+        }
+        return;
+    }
+
     switch (event_id) {
     case WIFI_EVENT_STA_START:
         handle_state_event(AIRDAP_WIFI_SM_EVENT_STA_STARTED);
@@ -332,12 +355,23 @@ static void event_handler(
     if (event_base == WIFI_EVENT) {
         handle_wifi_event(event_id, event_data);
     } else if (event_base == IP_EVENT) {
+        if (provisioning_suspended) {
+            if (event_id == IP_EVENT_STA_GOT_IP) {
+                publish_state(AIRDAP_WIFI_SM_ONLINE);
+            } else if (event_id == IP_EVENT_STA_LOST_IP) {
+                publish_state(AIRDAP_WIFI_SM_CONNECTING);
+            }
+            return;
+        }
         if (event_id == IP_EVENT_STA_GOT_IP) {
             handle_state_event(AIRDAP_WIFI_SM_EVENT_GOT_IP);
         } else if (event_id == IP_EVENT_STA_LOST_IP) {
             handle_state_event(AIRDAP_WIFI_SM_EVENT_LOST_IP);
         }
     } else if (event_base == AIRDAP_WIFI_INTERNAL_EVENT) {
+        if (provisioning_suspended) {
+            return;
+        }
         if (event_id == AIRDAP_WIFI_INTERNAL_RETRY) {
             handle_state_event(AIRDAP_WIFI_SM_EVENT_RETRY_EXPIRED);
         } else if (event_id == AIRDAP_WIFI_INTERNAL_CONFIGURATION_CHANGED) {
@@ -406,6 +440,7 @@ static void cleanup_failed_start(void)
     link_active = false;
     connection_in_progress = false;
     reconfiguration_pending = false;
+    provisioning_suspended = false;
 }
 
 esp_err_t airdap_wifi_manager_start(void)
@@ -432,10 +467,10 @@ esp_err_t airdap_wifi_manager_start(void)
         return error;
     }
     error = esp_event_loop_create_default();
-    if (error != ESP_OK) {
+    if (error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
         return error;
     }
-    event_loop_created = true;
+    event_loop_created = error == ESP_OK;
 
     station_netif = esp_netif_create_default_wifi_sta();
     if (station_netif == NULL) {
@@ -510,6 +545,71 @@ static esp_err_t notify_configuration_changed(void)
         portMAX_DELAY);
 }
 
+static bool make_station_config(
+    const airdap_wifi_credentials_t *credentials,
+    wifi_config_t *config)
+{
+    if (credentials == NULL || config == NULL ||
+        credentials->ssid_length == 0U ||
+        credentials->ssid_length > AIRDAP_WIFI_SSID_MAX_LENGTH ||
+        credentials->password_length > AIRDAP_WIFI_PASSWORD_MAX_LENGTH) {
+        return false;
+    }
+    memset(config, 0, sizeof(*config));
+    memcpy(config->sta.ssid, credentials->ssid, credentials->ssid_length);
+    memcpy(
+        config->sta.password,
+        credentials->password,
+        credentials->password_length);
+    config->sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    config->sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    config->sta.failure_retry_cnt = 0U;
+    config->sta.pmf_cfg.capable = true;
+    config->sta.pmf_cfg.required = false;
+    return true;
+}
+
+static esp_err_t clear_driver_credentials(void)
+{
+    wifi_config_t empty = {0};
+    esp_err_t error = esp_wifi_set_storage(WIFI_STORAGE_RAM);
+    if (error == ESP_OK) {
+        error = esp_wifi_set_config(WIFI_IF_STA, &empty);
+    }
+    clear_bytes(&empty, sizeof(empty));
+    return error;
+}
+
+esp_err_t airdap_wifi_manager_prepare_provisioning(void)
+{
+    if (!started || provisioning_suspended) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const esp_err_t error = esp_wifi_set_storage(WIFI_STORAGE_RAM);
+    if (error != ESP_OK) {
+        return error;
+    }
+    cancel_retry();
+    reconfiguration_pending = false;
+    provisioning_suspended = true;
+    return ESP_OK;
+}
+
+esp_err_t airdap_wifi_manager_stage_provisioning_credentials(
+    const airdap_wifi_credentials_t *credentials)
+{
+    if (!started || !provisioning_suspended) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    wifi_config_t validated_configuration;
+    if (!make_station_config(credentials, &validated_configuration)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    clear_bytes(&validated_configuration, sizeof(validated_configuration));
+    publish_state(AIRDAP_WIFI_SM_CONNECTING);
+    return ESP_OK;
+}
+
 esp_err_t airdap_wifi_manager_set_credentials(
     const airdap_wifi_credentials_t *credentials)
 {
@@ -528,12 +628,73 @@ esp_err_t airdap_wifi_manager_set_credentials(
         encoded,
         encoded_size);
     clear_bytes(encoded, sizeof(encoded));
-    return error == ESP_OK ? notify_configuration_changed() : error;
+    return error == ESP_OK && !provisioning_suspended
+        ? notify_configuration_changed()
+        : error;
+}
+
+esp_err_t airdap_wifi_manager_accept_provisioned_credentials(
+    const airdap_wifi_credentials_t *credentials)
+{
+    if (!started || !provisioning_suspended) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint8_t encoded[AIRDAP_WIFI_CREDENTIALS_ENCODED_MAX_SIZE];
+    size_t encoded_size = sizeof(encoded);
+    if (!airdap_wifi_credentials_encode(
+            credentials,
+            encoded,
+            &encoded_size)) {
+        clear_bytes(encoded, sizeof(encoded));
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_err_t error = airdap_config_store_commit_network_provisioning(
+        encoded,
+        encoded_size);
+    clear_bytes(encoded, sizeof(encoded));
+    return error;
+}
+
+esp_err_t airdap_wifi_manager_finish_provisioning(void)
+{
+    if (!started || !provisioning_suspended) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    provisioning_suspended = false;
+    handle_configuration_changed();
+    return ESP_OK;
 }
 
 esp_err_t airdap_wifi_manager_clear_credentials(void)
 {
     const esp_err_t error = airdap_config_store_clear(
         AIRDAP_CONFIG_CLEAR_WIFI_CREDENTIALS);
-    return error == ESP_OK ? notify_configuration_changed() : error;
+    return error == ESP_OK && !provisioning_suspended
+        ? notify_configuration_changed()
+        : error;
+}
+
+esp_err_t airdap_wifi_manager_clear_network_configuration(void)
+{
+    esp_err_t error = airdap_config_store_clear(AIRDAP_CONFIG_CLEAR_NETWORK);
+    if (error != ESP_OK) {
+        return error;
+    }
+
+    if (started) {
+        const esp_err_t driver_error = clear_driver_credentials();
+        if (driver_error != ESP_OK) {
+            ESP_LOGE(TAG, "Cleared Wi-Fi driver RAM cleanup failed: %s",
+                esp_err_to_name(driver_error));
+        }
+    }
+    if (!provisioning_suspended) {
+        const esp_err_t notify_error = notify_configuration_changed();
+        if (notify_error != ESP_OK) {
+            ESP_LOGE(TAG, "Cleared Wi-Fi configuration notify failed: %s",
+                esp_err_to_name(notify_error));
+        }
+    }
+    return ESP_OK;
 }

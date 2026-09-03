@@ -28,6 +28,8 @@ CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+# CONFIG_ESP_WIFI_NVS_ENABLED is not set
+CONFIG_LOG_MAXIMUM_LEVEL=3
 """
 
 
@@ -62,6 +64,30 @@ class OtaLayoutTests(unittest.TestCase):
                 ):
                     verify_ota_layout.validate_config(
                         verify_ota_layout.parse_sdkconfig("\n".join(lines))
+                    )
+
+    def test_rejects_wifi_driver_persistence_or_verbose_build_logs(self) -> None:
+        for old, new, message in (
+            (
+                "# CONFIG_ESP_WIFI_NVS_ENABLED is not set",
+                "CONFIG_ESP_WIFI_NVS_ENABLED=y",
+                "credential persistence",
+            ),
+            (
+                "CONFIG_LOG_MAXIMUM_LEVEL=3",
+                "CONFIG_LOG_MAXIMUM_LEVEL=4",
+                "at or below INFO",
+            ),
+        ):
+            with self.subTest(new=new):
+                with self.assertRaisesRegex(
+                    verify_ota_layout.VerificationError,
+                    message,
+                ):
+                    verify_ota_layout.validate_config(
+                        verify_ota_layout.parse_sdkconfig(
+                            VALID_CONFIG.replace(old, new)
+                        )
                     )
 
     def test_rejects_factory_or_missing_ota_partition(self) -> None:

@@ -355,6 +355,43 @@ esp_err_t airdap_config_store_set_blob(
     return error;
 }
 
+esp_err_t airdap_config_store_commit_network_provisioning(
+    const void *wifi_credentials,
+    size_t wifi_credentials_size)
+{
+    if (wifi_credentials == NULL || wifi_credentials_size == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (wifi_credentials_size > AIRDAP_CONFIG_BLOB_MAX_SIZE) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    esp_err_t error = lock_config_store();
+    if (error != ESP_OK) {
+        return error;
+    }
+
+    const airdap_config_store_blob_t *current =
+        &current_record.slots[AIRDAP_CONFIG_SLOT_WIFI_CREDENTIALS];
+    if (current_record.provisioned != 0U &&
+        current->length == wifi_credentials_size &&
+        memcmp(current->data, wifi_credentials, wifi_credentials_size) == 0) {
+        unlock_config_store();
+        return ESP_OK;
+    }
+
+    candidate_record = current_record;
+    airdap_config_store_blob_t *blob =
+        &candidate_record.slots[AIRDAP_CONFIG_SLOT_WIFI_CREDENTIALS];
+    memset(blob, 0, sizeof(*blob));
+    memcpy(blob->data, wifi_credentials, wifi_credentials_size);
+    blob->length = (uint32_t) wifi_credentials_size;
+    candidate_record.provisioned = 1U;
+    error = update_record(&candidate_record);
+    clear_candidate_record();
+    unlock_config_store();
+    return error;
+}
+
 static airdap_config_clear_flags_t slot_clear_flag(
     airdap_config_slot_t slot)
 {

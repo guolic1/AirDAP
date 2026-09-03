@@ -19,14 +19,16 @@ typedef enum {
     CALL_VOLTAGE_READ,
     CALL_USB_INITIALIZE,
     CALL_OTA_CONFIRM,
+    CALL_DEFAULT_EVENT_LOOP_CREATE,
     CALL_WIFI_MANAGER_START,
     CALL_DISCOVERY_START,
+    CALL_BLE_PROVISIONING_START,
 } call_t;
 
-static call_t calls[12];
+static call_t calls[14];
 static size_t call_count;
-static esp_err_t wifi_start_result;
-static esp_err_t discovery_start_result;
+static esp_err_t wifi_start_result = ESP_OK;
+static esp_err_t discovery_start_result = ESP_OK;
 
 static void record(call_t call)
 {
@@ -97,6 +99,12 @@ esp_err_t airdap_ota_confirm_running_image(void)
     return ESP_OK;
 }
 
+esp_err_t esp_event_loop_create_default(void)
+{
+    record(CALL_DEFAULT_EVENT_LOOP_CREATE);
+    return ESP_OK;
+}
+
 esp_err_t airdap_wifi_manager_start(void)
 {
     record(CALL_WIFI_MANAGER_START);
@@ -107,6 +115,12 @@ esp_err_t airdap_discovery_start(void)
 {
     record(CALL_DISCOVERY_START);
     return discovery_start_result;
+}
+
+esp_err_t airdap_ble_provisioning_start(void)
+{
+    record(CALL_BLE_PROVISIONING_START);
+    return ESP_FAIL;
 }
 
 void app_main(void);
@@ -124,7 +138,9 @@ static void test_wifi_failure_does_not_start_discovery(void)
         CALL_VOLTAGE_READ,
         CALL_USB_INITIALIZE,
         CALL_OTA_CONFIRM,
+        CALL_DEFAULT_EVENT_LOOP_CREATE,
         CALL_WIFI_MANAGER_START,
+        CALL_BLE_PROVISIONING_START,
     };
 
     wifi_start_result = ESP_FAIL;
@@ -150,15 +166,16 @@ static void test_discovery_starts_after_wifi_and_does_not_block_startup(void)
         CALL_VOLTAGE_READ,
         CALL_USB_INITIALIZE,
         CALL_OTA_CONFIRM,
+        CALL_DEFAULT_EVENT_LOOP_CREATE,
         CALL_WIFI_MANAGER_START,
         CALL_DISCOVERY_START,
+        CALL_BLE_PROVISIONING_START,
     };
 
     call_count = 0U;
     wifi_start_result = ESP_OK;
     discovery_start_result = ESP_FAIL;
     app_main();
-
     assert(call_count == sizeof(expected) / sizeof(expected[0]));
     for (size_t index = 0U; index < call_count; ++index) {
         assert(calls[index] == expected[index]);

@@ -14,11 +14,11 @@ from typing import NamedTuple
 
 FLASH_SIZE = 8 * 1024 * 1024
 REQUIRED_PARTITIONS = {
-    "nvs": ("data", "nvs", 0x9000, 0x6000),
-    "otadata": ("data", "ota", 0xF000, 0x2000),
-    "phy_init": ("data", "phy", 0x11000, 0x1000),
-    "ota_0": ("app", "ota_0", 0x20000, 0x3F0000),
-    "ota_1": ("app", "ota_1", 0x410000, 0x3F0000),
+    "nvs": ("data", "nvs", 0x9000, 0x6000, frozenset()),
+    "otadata": ("data", "ota", 0xF000, 0x2000, frozenset()),
+    "phy_init": ("data", "phy", 0x11000, 0x1000, frozenset()),
+    "ota_0": ("app", "ota_0", 0x20000, 0x3F0000, frozenset()),
+    "ota_1": ("app", "ota_1", 0x410000, 0x3F0000, frozenset()),
 }
 
 _UNSET_CONFIG = re.compile(r"^# (CONFIG_[A-Z0-9_]+) is not set$")
@@ -34,6 +34,7 @@ class Partition(NamedTuple):
     subtype: str
     offset: int
     size: int
+    flags: frozenset[str]
 
 
 def parse_size(value: str) -> int:
@@ -68,6 +69,9 @@ def parse_partition_csv(text: str) -> list[Partition]:
         name, type_name, subtype, offset, size = (
             field.strip() for field in fields[:5]
         )
+        flags = frozenset(
+            flag.strip() for flag in fields[5].split(":") if flag.strip()
+        ) if len(fields) > 5 else frozenset()
         if not all((name, type_name, subtype, offset, size)):
             raise VerificationError(
                 f"partition {name or '<unnamed>'} must use explicit fields and offset"
@@ -79,6 +83,7 @@ def parse_partition_csv(text: str) -> list[Partition]:
                 subtype=subtype,
                 offset=parse_size(offset),
                 size=parse_size(size),
+                flags=flags,
             )
         )
     return rows
@@ -107,6 +112,17 @@ def _require_config(
     if actual != expected:
         raise VerificationError(
             f"{description} must be {expected}, found {actual!r} ({name})"
+        )
+
+
+def _require_unset_config(
+    config: Mapping[str, str | None],
+    name: str,
+    description: str,
+) -> None:
+    if name not in config or config[name] is not None:
+        raise VerificationError(
+            f"{description} must be disabled, found {config.get(name)!r} ({name})"
         )
 
 
@@ -141,6 +157,30 @@ def validate_config(config: Mapping[str, str | None]) -> None:
         '"partitions.csv"',
         "AirDAP partition table filename",
     )
+    _require_unset_config(
+        config,
+        "CONFIG_ESP_WIFI_NVS_ENABLED",
+        "Wi-Fi driver credential persistence",
+    )
+
+    maximum_log_level = config.get("CONFIG_LOG_MAXIMUM_LEVEL")
+    if maximum_log_level is None:
+        raise VerificationError(
+            "maximum compiled log level must be an integer at or below INFO "
+            "(CONFIG_LOG_MAXIMUM_LEVEL), found None"
+        )
+    try:
+        numeric_log_level = int(maximum_log_level)
+    except ValueError as error:
+        raise VerificationError(
+            "maximum compiled log level must be an integer at or below INFO "
+            f"(CONFIG_LOG_MAXIMUM_LEVEL), found {maximum_log_level!r}"
+        ) from error
+    if numeric_log_level < 0 or numeric_log_level > 3:
+        raise VerificationError(
+            "maximum compiled log level must be at or below INFO "
+            f"(CONFIG_LOG_MAXIMUM_LEVEL), found {maximum_log_level!r}"
+        )
 
 
 def validate_layout(partitions: Sequence[Partition]) -> None:
@@ -171,6 +211,7 @@ def validate_layout(partitions: Sequence[Partition]) -> None:
             partition.subtype,
             partition.offset,
             partition.size,
+            partition.flags,
         )
         if actual != expected:
             raise VerificationError(

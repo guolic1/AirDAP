@@ -18,6 +18,7 @@
 enum {
     MAX_REGISTRATIONS = 3,
     MAX_POSTED_EVENTS = 8,
+    MAX_STORAGE_CHANGES = 16,
 };
 
 typedef struct {
@@ -58,6 +59,11 @@ static size_t wifi_connect_count;
 static size_t wifi_disconnect_count;
 static size_t timer_start_count;
 static size_t timer_stop_count;
+static int storage_changes[MAX_STORAGE_CHANGES];
+static size_t storage_change_count;
+static size_t provisioning_commit_count;
+static uint32_t last_clear_flags;
+static esp_err_t wifi_storage_result = ESP_OK;
 
 static void dispatch(
     esp_event_base_t base,
@@ -146,9 +152,23 @@ esp_err_t airdap_config_store_set_blob(
     return ESP_OK;
 }
 
+esp_err_t airdap_config_store_commit_network_provisioning(
+    const void *data,
+    size_t data_size)
+{
+    assert(data != NULL);
+    assert(data_size <= sizeof(stored_blob));
+    memcpy(stored_blob, data, data_size);
+    stored_blob_size = data_size;
+    ++provisioning_commit_count;
+    return ESP_OK;
+}
+
 esp_err_t airdap_config_store_clear(uint32_t flags)
 {
-    assert(flags == AIRDAP_CONFIG_CLEAR_WIFI_CREDENTIALS);
+    assert(flags == AIRDAP_CONFIG_CLEAR_WIFI_CREDENTIALS ||
+        flags == AIRDAP_CONFIG_CLEAR_NETWORK);
+    last_clear_flags = flags;
     memset(stored_blob, 0, sizeof(stored_blob));
     stored_blob_size = 0U;
     return ESP_OK;
@@ -289,8 +309,10 @@ esp_err_t esp_wifi_deinit(void)
 
 esp_err_t esp_wifi_set_storage(int storage)
 {
-    assert(storage == WIFI_STORAGE_RAM);
-    return ESP_OK;
+    assert(storage == WIFI_STORAGE_RAM || storage == WIFI_STORAGE_FLASH);
+    assert(storage_change_count < MAX_STORAGE_CHANGES);
+    storage_changes[storage_change_count++] = storage;
+    return wifi_storage_result;
 }
 
 esp_err_t esp_wifi_set_mode(int mode)
@@ -327,6 +349,10 @@ esp_err_t esp_wifi_disconnect(void)
 
 int main(void)
 {
+    assert(airdap_wifi_manager_clear_network_configuration() == ESP_OK);
+    assert(last_clear_flags == AIRDAP_CONFIG_CLEAR_NETWORK);
+    assert(posted_event_count == 0U);
+
     assert(airdap_wifi_manager_start() == ESP_OK);
     emit_wifi_event(WIFI_EVENT_STA_START, WIFI_REASON_UNSPECIFIED);
     assert(wifi_connect_count == 0U);
@@ -401,6 +427,94 @@ int main(void)
     dispatch_next_posted_event();
     assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_STOPPED);
     assert(wifi_disconnect_count == 2U);
+
+    credentials = make_credentials("canonical-ap", "canonical-password");
+    assert(airdap_wifi_manager_set_credentials(&credentials) == ESP_OK);
+    dispatch_next_posted_event();
+    emit_wifi_event(WIFI_EVENT_STA_CONNECTED, WIFI_REASON_UNSPECIFIED);
+    emit_ip_event(IP_EVENT_STA_GOT_IP);
+    assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_ONLINE);
+
+    emit_wifi_event(WIFI_EVENT_STA_DISCONNECTED, WIFI_REASON_BEACON_TIMEOUT);
+    assert(retry_timer.active);
+    const size_t timer_stops_before_prepare = timer_stop_count;
+    const size_t storage_before_prepare = storage_change_count;
+    assert(airdap_wifi_manager_prepare_provisioning() == ESP_OK);
+    assert(airdap_wifi_manager_prepare_provisioning() == ESP_ERR_INVALID_STATE);
+    assert(!retry_timer.active);
+    assert(timer_stop_count == timer_stops_before_prepare + 1U);
+    assert(storage_change_count == storage_before_prepare + 1U);
+    assert(storage_changes[storage_before_prepare] == WIFI_STORAGE_RAM);
+
+    const size_t connects_while_suspended = wifi_connect_count;
+    const size_t retry_starts_while_suspended = timer_start_count;
+    retry_timer.callback(retry_timer.argument);
+    dispatch_next_posted_event();
+    emit_wifi_event(WIFI_EVENT_STA_DISCONNECTED, WIFI_REASON_AUTH_FAIL);
+    assert(wifi_connect_count == connects_while_suspended);
+    assert(timer_start_count == retry_starts_while_suspended);
+
+    credentials = make_credentials("provisioned-ap", "provisioned-password");
+    const size_t configs_before_stage = wifi_set_config_count;
+    const size_t storage_before_stage = storage_change_count;
+    assert(airdap_wifi_manager_stage_provisioning_credentials(&credentials) ==
+        ESP_OK);
+    assert(storage_change_count == storage_before_stage);
+    assert(wifi_set_config_count == configs_before_stage);
+    assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_CONNECTING);
+
+    const size_t posts_before_accept = posted_event_count;
+    assert(airdap_wifi_manager_accept_provisioned_credentials(&credentials) ==
+        ESP_OK);
+    assert(provisioning_commit_count == 1U);
+    assert(posted_event_count == posts_before_accept);
+
+    emit_wifi_event(WIFI_EVENT_STA_CONNECTED, WIFI_REASON_UNSPECIFIED);
+    emit_ip_event(IP_EVENT_STA_GOT_IP);
+    const size_t disconnects_before_finish = wifi_disconnect_count;
+    const size_t posts_before_finish = posted_event_count;
+    assert(airdap_wifi_manager_finish_provisioning() == ESP_OK);
+    assert(posted_event_count == posts_before_finish);
+    assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_CONNECTING);
+    assert(wifi_disconnect_count == disconnects_before_finish + 1U);
+    emit_wifi_event(WIFI_EVENT_STA_DISCONNECTED, WIFI_REASON_UNSPECIFIED);
+    assert(memcmp(last_wifi_config.sta.ssid, "provisioned-ap", 14U) == 0);
+
+    emit_wifi_event(WIFI_EVENT_STA_CONNECTED, WIFI_REASON_UNSPECIFIED);
+    emit_ip_event(IP_EVENT_STA_GOT_IP);
+    assert(airdap_wifi_manager_prepare_provisioning() == ESP_OK);
+    credentials = make_credentials("rejected-ap", "rejected-password");
+    assert(airdap_wifi_manager_stage_provisioning_credentials(&credentials) ==
+        ESP_OK);
+    assert(airdap_wifi_manager_finish_provisioning() == ESP_OK);
+    assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_CONNECTING);
+    emit_wifi_event(WIFI_EVENT_STA_DISCONNECTED, WIFI_REASON_UNSPECIFIED);
+    assert(memcmp(last_wifi_config.sta.ssid, "provisioned-ap", 14U) == 0);
+
+    emit_wifi_event(WIFI_EVENT_STA_CONNECTED, WIFI_REASON_UNSPECIFIED);
+    emit_ip_event(IP_EVENT_STA_GOT_IP);
+    assert(airdap_wifi_manager_prepare_provisioning() == ESP_OK);
+    const size_t posts_before_clear = posted_event_count;
+    const size_t storage_before_clear = storage_change_count;
+    const size_t configs_before_clear = wifi_set_config_count;
+    assert(airdap_wifi_manager_clear_network_configuration() == ESP_OK);
+    assert(last_clear_flags == AIRDAP_CONFIG_CLEAR_NETWORK);
+    assert(posted_event_count == posts_before_clear);
+    assert(storage_change_count == storage_before_clear + 1U);
+    assert(storage_changes[storage_before_clear] == WIFI_STORAGE_RAM);
+    assert(wifi_set_config_count == configs_before_clear + 1U);
+    assert(last_wifi_config.sta.ssid[0] == 0U);
+    assert(airdap_wifi_manager_finish_provisioning() == ESP_OK);
+    assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_STOPPED);
+
+    credentials = make_credentials("cleanup-failure-ap", "password");
+    assert(airdap_wifi_manager_set_credentials(&credentials) == ESP_OK);
+    dispatch_next_posted_event();
+    wifi_storage_result = ESP_FAIL;
+    assert(airdap_wifi_manager_clear_network_configuration() == ESP_OK);
+    assert(last_clear_flags == AIRDAP_CONFIG_CLEAR_NETWORK);
+    dispatch_next_posted_event();
+    assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_STOPPED);
 
     puts("wifi manager adapter tests passed");
     return 0;

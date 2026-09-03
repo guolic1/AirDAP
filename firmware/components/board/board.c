@@ -104,3 +104,12 @@ esp_err_t airdap_target_reset_set_asserted(bool asserted)
         (gpio_num_t) AIRDAP_PIN_TARGET_NRESET,
         asserted ? 1U : 0U);
 }
+
+esp_err_t airdap_boot_key_get_pressed(bool *pressed)
+{
+    if (pressed == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *pressed = gpio_get_level((gpio_num_t) AIRDAP_PIN_BOOT_KEY) == 0;
+    return ESP_OK;
+}

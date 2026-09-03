@@ -43,6 +43,7 @@ static event_t events[EVENT_CAPACITY];
 static size_t event_count;
 static size_t fail_at_call;
 static int input_level;
+static gpio_num_t input_pin;
 
 static uint64_t pin_mask(unsigned int pin)
 {
@@ -54,6 +55,7 @@ static void reset_fake_gpio(void)
     event_count = 0;
     fail_at_call = SIZE_MAX;
     input_level = 0;
+    input_pin = AIRDAP_PIN_V_SOURCE_STATUS;
 }
 
 static esp_err_t record_event(event_t event)
@@ -88,8 +90,23 @@ esp_err_t gpio_config(const gpio_config_t *config)
 
 int gpio_get_level(gpio_num_t gpio_num)
 {
-    assert(gpio_num == AIRDAP_PIN_V_SOURCE_STATUS);
+    assert(gpio_num == input_pin);
     return input_level;
+}
+
+static void test_boot_key_uses_active_low_level(void)
+{
+    bool pressed = false;
+    reset_fake_gpio();
+    input_pin = AIRDAP_PIN_BOOT_KEY;
+
+    input_level = 0;
+    assert(airdap_boot_key_get_pressed(&pressed) == ESP_OK);
+    assert(pressed);
+    input_level = 1;
+    assert(airdap_boot_key_get_pressed(&pressed) == ESP_OK);
+    assert(!pressed);
+    assert(airdap_boot_key_get_pressed(NULL) == ESP_ERR_INVALID_ARG);
 }
 
 static const event_t *find_level_event(gpio_num_t pin)
@@ -252,6 +269,7 @@ int main(void)
     test_target_power_control_uses_open_drain_release_levels();
     test_target_power_active_reads_shared_status_net();
     test_target_reset_accounts_for_inverting_transistor();
+    test_boot_key_uses_active_low_level();
 
     puts("board safe-state tests passed");
     return 0;
