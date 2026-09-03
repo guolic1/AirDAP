@@ -338,7 +338,10 @@ class AirDapUpdateTests(unittest.TestCase):
         transport.open()
 
         with mock.patch.object(airdap_update.time, "sleep") as sleep:
-            with self.assertRaisesRegex(airdap_update.UpdateError, "Bulk IN"):
+            with self.assertRaisesRegex(
+                airdap_update.UpdateError,
+                "begin: USB Bulk IN",
+            ):
                 airdap_update.upload_image(transport, io.BytesIO(b"firmware"), 8)
 
         sleep.assert_called_once_with(airdap_update.DAP_STREAM_RECOVERY_SECONDS)

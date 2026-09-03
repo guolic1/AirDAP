@@ -238,16 +238,18 @@ class DapOtaTransport:
         except Exception as error:
             raise UpdateError(f"USB Bulk OUT failed: {error}") from error
 
-    def _exchange(self, request: bytes) -> bytes:
-        self._write(request)
-
-        response = self._read_response()
-        if response[0] != request[0]:
-            raise UpdateError(
-                f"command 0x{request[0]:02X} returned response "
-                f"0x{response[0]:02X}"
-            )
-        return response
+    def _exchange(self, request: bytes, operation: str) -> bytes:
+        try:
+            self._write(request)
+            response = self._read_response()
+            if response[0] != request[0]:
+                raise UpdateError(
+                    f"command 0x{request[0]:02X} returned response "
+                    f"0x{response[0]:02X}"
+                )
+            return response
+        except UpdateError as error:
+            raise UpdateError(f"{operation}: {error}") from error
 
     def _read_response(self) -> bytes:
         if self.endpoint_in is None:
@@ -276,7 +278,7 @@ class DapOtaTransport:
             raise UpdateError(f"{operation} returned the wrong command byte")
 
     def query(self) -> OtaInfo:
-        response = self._exchange(bytes((OTA_QUERY,)))
+        response = self._exchange(bytes((OTA_QUERY,)), "query")
         self._check_status(response, OTA_QUERY, "query")
         if len(response) < 9:
             raise UpdateError("query returned a short capability response")
@@ -303,13 +305,13 @@ class DapOtaTransport:
         return info
 
     def disconnect_debug(self) -> None:
-        response = self._exchange(bytes((DAP_DISCONNECT,)))
+        response = self._exchange(bytes((DAP_DISCONNECT,)), "disconnect")
         if response != bytes((DAP_DISCONNECT, 0)):
             raise UpdateError(f"DAP disconnect failed: {response.hex()}")
 
     def begin(self, image_size: int) -> None:
         request = bytes((OTA_BEGIN,)) + struct.pack("<I", image_size)
-        response = self._exchange(request)
+        response = self._exchange(request, "begin")
         if len(response) != 2:
             raise UpdateError("begin returned an invalid response length")
         self._check_status(response, OTA_BEGIN, "begin")
@@ -318,14 +320,14 @@ class DapOtaTransport:
         if not data or len(data) > OTA_CHUNK_SIZE:
             raise UpdateError(f"invalid OTA write chunk length {len(data)}")
         request = bytes((OTA_WRITE,)) + struct.pack("<IH", offset, len(data)) + data
-        response = self._exchange(request)
+        response = self._exchange(request, "write")
         self._check_status(response, OTA_WRITE, "write")
         if len(response) != 6:
             raise UpdateError("write returned an invalid response length")
         return struct.unpack_from("<I", response, 2)[0]
 
     def commit(self) -> None:
-        response = self._exchange(bytes((OTA_COMMIT,)))
+        response = self._exchange(bytes((OTA_COMMIT,)), "commit")
         if len(response) != 2:
             raise UpdateError("commit returned an invalid response length")
         self._check_status(response, OTA_COMMIT, "commit")
