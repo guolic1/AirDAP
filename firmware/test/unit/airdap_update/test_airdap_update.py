@@ -404,6 +404,45 @@ class AirDapUpdateTests(unittest.TestCase):
             )
         self.assertIs(reconnected, second)
 
+    def test_waits_for_matching_device_to_disconnect(self) -> None:
+        target = object()
+        other = object()
+        serials = {target: "ADP-TARGET", other: "ADP-OTHER"}
+        discoveries = iter([[target, other], [target], [other]])
+        monotonic = iter([0.0, 0.1, 0.2])
+
+        with mock.patch.object(
+            airdap_update.time, "monotonic", side_effect=lambda: next(monotonic)
+        ), mock.patch.object(airdap_update.time, "sleep") as sleep:
+            airdap_update.wait_for_disconnect(
+                lambda: next(discoveries),
+                "ADP-TARGET",
+                serials.__getitem__,
+                timeout_seconds=1.0,
+                poll_seconds=0.01,
+            )
+
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_disconnect_wait_times_out_while_same_serial_remains(self) -> None:
+        target = object()
+        monotonic = iter([0.0, 1.0])
+
+        with mock.patch.object(
+            airdap_update.time, "monotonic", side_effect=lambda: next(monotonic)
+        ), mock.patch.object(airdap_update.time, "sleep"):
+            with self.assertRaisesRegex(
+                airdap_update.UpdateError,
+                "waiting for ADP-TARGET to disconnect",
+            ):
+                airdap_update.wait_for_disconnect(
+                    lambda: [target],
+                    "ADP-TARGET",
+                    lambda device: "ADP-TARGET",
+                    timeout_seconds=1.0,
+                    poll_seconds=0.01,
+                )
+
     def test_load_image_requires_a_regular_nonempty_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

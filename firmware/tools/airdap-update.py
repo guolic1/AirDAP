@@ -435,6 +435,34 @@ def wait_for_reconnect(
         time.sleep(poll_seconds)
 
 
+def wait_for_disconnect(
+    find_devices: Callable[[], Iterable[Any]],
+    serial: str,
+    serial_getter: Callable[[Any], str | None],
+    timeout_seconds: float,
+    poll_seconds: float = 0.1,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        matches = []
+        for device in find_devices():
+            try:
+                if serial_getter(device) == serial:
+                    matches.append(device)
+            except Exception:
+                continue
+        if not matches:
+            return
+        if len(matches) > 1:
+            raise UpdateError(f"multiple AirDAP devices report serial {serial}")
+        if time.monotonic() >= deadline:
+            raise UpdateError(
+                f"timed out after {timeout_seconds:g}s waiting for "
+                f"{serial} to disconnect"
+            )
+        time.sleep(poll_seconds)
+
+
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Update a development AirDAP over its CMSIS-DAP USB interface",
@@ -543,6 +571,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
         reconnect_deadline = time.monotonic() + args.reconnect_timeout
+        disconnect_remaining = reconnect_deadline - time.monotonic()
+        if disconnect_remaining <= 0:
+            raise UpdateError(
+                f"timed out waiting for {serial} to disconnect after restart"
+            )
+        wait_for_disconnect(
+            lambda: _find_airdap_devices(usb_core),
+            serial,
+            serial_getter,
+            disconnect_remaining,
+        )
         last_reconnect_error: BaseException | None = None
         while True:
             remaining = reconnect_deadline - time.monotonic()
