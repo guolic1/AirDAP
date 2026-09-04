@@ -32,16 +32,12 @@ press. Hold `BOOT_KEY` for three seconds, release it, and confirm:
   `C5D2AA01B4DDA9A67CBE111D61B9F0CBBD3A9F7A7935E85E570A881C7EE03080`;
 - no SSID or Wi-Fi password appears in logs.
 
-Use the Espressif provisioning client with the public Security 2 credential;
-leave the Wi-Fi passphrase unset so it is prompted privately:
+Use the AirDAP provisioning tool. It discovers active AirDAP advertisements and
+supplies the public Security 2 credential automatically; the Wi-Fi passphrase
+is still prompted privately:
 
 ```sh
-python managed_components/espressif__network_provisioning/tool/esp_prov/esp_prov.py \
-    --transport ble \
-    --service_name <ADP-device-id> \
-    --sec_ver 2 \
-    --sec2_username wifiprov \
-    --sec2_pwd abcd1234
+python tools/airdap-provision.py
 ```
 
 After the client connects, confirm the device reports a negotiated ATT MTU of
@@ -50,12 +46,23 @@ characteristic write, and the request is not rejected with `Invalid PDU`.
 
 ## 2. Authentication failure and cancellation
 
-Open a new window and enter a deliberately incorrect PoP. Confirm the secure
-session is rejected, the stored Wi-Fi configuration is unchanged, and the BLE
-window remains available. Hold `BOOT_KEY` for three seconds again. Confirm BLE
-advertising and the provisioning service stop, the mode no longer reports an
-active provisioning attempt, and the prior Wi-Fi configuration remains in
-effect.
+Open a new window and use the raw Espressif client for this negative-only test,
+substituting the observed device ID and a deliberately incorrect PoP:
+
+```sh
+python managed_components/espressif__network_provisioning/tool/esp_prov/esp_prov.py \
+    --transport ble \
+    --service_name <ADP-device-id> \
+    --sec_ver 2 \
+    --sec2_username wifiprov \
+    --sec2_pwd intentionally-wrong-pop
+```
+
+Confirm the secure session is rejected, the stored Wi-Fi configuration is
+unchanged, and the BLE window remains available. Hold `BOOT_KEY` for three
+seconds again. Confirm BLE advertising and the provisioning service stop, the
+mode no longer reports an active provisioning attempt, and the prior Wi-Fi
+configuration remains in effect.
 
 ## 3. Timeout cleanup
 
@@ -68,8 +75,8 @@ alone is not evidence that the firmware stopped the BLE service.
 ## 4. First provisioning and reboot recovery
 
 If necessary, perform the ten-second reset from section 5 first. Open a window,
-enter the public PoP, select the dedicated test AP, and enter its password
-interactively. Required observations:
+run the AirDAP provisioning tool, select the dedicated test AP, and enter its
+password interactively. Required observations:
 
 - the Security 2 session succeeds and Wi-Fi association reaches DHCP;
 - the device becomes provisioned and online;
@@ -80,11 +87,12 @@ interactively. Required observations:
   Security 2 credential fingerprint.
 
 Repeat with an incorrect AP password before the successful attempt. Confirm the
-failed candidate is not published. Reconnect the same client with `--reset` in
-addition to the Security 2 arguments above, then rerun without `--reset` and
-enter the correct AP credentials. Confirm the prior committed Wi-Fi
-configuration is restored on cancel/timeout and no credential value appears in
-logs except the documented public fingerprint.
+failed candidate is not published. For the reset-specific check, reconnect the
+raw Espressif client command from section 2 with the correct public PoP and
+`--reset`, then rerun `python tools/airdap-provision.py` and enter the correct AP
+credentials. Confirm the prior committed Wi-Fi configuration is restored on
+cancel/timeout and no credential value appears in logs except the documented
+public fingerprint.
 
 ## 5. Ten-second network reset and GPIO0 release guard
 

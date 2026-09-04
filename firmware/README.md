@@ -346,17 +346,32 @@ idf.py build
 idf.py -p <airdap-programming-port> flash
 ```
 
-Run the Espressif client with the public credential; omit the Wi-Fi password so
-the client still prompts for that private value:
+From the repository root, sync the checked-in host environment and run the
+AirDAP provisioning tool:
+
+```powershell
+uv sync
+uv run python firmware/tools/airdap-provision.py
+```
+
+In an existing non-Windows Python environment, install the host dependencies
+and run the tool from `firmware/`:
 
 ```sh
-python managed_components/espressif__network_provisioning/tool/esp_prov/esp_prov.py \
-    --transport ble \
-    --service_name ADP-001122334455 \
-    --sec_ver 2 \
-    --sec2_username wifiprov \
-    --sec2_pwd abcd1234
+python -m pip install bleak protobuf cryptography
+python tools/airdap-provision.py
 ```
+
+The tool reads the ESP-IDF path saved by `tools/setup.py`, scans only active
+`ADP-...` provisioning services, and supplies the firmware's public Security 2
+credential automatically. A single AirDAP is selected automatically; multiple
+AirDAP devices produce an explicit selection prompt. The upstream client then
+prompts for the Wi-Fi access point and reads its passphrase without echo. The
+passphrase is not accepted on the command line or saved by this host tool.
+
+The pinned `espressif/network_provisioning` host client must already be present
+in `managed_components/`; if it has not yet been downloaded, activate the
+configured ESP-IDF environment and run `idf.py reconfigure` once.
 
 Security 2 still encrypts and authenticates the BLE provisioning session, but
 the published PoP does not identify an owner. Physical access to hold
@@ -589,7 +604,8 @@ for suite in \
     dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning \
     target_uart usb_descriptors project_version \
     debug_shell_config_status debug_shell_identity debug_shell_input debug_shell_wifi \
-    debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update wired_hil; do
+    debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update \
+    airdap_provision wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
     cmake --build "build-host/$suite"
     ctest --test-dir "build-host/$suite" --output-on-failure
@@ -612,7 +628,8 @@ command framing, mDNS identity/TXT formatting and IP-driven publish/refresh/
 withdraw behavior, OTA state transitions, stale USB-frame recovery, interleaved
 USB/NETWORK DAP routing, AirDAP frame golden vectors and sequence rules,
 stale-session response suppression, bounded queue failures, host update
-ordering, UART line-coding
+ordering, automatic AirDAP BLE discovery and public-credential command
+construction, UART line-coding
 mapping, both compile-time USB descriptor variants, bounded shell input, the
 bounded SWD IDCODE command flow, debug TX completion state, host tools, and
 wired HIL helper's protocol checks. They do not prove USB enumeration, real NVS
