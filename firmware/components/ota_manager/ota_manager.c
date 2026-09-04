@@ -136,7 +136,10 @@ airdap_ota_status_t airdap_ota_begin(uint32_t image_size)
     }
 
     esp_ota_handle_t handle = 0U;
-    if (esp_ota_begin(partition, image_size, &handle) != ESP_OK) {
+    if (esp_ota_begin(
+            partition,
+            OTA_WITH_SEQUENTIAL_WRITES,
+            &handle) != ESP_OK) {
         if (handle != 0U) {
             (void) esp_ota_abort(handle);
         }

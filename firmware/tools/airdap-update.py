@@ -238,16 +238,18 @@ class DapOtaTransport:
         except Exception as error:
             raise UpdateError(f"USB Bulk OUT failed: {error}") from error
 
-    def _exchange(self, request: bytes) -> bytes:
-        self._write(request)
-
-        response = self._read_response()
-        if response[0] != request[0]:
-            raise UpdateError(
-                f"command 0x{request[0]:02X} returned response "
-                f"0x{response[0]:02X}"
-            )
-        return response
+    def _exchange(self, request: bytes, operation: str) -> bytes:
+        try:
+            self._write(request)
+            response = self._read_response()
+            if response[0] != request[0]:
+                raise UpdateError(
+                    f"command 0x{request[0]:02X} returned response "
+                    f"0x{response[0]:02X}"
+                )
+            return response
+        except UpdateError as error:
+            raise UpdateError(f"{operation}: {error}") from error
 
     def _read_response(self) -> bytes:
         if self.endpoint_in is None:
@@ -276,7 +278,7 @@ class DapOtaTransport:
             raise UpdateError(f"{operation} returned the wrong command byte")
 
     def query(self) -> OtaInfo:
-        response = self._exchange(bytes((OTA_QUERY,)))
+        response = self._exchange(bytes((OTA_QUERY,)), "query")
         self._check_status(response, OTA_QUERY, "query")
         if len(response) < 9:
             raise UpdateError("query returned a short capability response")
@@ -303,13 +305,13 @@ class DapOtaTransport:
         return info
 
     def disconnect_debug(self) -> None:
-        response = self._exchange(bytes((DAP_DISCONNECT,)))
+        response = self._exchange(bytes((DAP_DISCONNECT,)), "disconnect")
         if response != bytes((DAP_DISCONNECT, 0)):
             raise UpdateError(f"DAP disconnect failed: {response.hex()}")
 
     def begin(self, image_size: int) -> None:
         request = bytes((OTA_BEGIN,)) + struct.pack("<I", image_size)
-        response = self._exchange(request)
+        response = self._exchange(request, "begin")
         if len(response) != 2:
             raise UpdateError("begin returned an invalid response length")
         self._check_status(response, OTA_BEGIN, "begin")
@@ -318,14 +320,14 @@ class DapOtaTransport:
         if not data or len(data) > OTA_CHUNK_SIZE:
             raise UpdateError(f"invalid OTA write chunk length {len(data)}")
         request = bytes((OTA_WRITE,)) + struct.pack("<IH", offset, len(data)) + data
-        response = self._exchange(request)
+        response = self._exchange(request, "write")
         self._check_status(response, OTA_WRITE, "write")
         if len(response) != 6:
             raise UpdateError("write returned an invalid response length")
         return struct.unpack_from("<I", response, 2)[0]
 
     def commit(self) -> None:
-        response = self._exchange(bytes((OTA_COMMIT,)))
+        response = self._exchange(bytes((OTA_COMMIT,)), "commit")
         if len(response) != 2:
             raise UpdateError("commit returned an invalid response length")
         self._check_status(response, OTA_COMMIT, "commit")
@@ -431,6 +433,34 @@ def wait_for_reconnect(
         if time.monotonic() >= deadline:
             raise UpdateError(
                 f"timed out after {timeout_seconds:g}s waiting for {serial} to reconnect"
+            )
+        time.sleep(poll_seconds)
+
+
+def wait_for_disconnect(
+    find_devices: Callable[[], Iterable[Any]],
+    serial: str,
+    serial_getter: Callable[[Any], str | None],
+    timeout_seconds: float,
+    poll_seconds: float = 0.1,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        matches = []
+        for device in find_devices():
+            try:
+                if serial_getter(device) == serial:
+                    matches.append(device)
+            except Exception:
+                continue
+        if not matches:
+            return
+        if len(matches) > 1:
+            raise UpdateError(f"multiple AirDAP devices report serial {serial}")
+        if time.monotonic() >= deadline:
+            raise UpdateError(
+                f"timed out after {timeout_seconds:g}s waiting for "
+                f"{serial} to disconnect"
             )
         time.sleep(poll_seconds)
 
@@ -543,6 +573,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
         reconnect_deadline = time.monotonic() + args.reconnect_timeout
+        disconnect_remaining = reconnect_deadline - time.monotonic()
+        if disconnect_remaining <= 0:
+            raise UpdateError(
+                f"timed out waiting for {serial} to disconnect after restart"
+            )
+        wait_for_disconnect(
+            lambda: _find_airdap_devices(usb_core),
+            serial,
+            serial_getter,
+            disconnect_remaining,
+        )
         last_reconnect_error: BaseException | None = None
         while True:
             remaining = reconnect_deadline - time.monotonic()

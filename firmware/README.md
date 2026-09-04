@@ -457,9 +457,10 @@ udev rule; on Windows interface 0 must retain its WinUSB binding.
 
 The tool queries the inactive-slot capacity, disconnects the SWD debug port,
 uploads sequential 496-byte chunks, validates and selects the image, requests
-a software restart, then waits for the same USB serial and reports its running
-version. It writes only `airdap.bin`; it does not replace the bootloader,
-partition table, NVS, PHY data, or OTA metadata partition directly.
+a software restart, waits for the old USB enumeration to disappear, then waits
+for the same USB serial and reports its running version. It writes only
+`airdap.bin`; it does not replace the bootloader, partition table, NVS, PHY data,
+or OTA metadata partition directly.
 
 An incomplete, rejected, or physically disconnected upload is aborted without
 selecting the inactive slot. A committed image is initially `PENDING_VERIFY`;
