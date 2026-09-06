@@ -17,7 +17,7 @@ safe states before ESP-IDF initializes and validates the application image:
 ## Build
 
 AirDAP keeps its ESP-IDF tools and Python environment in the ignored
-`firmware/.airdap-env/` directory. Python 3.10 or newer must be available on
+`firmware/.airdap-env/` directory. Python 3.13 or newer must be available on
 the host. The default setup also requires Git and network access the first
 time it downloads the pinned ESP-IDF v6.1.0 source and its tools. The managed
 checkout fetches only the ESP-IDF submodules used by AirDAP's standard and
@@ -134,6 +134,8 @@ not part of this repository. The application currently provides:
 - mDNS discovery on the station interface after DHCP succeeds;
 - an on-demand BLE provisioning window using protocomm Security 2 and
   a public credential gated by physical button access;
+- a TLS 1.3 PSK-DHE authentication layer with one rotatable credential and
+  one authenticated network-owner session;
 - a bounded transport-independent DAP service with session-safe response
   routing for USB and future network sessions;
 - target reset, power/status GPIO, VTref, and USB VBUS monitoring.
@@ -145,7 +147,7 @@ digits. Its 128-bit UUID is the first 16 bytes of
 development identifiers; product firmware must use identifiers the project is
 authorized to ship. The checked-in layout is for the confirmed 8 MiB module
 and provides two 4032 KiB OTA application slots. Secure Boot, Flash Encryption,
-authenticated updates, authenticated network services, and a production
+authenticated updates, authenticated network listeners, and a production
 credential lifecycle remain deferred.
 
 The firmware version is the single tag pointing directly at the built commit.
@@ -248,8 +250,9 @@ protocomm Security 2. While a window is active, the upstream manager exclusively
 controls Wi-Fi association; AirDAP's reconnect state machine resumes only after
 the provisioning manager ends and then reapplies the canonical configuration.
 A failed, cancelled, or timed-out attempt restores the previously committed
-configuration. The custom pairing and authenticated network-service endpoints
-remain later work.
+configuration. The custom network-credential pairing endpoint is available
+during the same Security 2 window; authenticated TCP listeners remain later
+transport work.
 
 For development-board Wi-Fi validation, use a dedicated test AP and never a
 production credential. The HIL console accepts credentials at runtime so they
@@ -380,6 +383,65 @@ trusted; it is not per-device authentication. Follow
 before relying on BLE lifecycle, RF behavior, Wi-Fi association, persistence,
 or the GPIO0 reset guard on hardware.
 
+## Network pairing and authenticated sessions
+
+AirDAP keeps exactly one active 256-bit network PSK. Its stable, non-secret TLS
+identity is `AIRDAP:<device_id>`. While the physical-button BLE window is open,
+the `airdap-pair` Security 2 endpoint accepts version `1` plus a 32-byte PSK.
+The device publishes the new generation only after the NVS commit succeeds and
+returns only `SHA-256("AirDAP network PSK v1" || identity || PSK)`. Repeating
+the same candidate is idempotent. Rotating to a different key revokes the old
+authenticated session; the old host must pair again before it can reconnect.
+
+The host tool has no implicit credential location. `--credential` is required;
+if that explicit path does not exist, the tool generates the key with the host
+CSPRNG and creates the file exclusively. The file contains the development PSK
+in plaintext: never commit it, and keep it in a protected user directory. POSIX
+loads reject group/other permission bits and new files use mode `0600`; on
+Windows, protect the selected directory with an appropriate user-only ACL.
+
+From the repository root on Windows, open the BLE window and run:
+
+```powershell
+uv sync --locked
+uv run python firmware/tools/airdap-pair.py `
+    --device ADP-001122334455 `
+    --credential "$env:LOCALAPPDATA\AirDAP\ADP-001122334455.json"
+```
+
+From `firmware/` in an existing Linux Python 3.13 or newer environment:
+
+```sh
+python tools/airdap-pair.py \
+    --device ADP-001122334455 \
+    --credential "${XDG_CONFIG_HOME:-$HOME/.config}/airdap/ADP-001122334455.json"
+```
+
+The authentication component completes the blocking TLS handshake before any
+application data is read. It accepts only TLS 1.3 PSK-DHE with
+`TLS_AES_128_GCM_SHA256`; pure PSK, unauthenticated ephemeral TLS, TLS 1.2,
+0-RTT, and server session tickets are disabled. At most two handshakes may be
+pending, each with a five-second timeout. A TLS connection becomes an AirDAP
+session only after `AUTH` binds it. The first binding creates the sole owner and
+a random 32-byte session token; later DAP, UART, or OTA connections may join
+only with that token. Privileged dispatch must revalidate the binding, and a
+disconnect, 60-second idle timeout, network clear, credential rotation, or
+restart releases it.
+
+This P4-T2 slice supplies the authentication/session boundary but deliberately
+does not open TCP port 3260 or dispatch DAP frames; those belong to P4-T3. Once
+that listener or a dedicated HIL harness is present, the standard-library
+Python TLS-PSK probe can verify the negotiated version and cipher:
+
+```sh
+python tools/airdap-tls-probe.py 192.0.2.10 \
+    --credential "${XDG_CONFIG_HOME:-$HOME/.config}/airdap/ADP-001122334455.json"
+```
+
+ESP-IDF 6.1 currently supplies Mbed TLS 4.1.0. Until a compatible ESP-IDF
+update supplies Mbed TLS 4.1.1 or newer, AirDAP keeps server tickets disabled
+and requires the explicit handshake-before-data boundary described above.
+
 `DAP_Connect` acquires its transport's DAP/SWD owner. USB may preempt an idle
 NETWORK owner after attach; it does not tear down an in-flight operation or a
 DIAGNOSTIC owner. Other owner conflicts fail without driving that owner's bus.
@@ -394,7 +456,9 @@ for a later network transport and is not exposed by this stage.
 
 Configuration schema 1 stores the friendly name, provisioning state, and
 bounded opaque slots for Wi-Fi credentials, pairing records, and network
-authentication material. The component writes one versioned NVS blob and only
+authentication material. The network-authentication slot holds one internal
+versioned PSK record and no session token. The component writes one versioned
+NVS blob and only
 publishes a changed in-memory snapshot after both `nvs_set_blob()` and
 `nvs_commit()` succeed. A component-owned mutex serializes public readers and
 writers across capture, commit, and snapshot publication. Selective clear
@@ -648,12 +712,12 @@ The other hardware-independent tests use the same pattern:
 for suite in \
     bootloader_artifact ota_layout setup_env board config_store device_identity voltage_monitor swd_protocol \
     dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame discovery \
-    dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning \
+    dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning network_auth \
     target_uart usb_descriptors project_version \
     debug_shell_commands debug_shell_diagnostics debug_shell_config_status \
     debug_shell_identity debug_shell_input debug_shell_wifi debug_shell_swd_probe \
     debug_shell_tx_state airdap_shell airdap_update \
-    airdap_provision wired_hil; do
+    airdap_provision airdap_pair airdap_tls_probe wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
     cmake --build "build-host/$suite"
     ctest --test-dir "build-host/$suite" --output-on-failure
@@ -669,7 +733,10 @@ online state, IP-loss handling, bounded reconnect backoff, actual timer/driver
 coordination, configuration-change event ordering and recovery, Security 2
 public-credential derivation against its published username and PoP,
 provisioning-button thresholds, BLE window cleanup, atomic provisioning commit,
-and reset-after-release behavior, DAP owner
+network-credential commit/rotation, exact TLS 1.3 PSK-DHE configuration,
+bounded handshake admission and cleanup, fingerprint vectors, authenticated
+session binding, single-owner/token admission, expiry/replay/revocation, the
+Python pairing/TLS-PSK tools, and reset-after-release behavior, DAP owner
 transitions and physical-backend release calls, unified
 USB/Wi-Fi/provisioning/OTA mode transitions and DAP admission, CMSIS-DAP and OTA
 command framing, mDNS identity/TXT formatting and IP-driven publish/refresh/
@@ -683,6 +750,7 @@ bounded SWD IDCODE command flow, debug TX completion state, host tools, and
 wired HIL helper's protocol checks. They do not prove USB enumeration, real NVS
 power-loss persistence or purge behavior, BLE enumeration or radio lifetime,
 real Wi-Fi provisioning, physical OTA persistence, bootloader rollback on a
-board, or electrical SWD timing.
+board, a live ESP32-S3 TLS handshake/resource profile, authenticated TCP/DAP
+dispatch, or electrical SWD timing.
 Follow `test/hil/wired.md` on a populated AirDAP board before marking roadmap
 Stage 1 complete.
