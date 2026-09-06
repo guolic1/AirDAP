@@ -9,8 +9,11 @@
 #include "sdkconfig.h"
 
 #include "airdap_board.h"
+#include "airdap_config_store.h"
 #include "airdap_debug_shell_commands.h"
+#include "airdap_debug_shell_config_status.h"
 #include "airdap_debug_shell_diagnostics.h"
+#include "airdap_debug_shell_identity.h"
 #include "airdap_device_identity.h"
 #include "airdap_mode_state.h"
 #include "airdap_ota.h"
@@ -27,6 +30,7 @@
 
 enum {
     TASK_DIAGNOSTIC_LIMIT = 48,
+    TASK_NAME_COLUMN_WIDTH = configMAX_TASK_NAME_LEN,
 };
 
 #if CONFIG_FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER
@@ -327,11 +331,23 @@ static int system_info_command(
     }
 
     const airdap_device_identity_t *identity = airdap_device_identity_get();
-    if (identity == NULL || identity->firmware_version == NULL) {
+    if (identity == NULL) {
         airdap_debug_shell_printf(
             invocation,
             AIRDAP_DEBUG_SHELL_STYLE_ERROR,
             "system-info: device identity unavailable\n");
+        return 1;
+    }
+
+    char identity_output[AIRDAP_DEBUG_SHELL_IDENTITY_OUTPUT_SIZE];
+    if (!airdap_debug_shell_identity_format(
+            identity,
+            identity_output,
+            sizeof(identity_output))) {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_ERROR,
+            "system-info: identity formatting failed\n");
         return 1;
     }
 
@@ -340,8 +356,12 @@ static int system_info_command(
     airdap_debug_shell_printf(
         invocation,
         AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
-        "firmware_version=%s idf_version=%s uptime_ms=%" PRId64 "\n",
-        identity->firmware_version,
+        "%s",
+        identity_output);
+    airdap_debug_shell_printf(
+        invocation,
+        AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+        "idf_version=%s uptime_ms=%" PRId64 "\n",
         esp_get_idf_version(),
         esp_timer_get_time() / INT64_C(1000));
     airdap_debug_shell_printf(
@@ -421,10 +441,38 @@ static int mode_status_command(
         return usage_error(invocation, "mode-status");
     }
 
+    airdap_config_status_t config_status;
+    const esp_err_t config_error =
+        airdap_config_store_get_status(&config_status);
+    if (config_error != ESP_OK) {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_ERROR,
+            "mode-status: config status read failed: %s\n",
+            esp_err_to_name(config_error));
+        return 1;
+    }
+    char config_output[AIRDAP_DEBUG_SHELL_CONFIG_STATUS_OUTPUT_SIZE];
+    if (!airdap_debug_shell_config_status_format(
+            &config_status,
+            config_output,
+            sizeof(config_output))) {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_ERROR,
+            "mode-status: config status formatting failed\n");
+        return 1;
+    }
+
     airdap_mode_snapshot_t snapshot;
     if (!read_mode_snapshot(invocation, "mode-status", &snapshot)) {
         return 1;
     }
+    airdap_debug_shell_printf(
+        invocation,
+        AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+        "%s",
+        config_output);
     airdap_debug_shell_printf(
         invocation,
         AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
@@ -694,8 +742,17 @@ static int tasks_command(
     airdap_debug_shell_printf(
         invocation,
         AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
-        "number name state core priority base_priority stack_free_bytes "
-        TASK_RUNTIME_FIELD " cpu_pct\n");
+        "%-10s %-*s %-9s %-4s %-10s %-13s %-16s %-20s %s\n",
+        "number",
+        TASK_NAME_COLUMN_WIDTH,
+        "name",
+        "state",
+        "core",
+        "priority",
+        "base_priority",
+        "stack_free_bytes",
+        TASK_RUNTIME_FIELD,
+        "cpu_pct");
     for (UBaseType_t index = 0U; index < task_count; ++index) {
         const task_diagnostic_t *task = &task_diagnostic_buffer[index];
         const uint32_t cpu = cpu_basis_points(
@@ -710,9 +767,10 @@ static int tasks_command(
         airdap_debug_shell_printf(
             invocation,
             AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
-            "%u %s %s %s %u %u %" PRIu64 " %" PRIu64 " %" PRIu32
-            ".%02" PRIu32 "\n",
+            "%-10u %-*s %-9s %-4s %-10u %-13u %-16" PRIu64
+            " %-20" PRIu64 " %" PRIu32 ".%02" PRIu32 "\n",
             (unsigned int) task->number,
+            TASK_NAME_COLUMN_WIDTH,
             task->name,
             task_state_name(task->state),
             core,
@@ -730,9 +788,10 @@ static const airdap_debug_shell_command_t diagnostic_commands[] = {
     {
         .name = "system-info",
         .usage = "system-info",
-        .summary = "Show firmware, chip, uptime, and reset details",
+        .summary = "Show device identity, firmware, and chip details",
         .details =
-            "Reports firmware and ESP-IDF versions, chip identity, uptime, "
+            "Reports the USB serial, device ID, UUID, firmware and protocol "
+            "versions, capabilities, ESP-IDF version, chip identity, uptime, "
             "and the previous reset reason without changing device state.",
         .handler = system_info_command,
     },
@@ -748,10 +807,11 @@ static const airdap_debug_shell_command_t diagnostic_commands[] = {
     {
         .name = "mode-status",
         .usage = "mode-status",
-        .summary = "Show the unified runtime mode snapshot",
+        .summary = "Show configuration and runtime mode state",
         .details =
-            "Reports USB presence, Wi-Fi, provisioning, OTA, and current DAP "
-            "ownership from the shared mode state.",
+            "Reports safe persistent configuration status plus USB, Wi-Fi, "
+            "provisioning, OTA, and DAP-owner runtime state. Credential and "
+            "authentication material are never displayed.",
         .handler = mode_status_command,
     },
     {

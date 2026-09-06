@@ -9,13 +9,17 @@ add_executable(
     debug_shell_diagnostics_test
     test_debug_shell_diagnostics.c
     ../../../components/usb_device/debug_shell_commands.c
+    ../../../components/usb_device/debug_shell_config_status.c
+    ../../../components/usb_device/debug_shell_core_commands.c
     ../../../components/usb_device/debug_shell_diagnostics.c
+    ../../../components/usb_device/debug_shell_identity.c
 )
 target_include_directories(
     debug_shell_diagnostics_test
     PRIVATE
         fake_include
         ../../../components/board/include
+        ../../../components/config_store/include
         ../../../components/dap_ownership/include
         ../../../components/device_identity/include
         ../../../components/mode_state/include

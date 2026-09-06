@@ -548,18 +548,15 @@ command group can be defined and registered from its own source file without
 extending a single global command table. Available commands are:
 
 - `help [command]` — list commands or show detailed help for one command;
-- `identity` — print the USB serial, device ID, UUID, firmware and protocol
-  versions, and capability bits from the shared device identity;
-- `config-status` — print only the configuration schema and provisioning state;
-  credential values are never included;
-- `status` — print `target_mv`, `usb_vbus_mv`, `uptime_ms`, and `free_heap`;
-- `system-info` — print firmware and ESP-IDF versions, uptime, chip model,
-  revision, core count, feature bits, and the previous reset reason;
+- `system-info` — print the USB serial, device ID, UUID, firmware and protocol
+  versions, capability bits, ESP-IDF version, uptime, chip model, revision,
+  core count, feature bits, and the previous reset reason;
 - `memory-info` — print total, free, historical minimum-free, and largest-free
   block sizes for default, internal, DMA, and SPI RAM heap capabilities; these
   capability categories can overlap and should not be summed;
-- `mode-status` — print USB presence, Wi-Fi, provisioning, OTA, and DAP-owner
-  state from the shared runtime snapshot;
+- `mode-status` — print the safe persistent configuration schema and provisioned
+  state, followed by USB, Wi-Fi, provisioning, OTA, and DAP-owner state from the
+  shared runtime snapshot; credential values are never included;
 - `ota-status` — print running version, OTA protocol/session/rollback state,
   running image state, and running/boot partition metadata without starting an
   update;
@@ -650,7 +647,7 @@ done
 These tests prove GPIO ordering, bootloader artifact-contract validation,
 versioned configuration validation, commit-before-publish behavior, serialized
 concurrent writes, fake-NVS restart recovery, selective configuration clearing,
-safe configuration-status command behavior, ADC scaling, SWD transaction
+safe persistent-configuration formatting and `mode-status` reporting, ADC scaling, SWD transaction
 framing, Wi-Fi credential encoding, wrong-password classification, DHCP-gated
 online state, IP-loss handling, bounded reconnect backoff, actual timer/driver
 coordination, configuration-change event ordering and recovery, Security 2

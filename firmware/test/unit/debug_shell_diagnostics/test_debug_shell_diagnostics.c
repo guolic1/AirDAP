@@ -9,8 +9,10 @@
 #include <string.h>
 
 #include "airdap_board.h"
+#include "airdap_config_store.h"
 #include "airdap_debug_shell_commands.h"
 #include "airdap_debug_shell_diagnostics.h"
+#include "airdap_debug_shell_core_commands.h"
 #include "airdap_device_identity.h"
 #include "airdap_mode_state.h"
 #include "airdap_ota.h"
@@ -29,6 +31,8 @@ typedef struct {
 } captured_output_t;
 
 static airdap_device_identity_t identity;
+static airdap_config_status_t config_status;
+static esp_err_t config_status_result;
 static airdap_mode_snapshot_t mode_snapshot;
 static airdap_ota_info_t ota_info;
 static esp_partition_t running_partition;
@@ -81,9 +85,52 @@ static int run_command(
     return command->handler(arguments, &invocation, command->context);
 }
 
+int airdap_debug_shell_help_command(
+    const char *arguments,
+    const airdap_debug_shell_invocation_t *invocation,
+    void *context)
+{
+    (void) arguments;
+    (void) invocation;
+    (void) context;
+    return 0;
+}
+
+int airdap_debug_shell_wifi_command(
+    const char *arguments,
+    const airdap_debug_shell_invocation_t *invocation,
+    void *context)
+{
+    return airdap_debug_shell_help_command(arguments, invocation, context);
+}
+
+int airdap_debug_shell_swd_idcode_command(
+    const char *arguments,
+    const airdap_debug_shell_invocation_t *invocation,
+    void *context)
+{
+    return airdap_debug_shell_help_command(arguments, invocation, context);
+}
+
+int airdap_debug_shell_restart_command(
+    const char *arguments,
+    const airdap_debug_shell_invocation_t *invocation,
+    void *context)
+{
+    return airdap_debug_shell_help_command(arguments, invocation, context);
+}
+
 const airdap_device_identity_t *airdap_device_identity_get(void)
 {
     return &identity;
+}
+
+esp_err_t airdap_config_store_get_status(airdap_config_status_t *status)
+{
+    if (config_status_result == ESP_OK) {
+        *status = config_status;
+    }
+    return config_status_result;
 }
 
 void esp_chip_info(esp_chip_info_t *info)
@@ -283,7 +330,25 @@ static void set_up(void)
     captured_task_count = 3U;
     ipc_result = ESP_OK;
     memset(&identity, 0, sizeof(identity));
+    (void) snprintf(
+        identity.usb_serial,
+        sizeof(identity.usb_serial),
+        "ADP-001122334455");
+    (void) snprintf(
+        identity.device_id,
+        sizeof(identity.device_id),
+        "ADP-001122334455");
+    for (size_t index = 0U; index < sizeof(identity.uuid); ++index) {
+        identity.uuid[index] = (uint8_t) index;
+    }
     identity.firmware_version = "abc1234";
+    identity.protocol_version = 1U;
+    identity.capabilities = UINT32_C(0x1F);
+    config_status = (airdap_config_status_t) {
+        .schema_version = 1U,
+        .provisioned = true,
+    };
+    config_status_result = ESP_OK;
 
     mode_snapshot = (airdap_mode_snapshot_t) {
         .usb_present = true,
@@ -335,7 +400,7 @@ static void set_up(void)
         .xCoreID = 0,
     };
     task_statuses[2] = (TaskStatus_t) {
-        .pcTaskName = "debug_shell",
+        .pcTaskName = "task-name-12345",
         .xTaskNumber = 12U,
         .eCurrentState = eRunning,
         .uxCurrentPriority = 4U,
@@ -380,6 +445,47 @@ static void test_registers_diagnostics_with_detailed_metadata(void)
     assert(!airdap_debug_shell_register_diagnostic_commands(&registry));
 }
 
+static void test_registers_complete_shell_without_legacy_duplicates(void)
+{
+    airdap_debug_shell_command_registry_t registry;
+    airdap_debug_shell_command_registry_init(&registry);
+
+    assert(airdap_debug_shell_register_core_commands(&registry));
+    assert(airdap_debug_shell_register_diagnostic_commands(&registry));
+    static const char *const expected[] = {
+        "help",
+        "wifi",
+        "swd-idcode",
+        "restart",
+        "system-info",
+        "memory-info",
+        "mode-status",
+        "ota-status",
+        "target-status",
+        "tasks",
+    };
+    assert(airdap_debug_shell_command_count(&registry) ==
+        sizeof(expected) / sizeof(expected[0]));
+    for (size_t index = 0U; index < sizeof(expected) / sizeof(expected[0]); ++index) {
+        const airdap_debug_shell_command_t *command =
+            airdap_debug_shell_command_at(&registry, index);
+        assert(command != NULL);
+        assert(strcmp(command->name, expected[index]) == 0);
+    }
+
+    static const char *const removed[] = {
+        "identity",
+        "config-status",
+        "status",
+    };
+    for (size_t index = 0U; index < sizeof(removed) / sizeof(removed[0]); ++index) {
+        assert(airdap_debug_shell_command_find(
+            &registry,
+            removed[index],
+            strlen(removed[index])) == NULL);
+    }
+}
+
 static void test_system_memory_and_mode_diagnostics(void)
 {
     airdap_debug_shell_command_registry_t registry;
@@ -390,7 +496,13 @@ static void test_system_memory_and_mode_diagnostics(void)
     assert(run_command(&registry, "system-info", "", &output) == 0);
     assert(strcmp(
         output.text,
-        "firmware_version=abc1234 idf_version=v6.1 uptime_ms=1234567\n"
+        "usb_serial=ADP-001122334455\n"
+        "device_id=ADP-001122334455\n"
+        "uuid=000102030405060708090A0B0C0D0E0F\n"
+        "firmware_version=abc1234\n"
+        "protocol_version=1\n"
+        "capabilities=0x0000001F\n"
+        "idf_version=v6.1 uptime_ms=1234567\n"
         "chip_model=esp32s3 chip_revision=2.3 chip_cores=2 "
         "chip_features=0x00000091 reset_reason=software\n") == 0);
 
@@ -407,6 +519,8 @@ static void test_system_memory_and_mode_diagnostics(void)
     assert(run_command(&registry, "mode-status", "", &output) == 0);
     assert(strcmp(
         output.text,
+        "schema_version=1\n"
+        "provisioning_state=provisioned\n"
         "usb=present wifi=online provisioning=active ota=receiving "
         "dap_owner=usb\n") == 0);
 }
@@ -434,6 +548,21 @@ static void test_ota_and_target_diagnostics(void)
         "power_active=yes target_mv=3301 usb_vbus_mv=4998 dap_owner=usb\n") == 0);
 }
 
+static void test_mode_status_reports_config_read_failure(void)
+{
+    airdap_debug_shell_command_registry_t registry;
+    airdap_debug_shell_command_registry_init(&registry);
+    assert(airdap_debug_shell_register_diagnostic_commands(&registry));
+
+    config_status_result = ESP_FAIL;
+    captured_output_t output = {0};
+    assert(run_command(&registry, "mode-status", "", &output) == 1);
+    assert(output.last_style == AIRDAP_DEBUG_SHELL_STYLE_ERROR);
+    assert(strcmp(
+        output.text,
+        "mode-status: config status read failed: ESP_FAIL\n") == 0);
+}
+
 static void test_tasks_reports_runtime_stack_and_affinity(void)
 {
     airdap_debug_shell_command_registry_t registry;
@@ -445,11 +574,14 @@ static void test_tasks_reports_runtime_stack_and_affinity(void)
     assert(strcmp(
         output.text,
         "tasks=3 total_runtime_us=1000000 cpu_capacity_cores=2\n"
-        "number name state core priority base_priority stack_free_bytes "
-        "runtime_us cpu_pct\n"
-        "1 IDLE0 ready 0 0 0 512 1200000 60.00\n"
-        "8 wifi blocked 0 5 4 768 500000 25.00\n"
-        "12 debug_shell running any 4 4 384 100000 5.00\n") == 0);
+        "number     name             state     core priority   "
+        "base_priority stack_free_bytes runtime_us           cpu_pct\n"
+        "1          IDLE0            ready     0    0          "
+        "0             512              1200000              60.00\n"
+        "8          wifi             blocked   0    5          "
+        "4             768              500000               25.00\n"
+        "12         task-name-12345  running   any  4          "
+        "4             384              100000               5.00\n") == 0);
     assert(atomic_load(&maximum_suspended_scheduler_count) == 2U);
     wait_for_schedulers_to_resume();
     assert(atomic_load(&suspended_scheduler_count) == 0U);
@@ -506,9 +638,9 @@ static void test_tasks_reports_guard_capacity_and_snapshot_failures(void)
     task_total_runtime = 0U;
     assert(run_command(&registry, "tasks", "", &output) == 0);
     assert(strstr(output.text, "total_runtime_us=0") != NULL);
-    assert(strstr(output.text, "1200000 0.00\n") != NULL);
-    assert(strstr(output.text, "500000 0.00\n") != NULL);
-    assert(strstr(output.text, "100000 0.00\n") != NULL);
+    assert(strstr(output.text, "1200000              0.00\n") != NULL);
+    assert(strstr(output.text, "500000               0.00\n") != NULL);
+    assert(strstr(output.text, "100000               0.00\n") != NULL);
     wait_for_schedulers_to_resume();
     assert(atomic_load(&suspended_scheduler_count) == 0U);
 }
@@ -518,9 +650,13 @@ int main(void)
     set_up();
     test_registers_diagnostics_with_detailed_metadata();
     set_up();
+    test_registers_complete_shell_without_legacy_duplicates();
+    set_up();
     test_system_memory_and_mode_diagnostics();
     set_up();
     test_ota_and_target_diagnostics();
+    set_up();
+    test_mode_status_reports_config_read_failure();
     set_up();
     test_tasks_reports_runtime_stack_and_affinity();
     set_up();

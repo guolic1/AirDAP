@@ -9,20 +9,16 @@
 
 #include "airdap_debug_shell.h"
 #include "airdap_debug_shell_commands.h"
-#include "airdap_debug_shell_config_status.h"
+#include "airdap_debug_shell_core_commands.h"
 #include "airdap_debug_shell_diagnostics.h"
-#include "airdap_debug_shell_identity.h"
 #include "airdap_debug_shell_input.h"
 #include "airdap_debug_shell_swd_probe.h"
 #include "airdap_debug_shell_tx_state.h"
 #include "airdap_debug_shell_wifi.h"
-#include "airdap_device_identity.h"
 #include "airdap_swd.h"
-#include "airdap_voltage_monitor.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_system.h"
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -56,101 +52,6 @@ typedef struct {
 struct shell_session {
     airdap_debug_shell_input_t *input;
     airdap_debug_shell_wifi_session_t wifi;
-};
-
-static int help_command(
-    const char *arguments,
-    const airdap_debug_shell_invocation_t *invocation,
-    void *context);
-static int identity_command(
-    const char *arguments,
-    const airdap_debug_shell_invocation_t *invocation,
-    void *context);
-static int config_status_command(
-    const char *arguments,
-    const airdap_debug_shell_invocation_t *invocation,
-    void *context);
-static int status_command(
-    const char *arguments,
-    const airdap_debug_shell_invocation_t *invocation,
-    void *context);
-static int wifi_command(
-    const char *arguments,
-    const airdap_debug_shell_invocation_t *invocation,
-    void *context);
-static int swd_idcode_command(
-    const char *arguments,
-    const airdap_debug_shell_invocation_t *invocation,
-    void *context);
-static int restart_command(
-    const char *arguments,
-    const airdap_debug_shell_invocation_t *invocation,
-    void *context);
-
-static const airdap_debug_shell_command_t core_commands[] = {
-    {
-        .name = "help",
-        .usage = "help [command]",
-        .summary = "List commands or explain one command",
-        .details =
-            "Without an argument, lists registered commands. With a command "
-            "name, prints its usage and full description.",
-        .handler = help_command,
-    },
-    {
-        .name = "identity",
-        .usage = "identity",
-        .summary = "Show the shared device identity",
-        .details =
-            "Reports the USB serial, device ID, UUID, firmware and protocol "
-            "versions, and advertised capability bits.",
-        .handler = identity_command,
-    },
-    {
-        .name = "config-status",
-        .usage = "config-status",
-        .summary = "Show safe persistent-config status",
-        .details =
-            "Reports only the schema version and provisioning state. "
-            "Credential and authentication material are never displayed.",
-        .handler = config_status_command,
-    },
-    {
-        .name = "status",
-        .usage = "status",
-        .summary = "Show voltages, uptime, and free heap",
-        .details =
-            "Provides the original compact health line for script "
-            "compatibility. Use the *-info and *-status commands for detail.",
-        .handler = status_command,
-    },
-    {
-        .name = "wifi",
-        .usage = "wifi status|set|clear",
-        .summary = "Manage Wi-Fi credentials and show state",
-        .details =
-            "Status is read-only. Set prompts for an SSID and hidden password; "
-            "clear removes stored Wi-Fi credentials.",
-        .handler = wifi_command,
-    },
-    {
-        .name = "swd-idcode",
-        .usage = "swd-idcode [clock_khz]",
-        .summary = "Read the target DP IDCODE",
-        .details =
-            "Acquires the diagnostic DAP owner, performs a bounded IDCODE "
-            "probe at 100-10000 kHz, then releases the target-facing bus.",
-        .handler = swd_idcode_command,
-    },
-    {
-        .name = "restart",
-        .usage = "restart",
-        .summary = "Restart the AirDAP firmware",
-        .details =
-            "Waits for its acknowledgement to reach USB before restarting. "
-            "The command fails without restarting if delivery times out.",
-        .handler = restart_command,
-    },
 };
 
 static airdap_debug_shell_command_registry_t command_registry;
@@ -578,7 +479,7 @@ static const char *shell_complete(
         match_index);
 }
 
-static int help_command(
+int airdap_debug_shell_help_command(
     const char *arguments,
     const airdap_debug_shell_invocation_t *invocation,
     void *context)
@@ -590,91 +491,7 @@ static int help_command(
         invocation);
 }
 
-static int identity_command(
-    const char *arguments,
-    const airdap_debug_shell_invocation_t *invocation,
-    void *context)
-{
-    (void) invocation;
-    (void) context;
-    if (*arguments != '\0') {
-        shell_printf("usage: identity\n");
-        return 1;
-    }
-
-    const airdap_device_identity_t *identity = airdap_device_identity_get();
-    if (identity == NULL) {
-        shell_printf("identity: device identity unavailable\n");
-        return 1;
-    }
-
-    char output[AIRDAP_DEBUG_SHELL_IDENTITY_OUTPUT_SIZE];
-    if (!airdap_debug_shell_identity_format(identity, output, sizeof(output))) {
-        shell_printf("identity: formatting failed\n");
-        return 1;
-    }
-    shell_printf("%s", output);
-    return 0;
-}
-
-static int config_status_command(
-    const char *arguments,
-    const airdap_debug_shell_invocation_t *invocation,
-    void *context)
-{
-    (void) invocation;
-    (void) context;
-    char output[AIRDAP_DEBUG_SHELL_CONFIG_STATUS_OUTPUT_SIZE];
-    airdap_debug_shell_config_status_style_t style;
-    const int result = airdap_debug_shell_config_status_execute(
-        arguments,
-        output,
-        sizeof(output),
-        &style);
-    const char *ansi_style = ansi_red;
-    if (style == AIRDAP_DEBUG_SHELL_CONFIG_STATUS_STYLE_YELLOW) {
-        ansi_style = ansi_yellow;
-    } else if (style == AIRDAP_DEBUG_SHELL_CONFIG_STATUS_STYLE_GREEN) {
-        ansi_style = ansi_green;
-    }
-    shell_printf_styled(ansi_style, "%s", output);
-    return result;
-}
-
-static int status_command(
-    const char *arguments,
-    const airdap_debug_shell_invocation_t *invocation,
-    void *context)
-{
-    (void) invocation;
-    (void) context;
-    if (*arguments != '\0') {
-        shell_printf_styled(ansi_yellow, "usage: status\n");
-        return 1;
-    }
-
-    airdap_voltage_reading_t voltage;
-    const esp_err_t error = airdap_voltage_monitor_read(&voltage);
-    if (error != ESP_OK) {
-        shell_printf_styled(
-            ansi_red,
-            "status: voltage read failed: %s\n",
-            esp_err_to_name(error));
-        return 1;
-    }
-
-    shell_printf_styled(
-        ansi_green,
-        "target_mv=%" PRIu32 " usb_vbus_mv=%" PRIu32
-        " uptime_ms=%" PRId64 " free_heap=%" PRIu32 "\n",
-        voltage.target_mv,
-        voltage.usb_vbus_mv,
-        esp_timer_get_time() / 1000,
-        esp_get_free_heap_size());
-    return 0;
-}
-
-static int wifi_command(
+int airdap_debug_shell_wifi_command(
     const char *arguments,
     const airdap_debug_shell_invocation_t *invocation,
     void *context)
@@ -755,7 +572,7 @@ static bool shell_swd_cancelled(void *context)
         !tud_vendor_n_mounted(DEBUG_VENDOR_INSTANCE);
 }
 
-static int swd_idcode_command(
+int airdap_debug_shell_swd_idcode_command(
     const char *arguments,
     const airdap_debug_shell_invocation_t *invocation,
     void *context)
@@ -881,7 +698,7 @@ static int swd_idcode_command(
     return 1;
 }
 
-static int restart_command(
+int airdap_debug_shell_restart_command(
     const char *arguments,
     const airdap_debug_shell_invocation_t *invocation,
     void *context)
@@ -1029,15 +846,8 @@ static void shell_task(void *argument)
 esp_err_t airdap_debug_shell_start(void)
 {
     airdap_debug_shell_command_registry_init(&command_registry);
-    for (size_t index = 0U;
-         index < sizeof(core_commands) / sizeof(core_commands[0]);
-         ++index) {
-        if (airdap_debug_shell_command_register(
-                &command_registry,
-                &core_commands[index]) !=
-            AIRDAP_DEBUG_SHELL_COMMAND_REGISTERED) {
-            return ESP_ERR_INVALID_STATE;
-        }
+    if (!airdap_debug_shell_register_core_commands(&command_registry)) {
+        return ESP_ERR_INVALID_STATE;
     }
     if (!airdap_debug_shell_register_diagnostic_commands(&command_registry)) {
         return ESP_ERR_INVALID_STATE;

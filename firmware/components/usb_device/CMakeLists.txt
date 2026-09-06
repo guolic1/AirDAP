@@ -34,6 +34,7 @@ if(CONFIG_AIRDAP_DEBUG_SHELL)
         "debug_shell.c"
         "debug_shell_commands.c"
         "debug_shell_config_status.c"
+        "debug_shell_core_commands.c"
         "debug_shell_diagnostics.c"
         "debug_shell_identity.c"
         "debug_shell_input.c"
