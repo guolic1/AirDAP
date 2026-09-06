@@ -14,6 +14,7 @@ typedef enum {
     CALL_BOARD_INITIALIZE,
     CALL_DEVICE_IDENTITY_INITIALIZE,
     CALL_CONFIG_STORE_INITIALIZE,
+    CALL_NETWORK_AUTH_INITIALIZE,
     CALL_VOLTAGE_INITIALIZE,
     CALL_SWD_INITIALIZE,
     CALL_VOLTAGE_READ,
@@ -25,7 +26,7 @@ typedef enum {
     CALL_BLE_PROVISIONING_START,
 } call_t;
 
-static call_t calls[14];
+static call_t calls[15];
 static size_t call_count;
 static esp_err_t wifi_start_result = ESP_OK;
 static esp_err_t discovery_start_result = ESP_OK;
@@ -62,6 +63,12 @@ esp_err_t airdap_device_identity_init(void)
 esp_err_t airdap_config_store_init(void)
 {
     record(CALL_CONFIG_STORE_INITIALIZE);
+    return ESP_OK;
+}
+
+esp_err_t airdap_network_auth_init(void)
+{
+    record(CALL_NETWORK_AUTH_INITIALIZE);
     return ESP_OK;
 }
 
@@ -133,6 +140,7 @@ static void test_wifi_failure_does_not_start_discovery(void)
         CALL_BOARD_INITIALIZE,
         CALL_DEVICE_IDENTITY_INITIALIZE,
         CALL_CONFIG_STORE_INITIALIZE,
+        CALL_NETWORK_AUTH_INITIALIZE,
         CALL_VOLTAGE_INITIALIZE,
         CALL_SWD_INITIALIZE,
         CALL_VOLTAGE_READ,
@@ -161,6 +169,7 @@ static void test_discovery_starts_after_wifi_and_does_not_block_startup(void)
         CALL_BOARD_INITIALIZE,
         CALL_DEVICE_IDENTITY_INITIALIZE,
         CALL_CONFIG_STORE_INITIALIZE,
+        CALL_NETWORK_AUTH_INITIALIZE,
         CALL_VOLTAGE_INITIALIZE,
         CALL_SWD_INITIALIZE,
         CALL_VOLTAGE_READ,

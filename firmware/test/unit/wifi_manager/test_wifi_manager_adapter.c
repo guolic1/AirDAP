@@ -7,6 +7,7 @@
 
 #include "airdap_config_store.h"
 #include "airdap_mode_state.h"
+#include "airdap_network_auth.h"
 #include "airdap_wifi_credentials.h"
 #include "airdap_wifi_manager.h"
 #include "esp_err.h"
@@ -183,9 +184,16 @@ esp_err_t airdap_config_store_commit_network_provisioning(
 
 esp_err_t airdap_config_store_clear(uint32_t flags)
 {
-    assert(flags == AIRDAP_CONFIG_CLEAR_WIFI_CREDENTIALS ||
-        flags == AIRDAP_CONFIG_CLEAR_NETWORK);
+    assert(flags == AIRDAP_CONFIG_CLEAR_WIFI_CREDENTIALS);
     last_clear_flags = flags;
+    memset(stored_blob, 0, sizeof(stored_blob));
+    stored_blob_size = 0U;
+    return ESP_OK;
+}
+
+esp_err_t airdap_network_auth_clear_network_configuration(void)
+{
+    last_clear_flags = AIRDAP_CONFIG_CLEAR_NETWORK;
     memset(stored_blob, 0, sizeof(stored_blob));
     stored_blob_size = 0U;
     return ESP_OK;

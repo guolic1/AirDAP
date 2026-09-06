@@ -7,6 +7,7 @@
 
 #include "airdap_config_store.h"
 #include "airdap_mode_state.h"
+#include "airdap_network_auth.h"
 #include "airdap_wifi_credentials.h"
 #include "airdap_wifi_disconnect_reason.h"
 #include "airdap_wifi_manager.h"
@@ -865,7 +866,7 @@ esp_err_t airdap_wifi_manager_clear_credentials(void)
 esp_err_t airdap_wifi_manager_clear_network_configuration(void)
 {
     const esp_err_t config_error =
-        airdap_config_store_clear(AIRDAP_CONFIG_CLEAR_NETWORK);
+        airdap_network_auth_clear_network_configuration();
     if (config_error != ESP_OK) {
         return config_error;
     }

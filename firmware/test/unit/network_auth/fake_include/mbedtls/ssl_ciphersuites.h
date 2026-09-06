@@ -1,0 +1,3 @@
+#pragma once
+
+#define MBEDTLS_TLS1_3_AES_128_GCM_SHA256 0x1301
