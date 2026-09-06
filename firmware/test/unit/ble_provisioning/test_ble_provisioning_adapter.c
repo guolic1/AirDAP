@@ -3,12 +3,14 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "airdap_ble_provisioning.h"
 #include "airdap_ble_provisioning_internal.h"
 #include "airdap_device_identity.h"
 #include "airdap_mode_state.h"
+#include "airdap_network_auth.h"
 #include "airdap_sec2_credentials.h"
 #include "airdap_wifi_manager.h"
 #include "esp_event.h"
@@ -36,6 +38,8 @@ static unsigned manager_init_count;
 static unsigned manager_deinit_count;
 static unsigned manager_start_count;
 static unsigned manager_stop_count;
+static unsigned endpoint_create_count;
+static unsigned endpoint_register_count;
 static unsigned prepare_count;
 static unsigned stage_count;
 static unsigned accept_count;
@@ -56,10 +60,31 @@ static size_t mode_event_count;
 static airdap_wifi_credentials_t staged_credentials;
 static uint8_t captured_salt[AIRDAP_SEC2_SALT_SIZE];
 static uint8_t captured_verifier[AIRDAP_SEC2_VERIFIER_SIZE];
+static protocomm_req_handler_t pairing_handler;
+static unsigned pair_count;
+static bool manager_active;
+static bool endpoint_created_for_window;
+static bool provisioning_started_for_window;
 
 const airdap_device_identity_t *airdap_device_identity_get(void)
 {
     return &identity;
+}
+
+airdap_network_auth_result_t airdap_network_auth_pair(
+    const uint8_t *request,
+    size_t request_size,
+    uint8_t fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE])
+{
+    assert(request != NULL && fingerprint != NULL);
+    assert(request_size == AIRDAP_NETWORK_AUTH_PAIR_REQUEST_SIZE);
+    assert(request[0] == AIRDAP_NETWORK_AUTH_PAIR_REQUEST_VERSION);
+    for (size_t index = 1U; index < request_size; ++index) {
+        assert(request[index] == (uint8_t) index);
+    }
+    memset(fingerprint, 0x5A, AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE);
+    ++pair_count;
+    return AIRDAP_NETWORK_AUTH_OK;
 }
 
 esp_err_t airdap_sec2_credentials_load(airdap_sec2_credentials_t *credentials)
@@ -132,6 +157,10 @@ esp_err_t network_prov_mgr_init(network_prov_mgr_config_t config)
 {
     assert(config.scheme.marker == network_prov_scheme_ble.marker);
     assert(config.network_prov_wifi_conn_cfg.wifi_conn_attempts == 3U);
+    assert(!manager_active);
+    manager_active = true;
+    endpoint_created_for_window = false;
+    provisioning_started_for_window = false;
     prepared_after_manager_init = false;
     ++manager_init_count;
     return ESP_OK;
@@ -139,6 +168,8 @@ esp_err_t network_prov_mgr_init(network_prov_mgr_config_t config)
 
 esp_err_t network_prov_mgr_deinit(void)
 {
+    assert(manager_active);
+    manager_active = false;
     ++manager_deinit_count;
     return ESP_OK;
 }
@@ -154,6 +185,8 @@ esp_err_t network_prov_mgr_start_provisioning(
     prepared_after_manager_init = false;
     assert(service_name != NULL && strcmp(service_name, identity.device_id) == 0);
     assert(service_key == NULL);
+    assert(manager_active && endpoint_created_for_window);
+    provisioning_started_for_window = true;
     const network_prov_security2_params_t *params = security_params;
     assert(params != NULL);
     assert(params->salt_len == sizeof(captured_salt));
@@ -162,6 +195,37 @@ esp_err_t network_prov_mgr_start_provisioning(
     memcpy(captured_verifier, params->verifier, sizeof(captured_verifier));
     ++manager_start_count;
     return ESP_OK;
+}
+
+esp_err_t network_prov_mgr_endpoint_create(const char *endpoint_name)
+{
+    assert(endpoint_name != NULL);
+    assert(strcmp(endpoint_name, "airdap-pair") == 0);
+    assert(manager_active && !endpoint_created_for_window &&
+        !provisioning_started_for_window);
+    endpoint_created_for_window = true;
+    ++endpoint_create_count;
+    return ESP_OK;
+}
+
+esp_err_t network_prov_mgr_endpoint_register(
+    const char *endpoint_name,
+    protocomm_req_handler_t handler,
+    void *user_context)
+{
+    assert(endpoint_name != NULL);
+    assert(strcmp(endpoint_name, "airdap-pair") == 0);
+    assert(handler != NULL && user_context == NULL);
+    assert(manager_active && endpoint_created_for_window &&
+        provisioning_started_for_window);
+    pairing_handler = handler;
+    ++endpoint_register_count;
+    return ESP_OK;
+}
+
+void network_prov_mgr_endpoint_unregister(const char *endpoint_name)
+{
+    (void) endpoint_name;
 }
 
 void network_prov_mgr_stop_provisioning(void)
@@ -317,6 +381,7 @@ int main(void)
     assert(airdap_ble_provisioning_test_window_active());
     assert(credential_load_count == 1U && manager_init_count == 1U);
     assert(manager_start_count == 1U && prepare_count == 1U);
+    assert(endpoint_create_count == 1U && endpoint_register_count == 1U);
     assert(timer.active && timer.timeout_us == 120000000U);
     assert(mode_events[mode_event_count - 1U] ==
         AIRDAP_MODE_EVENT_PROVISIONING_STARTED);
@@ -326,6 +391,39 @@ int main(void)
     for (size_t index = 0U; index < sizeof(captured_verifier); ++index) {
         assert(captured_verifier[index] == 0x22U);
     }
+
+    uint8_t pair_request[AIRDAP_NETWORK_AUTH_PAIR_REQUEST_SIZE] = {
+        AIRDAP_NETWORK_AUTH_PAIR_REQUEST_VERSION,
+    };
+    for (size_t index = 1U; index < sizeof(pair_request); ++index) {
+        pair_request[index] = (uint8_t) index;
+    }
+    uint8_t *pair_response = NULL;
+    ssize_t pair_response_size = 0;
+    assert(pairing_handler(
+        7U,
+        pair_request,
+        sizeof(pair_request),
+        &pair_response,
+        &pair_response_size,
+        NULL) == ESP_OK);
+    assert(pair_count == 1U);
+    assert(pair_response != NULL);
+    assert(pair_response_size == AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE);
+    for (ssize_t index = 0; index < pair_response_size; ++index) {
+        assert(pair_response[index] == 0x5AU);
+    }
+    free(pair_response);
+    pair_response = NULL;
+    pair_response_size = 0;
+    assert(pairing_handler(
+        7U,
+        pair_request,
+        sizeof(pair_request) - 1U,
+        &pair_response,
+        &pair_response_size,
+        NULL) == ESP_ERR_INVALID_ARG);
+    assert(pair_count == 1U && pair_response == NULL && pair_response_size == 0);
 
     wifi_sta_config_t station = make_station("Lab AP", "test password");
     airdap_ble_provisioning_test_network_event(

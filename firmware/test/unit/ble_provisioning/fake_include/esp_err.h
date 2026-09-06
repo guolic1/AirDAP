@@ -10,6 +10,7 @@ typedef int esp_err_t;
 #define ESP_ERR_NVS_NOT_FOUND 5
 #define ESP_ERR_INVALID_STATE 6
 #define ESP_ERR_NO_MEM 7
+#define ESP_ERR_INVALID_VERSION 8
 
 static inline const char *esp_err_to_name(esp_err_t error)
 {

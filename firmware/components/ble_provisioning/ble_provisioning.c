@@ -1,6 +1,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "airdap_ble_provisioning.h"
@@ -8,6 +10,7 @@
 #include "airdap_board.h"
 #include "airdap_device_identity.h"
 #include "airdap_mode_state.h"
+#include "airdap_network_auth.h"
 #include "airdap_provisioning_button.h"
 #include "airdap_sec2_credentials.h"
 #include "airdap_wifi_manager.h"
@@ -32,6 +35,8 @@ enum {
     INTERNAL_EVENT_TIMEOUT = 100,
     TIMEOUT_RETRY_US = BUTTON_POLL_MS * 1000,
 };
+
+static const char *PAIRING_ENDPOINT = "airdap-pair";
 
 typedef enum {
     WINDOW_OUTCOME_NONE = 0,
@@ -79,6 +84,64 @@ static void clear_pending_credentials(void)
 {
     clear_bytes(&pending_wifi_credentials, sizeof(pending_wifi_credentials));
     pending_wifi_credentials_valid = false;
+}
+
+static esp_err_t pairing_endpoint_handler(
+    uint32_t session_id,
+    const uint8_t *input,
+    ssize_t input_length,
+    uint8_t **output,
+    ssize_t *output_length,
+    void *private_data)
+{
+    (void) session_id;
+    (void) private_data;
+    if (output == NULL || output_length == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *output = NULL;
+    *output_length = 0;
+    if (input == NULL || input_length !=
+        AIRDAP_NETWORK_AUTH_PAIR_REQUEST_SIZE) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE];
+    const airdap_network_auth_result_t result = airdap_network_auth_pair(
+        input,
+        (size_t) input_length,
+        fingerprint);
+    if (result != AIRDAP_NETWORK_AUTH_OK) {
+        clear_bytes(fingerprint, sizeof(fingerprint));
+        return result == AIRDAP_NETWORK_AUTH_UNSUPPORTED_VERSION
+            ? ESP_ERR_INVALID_VERSION
+            : result == AIRDAP_NETWORK_AUTH_INVALID_ARGUMENT
+                ? ESP_ERR_INVALID_ARG
+                : ESP_FAIL;
+    }
+
+    uint8_t *response = malloc(sizeof(fingerprint));
+    if (response == NULL) {
+        clear_bytes(fingerprint, sizeof(fingerprint));
+        return ESP_ERR_NO_MEM;
+    }
+    memcpy(response, fingerprint, sizeof(fingerprint));
+    *output = response;
+    *output_length = sizeof(fingerprint);
+
+    char fingerprint_hex[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE * 2U + 1U];
+    for (size_t index = 0U; index < sizeof(fingerprint); ++index) {
+        (void) snprintf(
+            fingerprint_hex + index * 2U,
+            sizeof(fingerprint_hex) - index * 2U,
+            "%02x",
+            fingerprint[index]);
+    }
+    ESP_LOGI(TAG, "Network credential committed; fingerprint=%s",
+        fingerprint_hex);
+    clear_bytes(fingerprint_hex, sizeof(fingerprint_hex));
+    clear_bytes(fingerprint, sizeof(fingerprint));
+    return ESP_OK;
 }
 
 static void publish_mode(airdap_mode_event_t event)
@@ -201,6 +264,12 @@ static esp_err_t start_window(void)
     }
     manager_initialized = true;
 
+    error = network_prov_mgr_endpoint_create(PAIRING_ENDPOINT);
+    if (error != ESP_OK) {
+        cleanup_failed_window_start();
+        return error;
+    }
+
     error = airdap_wifi_manager_prepare_provisioning();
     if (error != ESP_OK) {
         cleanup_failed_window_start();
@@ -219,6 +288,15 @@ static esp_err_t start_window(void)
         identity->device_id,
         NULL);
     if (error != ESP_OK) {
+        cleanup_failed_window_start();
+        return error;
+    }
+    error = network_prov_mgr_endpoint_register(
+        PAIRING_ENDPOINT,
+        pairing_endpoint_handler,
+        NULL);
+    if (error != ESP_OK) {
+        network_prov_mgr_stop_provisioning();
         cleanup_failed_window_start();
         return error;
     }

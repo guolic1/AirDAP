@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #include "esp_err.h"
 #include "esp_event.h"
@@ -58,6 +59,14 @@ typedef struct {
     uint16_t verifier_len;
 } network_prov_security2_params_t;
 
+typedef esp_err_t (*protocomm_req_handler_t)(
+    uint32_t session_id,
+    const uint8_t *input,
+    ssize_t input_length,
+    uint8_t **output,
+    ssize_t *output_length,
+    void *private_data);
+
 esp_err_t network_prov_mgr_init(network_prov_mgr_config_t config);
 esp_err_t network_prov_mgr_deinit(void);
 esp_err_t network_prov_mgr_start_provisioning(
@@ -66,3 +75,9 @@ esp_err_t network_prov_mgr_start_provisioning(
     const char *service_name,
     const char *service_key);
 void network_prov_mgr_stop_provisioning(void);
+esp_err_t network_prov_mgr_endpoint_create(const char *endpoint_name);
+esp_err_t network_prov_mgr_endpoint_register(
+    const char *endpoint_name,
+    protocomm_req_handler_t handler,
+    void *user_context);
+void network_prov_mgr_endpoint_unregister(const char *endpoint_name);
