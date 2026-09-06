@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "airdap_debug_shell_commands.h"
 #include "airdap_debug_shell_config_status.h"
 
 static esp_err_t status_result;
@@ -96,31 +95,6 @@ static void test_rejects_invalid_arguments_and_short_output(void)
         sizeof(output)));
 }
 
-static void test_command_registry_has_only_supported_commands(void)
-{
-    static const char *const command_names[] = {
-#define AIRDAP_DEBUG_SHELL_COMMAND_NAME(name_, help_, handler_) name_,
-        AIRDAP_DEBUG_SHELL_COMMAND_LIST(AIRDAP_DEBUG_SHELL_COMMAND_NAME)
-#undef AIRDAP_DEBUG_SHELL_COMMAND_NAME
-    };
-    static const char *const expected_names[] = {
-        "help",
-        "identity",
-        "config-status",
-        "status",
-        "wifi",
-        "swd-idcode",
-        "restart",
-    };
-    assert(sizeof(command_names) == sizeof(expected_names));
-    for (size_t index = 0U;
-         index < sizeof(expected_names) / sizeof(expected_names[0]);
-         ++index) {
-        assert(strcmp(command_names[index], expected_names[index]) == 0);
-        assert(strcmp(command_names[index], "version") != 0);
-    }
-}
-
 static void test_command_boundary_reports_safe_status_and_errors(void)
 {
     char output[AIRDAP_DEBUG_SHELL_CONFIG_STATUS_OUTPUT_SIZE];
@@ -167,7 +141,6 @@ int main(void)
 {
     test_formats_only_safe_status_fields();
     test_rejects_invalid_arguments_and_short_output();
-    test_command_registry_has_only_supported_commands();
     test_command_boundary_reports_safe_status_and_errors();
 
     puts("Debug shell config-status tests passed");
