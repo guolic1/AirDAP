@@ -18,6 +18,7 @@
 #include "airdap_device_identity.h"
 #include "airdap_mode_state.h"
 #include "airdap_ota.h"
+#include "airdap_target_uart.h"
 #include "airdap_usb_status.h"
 #include "airdap_voltage_monitor.h"
 #include "airdap_wifi_manager.h"
@@ -48,6 +49,8 @@ static airdap_dap_service_stats_t dap_stats;
 static airdap_wifi_manager_info_t wifi_info;
 static esp_err_t wifi_info_result;
 static airdap_usb_status_t usb_status;
+static airdap_target_uart_status_t uart_status;
+static esp_err_t uart_status_result;
 static TaskStatus_t task_statuses[3];
 static configRUN_TIME_COUNTER_TYPE task_total_runtime;
 static UBaseType_t reported_task_count;
@@ -265,6 +268,14 @@ void airdap_usb_get_status(airdap_usb_status_t *status)
     *status = usb_status;
 }
 
+esp_err_t airdap_target_uart_get_status(airdap_target_uart_status_t *status)
+{
+    if (uart_status_result == ESP_OK) {
+        *status = uart_status;
+    }
+    return uart_status_result;
+}
+
 UBaseType_t uxTaskGetNumberOfTasks(void)
 {
     assert(atomic_load(&suspended_scheduler_count) == 2U);
@@ -462,6 +473,20 @@ static void set_up(void)
         .debug_vendor_mounted = true,
         .dap_session_active = true,
     };
+    uart_status = (airdap_target_uart_status_t) {
+        .initialized = true,
+        .baud_rate = 115200U,
+        .data_bits = 8U,
+        .parity = 0U,
+        .stop_bits = 0U,
+        .rx_buffered_bytes = 17U,
+        .tx_buffer_free_bytes = 1900U,
+        .rx_bytes = 12345U,
+        .tx_bytes = 67890U,
+        .read_failures = 2U,
+        .write_failures = 3U,
+    };
+    uart_status_result = ESP_OK;
     task_statuses[0] = (TaskStatus_t) {
         .pcTaskName = "wifi",
         .xTaskNumber = 8U,
@@ -550,6 +575,7 @@ static void test_registers_complete_shell_without_legacy_duplicates(void)
         "dap-stats",
         "network-info",
         "usb-status",
+        "uart-status",
     };
     assert(airdap_debug_shell_command_count(&registry) ==
         sizeof(expected) / sizeof(expected[0]));
@@ -571,6 +597,33 @@ static void test_registers_complete_shell_without_legacy_duplicates(void)
             removed[index],
             strlen(removed[index])) == NULL);
     }
+}
+
+static void test_uart_status_reports_config_buffers_and_counters(void)
+{
+    airdap_debug_shell_command_registry_t registry;
+    airdap_debug_shell_command_registry_init(&registry);
+    assert(airdap_debug_shell_register_service_diagnostic_commands(&registry));
+
+    captured_output_t output = {0};
+    assert(run_command(&registry, "uart-status", "", &output) == 0);
+    assert(strcmp(
+        output.text,
+        "initialized=yes baud=115200 data_bits=8 parity=none stop_bits=1\n"
+        "buffers rx_queued=17 tx_free=1900\n"
+        "counters rx_bytes=12345 tx_bytes=67890 read_failures=2 "
+        "write_failures=3\n") == 0);
+
+    output = (captured_output_t) {0};
+    uart_status_result = ESP_FAIL;
+    assert(run_command(&registry, "uart-status", "", &output) == 1);
+    assert(strcmp(
+        output.text,
+        "uart-status: status read failed: ESP_FAIL\n") == 0);
+
+    output = (captured_output_t) {0};
+    assert(run_command(&registry, "uart-status", "extra", &output) == 1);
+    assert(strcmp(output.text, "usage: uart-status\n") == 0);
 }
 
 static void test_usb_status_reports_bus_interfaces_and_session(void)
@@ -867,6 +920,8 @@ int main(void)
     test_network_info_reports_non_secret_runtime_state();
     set_up();
     test_usb_status_reports_bus_interfaces_and_session();
+    set_up();
+    test_uart_status_reports_config_buffers_and_counters();
     set_up();
     test_system_memory_and_mode_diagnostics();
     set_up();

@@ -518,7 +518,8 @@ run non-interactively:
 ```sh
 python tools/airdap-shell.py \
     -c system-info -c memory-info -c mode-status -c ota-status \
-    -c target-status -c tasks -c dap-stats -c network-info -c usb-status
+    -c target-status -c tasks -c dap-stats -c network-info -c usb-status \
+    -c uart-status
 ```
 
 `wifi set` is interactive-only so credentials cannot be supplied through shell
@@ -575,6 +576,9 @@ extending a single global command table. Available commands are:
   displaying SSID, BSSID, credentials, or authentication material;
 - `usb-status` — print TinyUSB mount/suspend state, DAP Vendor, target CDC and
   debug Vendor interface state, and whether the USB DAP session is active;
+- `uart-status` — print the target UART's last accepted line coding, RX queued
+  bytes, TX free space, cumulative transferred bytes, and driver I/O failures
+  without consuming UART data;
 - `wifi status` — print `wifi=stopped`, `disconnected`, `connecting`, or
   `online` without displaying credentials;
 - `wifi set` — interactively replace the stored SSID and password, reset

@@ -5,6 +5,7 @@
 #include "airdap_debug_shell_commands.h"
 #include "airdap_debug_shell_service_diagnostics.h"
 #include "airdap_mode_state.h"
+#include "airdap_target_uart.h"
 #include "airdap_usb_status.h"
 #include "airdap_wifi_manager.h"
 #include "esp_err.h"
@@ -196,6 +197,86 @@ static int usb_status_command(
     return 0;
 }
 
+static const char *uart_parity_name(uint8_t parity)
+{
+    switch (parity) {
+    case 0U:
+        return "none";
+    case 1U:
+        return "odd";
+    case 2U:
+        return "even";
+    default:
+        return "unknown";
+    }
+}
+
+static const char *uart_stop_bits_name(uint8_t stop_bits)
+{
+    switch (stop_bits) {
+    case 0U:
+        return "1";
+    case 1U:
+        return "1.5";
+    case 2U:
+        return "2";
+    default:
+        return "unknown";
+    }
+}
+
+static int uart_status_command(
+    const char *arguments,
+    const airdap_debug_shell_invocation_t *invocation,
+    void *context)
+{
+    (void) context;
+    if (arguments == NULL || arguments[0] != '\0') {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_WARNING,
+            "usage: uart-status\n");
+        return 1;
+    }
+
+    airdap_target_uart_status_t status;
+    const esp_err_t error = airdap_target_uart_get_status(&status);
+    if (error != ESP_OK) {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_ERROR,
+            "uart-status: status read failed: %s\n",
+            esp_err_to_name(error));
+        return 1;
+    }
+    airdap_debug_shell_printf(
+        invocation,
+        AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+        "initialized=%s baud=%" PRIu32 " data_bits=%u parity=%s "
+        "stop_bits=%s\n",
+        status.initialized ? "yes" : "no",
+        status.baud_rate,
+        (unsigned int) status.data_bits,
+        uart_parity_name(status.parity),
+        uart_stop_bits_name(status.stop_bits));
+    airdap_debug_shell_printf(
+        invocation,
+        AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+        "buffers rx_queued=%zu tx_free=%zu\n",
+        status.rx_buffered_bytes,
+        status.tx_buffer_free_bytes);
+    airdap_debug_shell_printf(
+        invocation,
+        AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+        "counters rx_bytes=%" PRIu32 " tx_bytes=%" PRIu32
+        " read_failures=%" PRIu32 " write_failures=%" PRIu32 "\n",
+        status.rx_bytes,
+        status.tx_bytes,
+        status.read_failures,
+        status.write_failures);
+    return 0;
+}
+
 static const airdap_debug_shell_command_t service_diagnostic_commands[] = {
     {
         .name = "dap-stats",
@@ -226,6 +307,16 @@ static const airdap_debug_shell_command_t service_diagnostic_commands[] = {
             "CDC, and debug Vendor interfaces, and whether a USB DAP service "
             "session is active without changing the USB connection.",
         .handler = usb_status_command,
+    },
+    {
+        .name = "uart-status",
+        .usage = "uart-status",
+        .summary = "Show target UART configuration and I/O counters",
+        .details =
+            "Reports the last accepted line coding, RX queued and TX free "
+            "bytes, transferred-byte totals, and driver read/write failures "
+            "without reading or draining target UART data.",
+        .handler = uart_status_command,
     },
 };
 

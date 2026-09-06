@@ -65,3 +65,5 @@ int uart_read_bytes(
     uint32_t length,
     TickType_t ticks_to_wait);
 int uart_write_bytes(uart_port_t uart_num, const void *src, size_t size);
+esp_err_t uart_get_buffered_data_len(uart_port_t uart_num, size_t *size);
+esp_err_t uart_get_tx_buffer_free_size(uart_port_t uart_num, size_t *size);

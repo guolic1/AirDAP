@@ -34,6 +34,12 @@ static uint8_t read_payload[] = {0x12, 0x34, 0x56};
 static const void *last_write_data;
 static size_t last_write_size;
 static TickType_t last_read_timeout;
+static int read_result = 3;
+static int write_result = 2;
+static esp_err_t rx_buffer_result = ESP_OK;
+static esp_err_t tx_buffer_result = ESP_OK;
+static size_t rx_buffered_bytes = 17U;
+static size_t tx_buffer_free_bytes = 1900U;
 
 static void reset_calls(void)
 {
@@ -47,6 +53,10 @@ static void reset_calls(void)
     last_write_data = NULL;
     last_write_size = 0U;
     last_read_timeout = 0U;
+    read_result = 3;
+    write_result = 2;
+    rx_buffer_result = ESP_OK;
+    tx_buffer_result = ESP_OK;
 }
 
 esp_err_t uart_param_config(
@@ -102,6 +112,9 @@ int uart_read_bytes(
 {
     assert(uart_num == UART_NUM_1);
     assert(buf != NULL);
+    if (read_result < 0) {
+        return read_result;
+    }
     const size_t count = length < sizeof(read_payload) ? length : sizeof(read_payload);
     memcpy(buf, read_payload, count);
     last_read_timeout = ticks_to_wait;
@@ -113,7 +126,27 @@ int uart_write_bytes(uart_port_t uart_num, const void *src, size_t size)
     assert(uart_num == UART_NUM_1);
     last_write_data = src;
     last_write_size = size;
-    return (int) size;
+    return write_result < 0 ? write_result : (int) size;
+}
+
+esp_err_t uart_get_buffered_data_len(uart_port_t uart_num, size_t *size)
+{
+    assert(uart_num == UART_NUM_1);
+    assert(size != NULL);
+    if (rx_buffer_result == ESP_OK) {
+        *size = rx_buffered_bytes;
+    }
+    return rx_buffer_result;
+}
+
+esp_err_t uart_get_tx_buffer_free_size(uart_port_t uart_num, size_t *size)
+{
+    assert(uart_num == UART_NUM_1);
+    assert(size != NULL);
+    if (tx_buffer_result == ESP_OK) {
+        *size = tx_buffer_free_bytes;
+    }
+    return tx_buffer_result;
 }
 
 static void assert_config(
@@ -134,9 +167,13 @@ static void assert_config(
 static void test_io_rejected_before_initialization(void)
 {
     uint8_t data = 0U;
+    airdap_target_uart_status_t status;
 
     assert(airdap_target_uart_read(&data, 1U, 1U) == -1);
     assert(airdap_target_uart_write(&data, 1U) == -1);
+    assert(airdap_target_uart_get_status(NULL) == ESP_ERR_INVALID_ARG);
+    assert(airdap_target_uart_get_status(&status) == ESP_OK);
+    assert(!status.initialized);
 }
 
 static void test_line_coding_mapping_and_rejection(void)
@@ -213,6 +250,34 @@ static void test_initialized_io(void)
     assert(airdap_target_uart_read(data, 0U, 0U) == -1);
     assert(airdap_target_uart_write(NULL, 1U) == -1);
     assert(airdap_target_uart_write(outbound, 0U) == -1);
+
+    airdap_target_uart_status_t status;
+    assert(airdap_target_uart_get_status(&status) == ESP_OK);
+    assert(status.initialized);
+    assert(status.baud_rate == AIRDAP_TARGET_UART_DEFAULT_BAUD);
+    assert(status.data_bits == 8U);
+    assert(status.parity == 0U);
+    assert(status.stop_bits == 0U);
+    assert(status.rx_buffered_bytes == 17U);
+    assert(status.tx_buffer_free_bytes == 1900U);
+    assert(status.rx_bytes == 3U);
+    assert(status.tx_bytes == 2U);
+    assert(status.read_failures == 0U);
+    assert(status.write_failures == 0U);
+
+    read_result = -1;
+    write_result = -1;
+    assert(airdap_target_uart_read(data, sizeof(data), 0U) == -1);
+    assert(airdap_target_uart_write(outbound, sizeof(outbound)) == -1);
+    assert(airdap_target_uart_get_status(&status) == ESP_OK);
+    assert(status.read_failures == 1U);
+    assert(status.write_failures == 1U);
+
+    rx_buffer_result = ESP_FAIL;
+    assert(airdap_target_uart_get_status(&status) == ESP_FAIL);
+    rx_buffer_result = ESP_OK;
+    tx_buffer_result = ESP_FAIL;
+    assert(airdap_target_uart_get_status(&status) == ESP_FAIL);
 }
 
 int main(void)
