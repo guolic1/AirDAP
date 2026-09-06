@@ -4,6 +4,7 @@
 #include "airdap_dap_service.h"
 #include "airdap_debug_shell_commands.h"
 #include "airdap_debug_shell_service_diagnostics.h"
+#include "airdap_discovery.h"
 #include "airdap_mode_state.h"
 #include "airdap_target_uart.h"
 #include "airdap_usb_status.h"
@@ -277,6 +278,48 @@ static int uart_status_command(
     return 0;
 }
 
+static int discovery_status_command(
+    const char *arguments,
+    const airdap_debug_shell_invocation_t *invocation,
+    void *context)
+{
+    (void) context;
+    if (arguments == NULL || arguments[0] != '\0') {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_WARNING,
+            "usage: discovery-status\n");
+        return 1;
+    }
+
+    airdap_discovery_status_t status;
+    const esp_err_t error = airdap_discovery_get_status(&status);
+    if (error != ESP_OK) {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_ERROR,
+            "discovery-status: status read failed: %s\n",
+            esp_err_to_name(error));
+        return 1;
+    }
+    airdap_debug_shell_printf(
+        invocation,
+        AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+        "mdns_initialized=%s started=%s service_published=%s hostname=%s\n",
+        status.initialized ? "yes" : "no",
+        status.started ? "yes" : "no",
+        status.service_published ? "yes" : "no",
+        status.hostname[0] != '\0' ? status.hostname : "unavailable");
+    airdap_debug_shell_printf(
+        invocation,
+        AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+        "service=_airdap._tcp dap_port=%u uart_port=%u last_error=%s\n",
+        (unsigned int) status.dap_port,
+        (unsigned int) status.uart_port,
+        esp_err_to_name(status.last_error));
+    return 0;
+}
+
 static const airdap_debug_shell_command_t service_diagnostic_commands[] = {
     {
         .name = "dap-stats",
@@ -317,6 +360,16 @@ static const airdap_debug_shell_command_t service_diagnostic_commands[] = {
             "bytes, transferred-byte totals, and driver read/write failures "
             "without reading or draining target UART data.",
         .handler = uart_status_command,
+    },
+    {
+        .name = "discovery-status",
+        .usage = "discovery-status",
+        .summary = "Show mDNS discovery lifecycle and service state",
+        .details =
+            "Reports mDNS initialization, lifecycle and publication state, "
+            "the advertised hostname and service ports, and the latest "
+            "lifecycle error without publishing or withdrawing the service.",
+        .handler = discovery_status_command,
     },
 };
 

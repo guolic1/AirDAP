@@ -11,6 +11,7 @@ set(usb_device_private_requires
     dap_protocol
     dap_service
     device_identity
+    discovery
     esp_system
     esp_tinyusb
     esp_timer

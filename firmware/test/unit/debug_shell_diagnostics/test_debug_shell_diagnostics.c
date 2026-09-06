@@ -16,6 +16,7 @@
 #include "airdap_debug_shell_service_diagnostics.h"
 #include "airdap_dap_service.h"
 #include "airdap_device_identity.h"
+#include "airdap_discovery.h"
 #include "airdap_mode_state.h"
 #include "airdap_ota.h"
 #include "airdap_target_uart.h"
@@ -51,6 +52,8 @@ static esp_err_t wifi_info_result;
 static airdap_usb_status_t usb_status;
 static airdap_target_uart_status_t uart_status;
 static esp_err_t uart_status_result;
+static airdap_discovery_status_t discovery_status;
+static esp_err_t discovery_status_result;
 static TaskStatus_t task_statuses[3];
 static configRUN_TIME_COUNTER_TYPE task_total_runtime;
 static UBaseType_t reported_task_count;
@@ -276,6 +279,14 @@ esp_err_t airdap_target_uart_get_status(airdap_target_uart_status_t *status)
     return uart_status_result;
 }
 
+esp_err_t airdap_discovery_get_status(airdap_discovery_status_t *status)
+{
+    if (discovery_status_result == ESP_OK) {
+        *status = discovery_status;
+    }
+    return discovery_status_result;
+}
+
 UBaseType_t uxTaskGetNumberOfTasks(void)
 {
     assert(atomic_load(&suspended_scheduler_count) == 2U);
@@ -487,6 +498,16 @@ static void set_up(void)
         .write_failures = 3U,
     };
     uart_status_result = ESP_OK;
+    discovery_status = (airdap_discovery_status_t) {
+        .initialized = true,
+        .started = true,
+        .service_published = true,
+        .hostname = "airdap-001122334455",
+        .dap_port = 3260U,
+        .uart_port = 3261U,
+        .last_error = ESP_OK,
+    };
+    discovery_status_result = ESP_OK;
     task_statuses[0] = (TaskStatus_t) {
         .pcTaskName = "wifi",
         .xTaskNumber = 8U,
@@ -576,6 +597,7 @@ static void test_registers_complete_shell_without_legacy_duplicates(void)
         "network-info",
         "usb-status",
         "uart-status",
+        "discovery-status",
     };
     assert(airdap_debug_shell_command_count(&registry) ==
         sizeof(expected) / sizeof(expected[0]));
@@ -597,6 +619,40 @@ static void test_registers_complete_shell_without_legacy_duplicates(void)
             removed[index],
             strlen(removed[index])) == NULL);
     }
+}
+
+static void test_discovery_status_reports_mdns_lifecycle(void)
+{
+    airdap_debug_shell_command_registry_t registry;
+    airdap_debug_shell_command_registry_init(&registry);
+    assert(airdap_debug_shell_register_service_diagnostic_commands(&registry));
+
+    captured_output_t output = {0};
+    assert(run_command(&registry, "discovery-status", "", &output) == 0);
+    assert(strcmp(
+        output.text,
+        "mdns_initialized=yes started=yes service_published=yes "
+        "hostname=airdap-001122334455\n"
+        "service=_airdap._tcp dap_port=3260 uart_port=3261 "
+        "last_error=ESP_OK\n") == 0);
+
+    output = (captured_output_t) {0};
+    discovery_status.last_error = ESP_FAIL;
+    discovery_status.service_published = false;
+    assert(run_command(&registry, "discovery-status", "", &output) == 0);
+    assert(strstr(output.text, "service_published=no") != NULL);
+    assert(strstr(output.text, "last_error=ESP_FAIL") != NULL);
+
+    output = (captured_output_t) {0};
+    discovery_status_result = ESP_FAIL;
+    assert(run_command(&registry, "discovery-status", "", &output) == 1);
+    assert(strcmp(
+        output.text,
+        "discovery-status: status read failed: ESP_FAIL\n") == 0);
+
+    output = (captured_output_t) {0};
+    assert(run_command(&registry, "discovery-status", "extra", &output) == 1);
+    assert(strcmp(output.text, "usage: discovery-status\n") == 0);
 }
 
 static void test_uart_status_reports_config_buffers_and_counters(void)
@@ -922,6 +978,8 @@ int main(void)
     test_usb_status_reports_bus_interfaces_and_session();
     set_up();
     test_uart_status_reports_config_buffers_and_counters();
+    set_up();
+    test_discovery_status_reports_mdns_lifecycle();
     set_up();
     test_system_memory_and_mode_diagnostics();
     set_up();

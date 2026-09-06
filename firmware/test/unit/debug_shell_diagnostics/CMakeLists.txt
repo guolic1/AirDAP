@@ -24,6 +24,7 @@ target_include_directories(
         ../../../components/dap_ownership/include
         ../../../components/dap_service/include
         ../../../components/device_identity/include
+        ../../../components/discovery/include
         ../../../components/mode_state/include
         ../../../components/ota_manager/include
         ../../../components/target_uart/include

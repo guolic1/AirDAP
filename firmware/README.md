@@ -519,7 +519,7 @@ run non-interactively:
 python tools/airdap-shell.py \
     -c system-info -c memory-info -c mode-status -c ota-status \
     -c target-status -c tasks -c dap-stats -c network-info -c usb-status \
-    -c uart-status
+    -c uart-status -c discovery-status
 ```
 
 `wifi set` is interactive-only so credentials cannot be supplied through shell
@@ -579,6 +579,9 @@ extending a single global command table. Available commands are:
 - `uart-status` — print the target UART's last accepted line coding, RX queued
   bytes, TX free space, cumulative transferred bytes, and driver I/O failures
   without consuming UART data;
+- `discovery-status` — print mDNS initialization, lifecycle/publication state,
+  advertised hostname and service ports, and the latest lifecycle error without
+  publishing or withdrawing the service;
 - `wifi status` — print `wifi=stopped`, `disconnected`, `connecting`, or
   `online` without displaying credentials;
 - `wifi set` — interactively replace the stored SSID and password, reset
