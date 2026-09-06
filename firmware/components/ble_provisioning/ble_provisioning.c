@@ -38,6 +38,7 @@ typedef enum {
     WINDOW_OUTCOME_SUCCESS,
     WINDOW_OUTCOME_RESTORE,
     WINDOW_OUTCOME_CLEAR,
+    WINDOW_OUTCOME_CLEAR_FAILED,
 } window_outcome_t;
 
 static const char *TAG = "airdap_prov";
@@ -361,6 +362,7 @@ static esp_err_t handle_button_action(
         if (error != ESP_OK) {
             ESP_LOGE(TAG, "Network configuration clear failed: %s",
                 esp_err_to_name(error));
+            request_window_stop(WINDOW_OUTCOME_CLEAR_FAILED);
             return error;
         }
         restart_after_release = true;

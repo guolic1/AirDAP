@@ -14,11 +14,12 @@
 #include "esp_netif.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "nvs.h"
 
 enum {
     MAX_REGISTRATIONS = 3,
     MAX_POSTED_EVENTS = 8,
-    MAX_STORAGE_CHANGES = 16,
+    MAX_STORAGE_CHANGES = 24,
 };
 
 typedef struct {
@@ -64,6 +65,13 @@ static size_t storage_change_count;
 static size_t provisioning_commit_count;
 static uint32_t last_clear_flags;
 static esp_err_t wifi_storage_result = ESP_OK;
+static size_t nvs_open_count;
+static size_t nvs_purge_all_count;
+static size_t nvs_erase_all_count;
+static size_t nvs_commit_count;
+static size_t nvs_close_count;
+static esp_err_t nvs_purge_result = ESP_OK;
+static esp_err_t nvs_commit_result = ESP_OK;
 
 static void dispatch(
     esp_event_base_t base,
@@ -307,6 +315,46 @@ esp_err_t esp_wifi_deinit(void)
     return ESP_OK;
 }
 
+esp_err_t nvs_open(
+    const char *namespace_name,
+    nvs_open_mode_t open_mode,
+    nvs_handle_t *handle)
+{
+    assert(strcmp(namespace_name, "nvs.net80211") == 0);
+    assert(open_mode == NVS_READWRITE_PURGE);
+    assert(handle != NULL);
+    *handle = 1U;
+    ++nvs_open_count;
+    return ESP_OK;
+}
+
+esp_err_t nvs_erase_all(nvs_handle_t handle)
+{
+    assert(handle == 1U);
+    ++nvs_erase_all_count;
+    return ESP_OK;
+}
+
+esp_err_t nvs_purge_all(nvs_handle_t handle)
+{
+    assert(handle == 1U);
+    ++nvs_purge_all_count;
+    return nvs_purge_result;
+}
+
+esp_err_t nvs_commit(nvs_handle_t handle)
+{
+    assert(handle == 1U);
+    ++nvs_commit_count;
+    return nvs_commit_result;
+}
+
+void nvs_close(nvs_handle_t handle)
+{
+    assert(handle == 1U);
+    ++nvs_close_count;
+}
+
 esp_err_t esp_wifi_set_storage(int storage)
 {
     assert(storage == WIFI_STORAGE_RAM || storage == WIFI_STORAGE_FLASH);
@@ -352,6 +400,11 @@ int main(void)
     assert(airdap_wifi_manager_clear_network_configuration() == ESP_OK);
     assert(last_clear_flags == AIRDAP_CONFIG_CLEAR_NETWORK);
     assert(posted_event_count == 0U);
+    assert(nvs_open_count == 1U);
+    assert(nvs_purge_all_count == 1U);
+    assert(nvs_erase_all_count == 1U);
+    assert(nvs_commit_count == 1U);
+    assert(nvs_close_count == 1U);
 
     assert(airdap_wifi_manager_start() == ESP_OK);
     emit_wifi_event(WIFI_EVENT_STA_START, WIFI_REASON_UNSPECIFIED);
@@ -495,11 +548,15 @@ int main(void)
     emit_ip_event(IP_EVENT_STA_GOT_IP);
     assert(airdap_wifi_manager_prepare_provisioning() == ESP_OK);
     const size_t posts_before_clear = posted_event_count;
+    const size_t nvs_purges_before_clear = nvs_purge_all_count;
+    const size_t nvs_erases_before_clear = nvs_erase_all_count;
     const size_t storage_before_clear = storage_change_count;
     const size_t configs_before_clear = wifi_set_config_count;
     assert(airdap_wifi_manager_clear_network_configuration() == ESP_OK);
     assert(last_clear_flags == AIRDAP_CONFIG_CLEAR_NETWORK);
     assert(posted_event_count == posts_before_clear);
+    assert(nvs_purge_all_count == nvs_purges_before_clear + 1U);
+    assert(nvs_erase_all_count == nvs_erases_before_clear + 1U);
     assert(storage_change_count == storage_before_clear + 1U);
     assert(storage_changes[storage_before_clear] == WIFI_STORAGE_RAM);
     assert(wifi_set_config_count == configs_before_clear + 1U);
@@ -510,9 +567,32 @@ int main(void)
     credentials = make_credentials("cleanup-failure-ap", "password");
     assert(airdap_wifi_manager_set_credentials(&credentials) == ESP_OK);
     dispatch_next_posted_event();
+    const size_t nvs_erases_before_runtime_failure = nvs_erase_all_count;
     wifi_storage_result = ESP_FAIL;
-    assert(airdap_wifi_manager_clear_network_configuration() == ESP_OK);
+    assert(airdap_wifi_manager_clear_network_configuration() == ESP_FAIL);
     assert(last_clear_flags == AIRDAP_CONFIG_CLEAR_NETWORK);
+    assert(nvs_erase_all_count == nvs_erases_before_runtime_failure + 1U);
+    dispatch_next_posted_event();
+    assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_STOPPED);
+
+    wifi_storage_result = ESP_OK;
+    credentials = make_credentials("nvs-failure-ap", "password");
+    assert(airdap_wifi_manager_set_credentials(&credentials) == ESP_OK);
+    dispatch_next_posted_event();
+    nvs_commit_result = ESP_FAIL;
+    assert(airdap_wifi_manager_clear_network_configuration() == ESP_FAIL);
+    assert(last_wifi_config.sta.ssid[0] == 0U);
+    dispatch_next_posted_event();
+    assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_STOPPED);
+
+    nvs_commit_result = ESP_OK;
+    credentials = make_credentials("purge-failure-ap", "password");
+    assert(airdap_wifi_manager_set_credentials(&credentials) == ESP_OK);
+    dispatch_next_posted_event();
+    const size_t nvs_erases_before_purge_failure = nvs_erase_all_count;
+    nvs_purge_result = ESP_FAIL;
+    assert(airdap_wifi_manager_clear_network_configuration() == ESP_FAIL);
+    assert(nvs_erase_all_count == nvs_erases_before_purge_failure);
     dispatch_next_posted_event();
     assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_STOPPED);
 

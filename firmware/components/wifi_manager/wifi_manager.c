@@ -17,6 +17,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "nvs.h"
 
 ESP_EVENT_DEFINE_BASE(AIRDAP_WIFI_INTERNAL_EVENT);
 
@@ -26,6 +27,10 @@ typedef enum {
 } airdap_wifi_internal_event_t;
 
 static const char *TAG = "airdap_wifi";
+/* ESP-IDF's generated Wi-Fi NVS images use this namespace. Runtime Wi-Fi NVS
+ * stays disabled, but network reset must purge credentials left by older
+ * builds or provisioning-manager storage changes. */
+static const char wifi_driver_nvs_namespace[] = "nvs.net80211";
 
 static airdap_wifi_state_machine_t state_machine;
 static esp_netif_t *station_netif;
@@ -580,6 +585,27 @@ static esp_err_t clear_driver_credentials(void)
     return error;
 }
 
+static esp_err_t clear_driver_persistent_configuration(void)
+{
+    nvs_handle_t handle;
+    esp_err_t error = nvs_open(
+        wifi_driver_nvs_namespace,
+        NVS_READWRITE_PURGE,
+        &handle);
+    if (error != ESP_OK) {
+        return error;
+    }
+    error = nvs_purge_all(handle);
+    if (error == ESP_OK) {
+        error = nvs_erase_all(handle);
+    }
+    if (error == ESP_OK) {
+        error = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return error;
+}
+
 esp_err_t airdap_wifi_manager_prepare_provisioning(void)
 {
     if (!started || provisioning_suspended) {
@@ -677,16 +703,28 @@ esp_err_t airdap_wifi_manager_clear_credentials(void)
 
 esp_err_t airdap_wifi_manager_clear_network_configuration(void)
 {
-    esp_err_t error = airdap_config_store_clear(AIRDAP_CONFIG_CLEAR_NETWORK);
-    if (error != ESP_OK) {
-        return error;
+    const esp_err_t config_error =
+        airdap_config_store_clear(AIRDAP_CONFIG_CLEAR_NETWORK);
+    if (config_error != ESP_OK) {
+        return config_error;
     }
 
+    esp_err_t result = ESP_OK;
     if (started) {
         const esp_err_t driver_error = clear_driver_credentials();
         if (driver_error != ESP_OK) {
             ESP_LOGE(TAG, "Cleared Wi-Fi driver RAM cleanup failed: %s",
                 esp_err_to_name(driver_error));
+            result = driver_error;
+        }
+    }
+    const esp_err_t persistent_error =
+        clear_driver_persistent_configuration();
+    if (persistent_error != ESP_OK) {
+        ESP_LOGE(TAG, "Wi-Fi driver NVS cleanup failed: %s",
+            esp_err_to_name(persistent_error));
+        if (result == ESP_OK) {
+            result = persistent_error;
         }
     }
     if (!provisioning_suspended) {
@@ -694,7 +732,10 @@ esp_err_t airdap_wifi_manager_clear_network_configuration(void)
         if (notify_error != ESP_OK) {
             ESP_LOGE(TAG, "Cleared Wi-Fi configuration notify failed: %s",
                 esp_err_to_name(notify_error));
+            if (result == ESP_OK) {
+                result = notify_error;
+            }
         }
     }
-    return ESP_OK;
+    return result;
 }

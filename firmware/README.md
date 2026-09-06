@@ -239,7 +239,9 @@ a versioned, length-delimited encoding in the existing Wi-Fi credential slot,
 and `CONFIG_ESP_WIFI_NVS_ENABLED` is disabled. Driver storage is also selected
 as RAM for normal operation, so neither ordinary reconnects nor the upstream
 provisioning manager can persist a second copy; this slot remains the canonical
-persisted value.
+persisted value. The ten-second network reset also purges ESP-IDF's Wi-Fi NVS
+namespace so credentials left by older firmware cannot survive the reset. This
+does not affect AirDAP's compiled Security 2 credential.
 
 A station link is still reported as `connecting`. Only
 `IP_EVENT_STA_GOT_IP`, after DHCP succeeds, publishes `online`. Authentication

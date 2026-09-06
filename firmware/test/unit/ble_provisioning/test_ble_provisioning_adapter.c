@@ -44,6 +44,7 @@ static unsigned clear_count;
 static unsigned restart_count;
 static unsigned credential_load_count;
 static esp_err_t prepare_result = ESP_OK;
+static esp_err_t clear_result = ESP_OK;
 static esp_err_t event_post_result = ESP_OK;
 static bool prepared_after_manager_init;
 static airdap_mode_event_t mode_events[32];
@@ -120,7 +121,7 @@ esp_err_t airdap_wifi_manager_finish_provisioning(void)
 esp_err_t airdap_wifi_manager_clear_network_configuration(void)
 {
     ++clear_count;
-    return ESP_OK;
+    return clear_result;
 }
 
 esp_err_t network_prov_mgr_init(network_prov_mgr_config_t config)
@@ -364,8 +365,10 @@ int main(void)
     finish_window();
     assert(finish_count == 4U && restart_count == 1U);
 
+    const unsigned credential_loads_after_clear = credential_load_count;
     assert(airdap_ble_provisioning_test_button_action(
         AIRDAP_PROVISIONING_BUTTON_TOGGLE) == ESP_OK);
+    assert(credential_load_count == credential_loads_after_clear + 1U);
     assert(airdap_ble_provisioning_test_button_action(
         AIRDAP_PROVISIONING_BUTTON_CLEAR) == ESP_OK);
     assert(clear_count == 2U && restart_count == 1U);
@@ -439,6 +442,21 @@ int main(void)
     assert(mode_events[mode_event_count - 1U] ==
         AIRDAP_MODE_EVENT_PROVISIONING_SUCCEEDED);
     finish_window();
+
+    assert(airdap_ble_provisioning_test_button_action(
+        AIRDAP_PROVISIONING_BUTTON_TOGGLE) == ESP_OK);
+    clear_result = ESP_FAIL;
+    const unsigned stops_before_clear_failure = manager_stop_count;
+    const unsigned restarts_before_clear_failure = restart_count;
+    const size_t mode_events_before_clear_failure = mode_event_count;
+    assert(airdap_ble_provisioning_test_button_action(
+        AIRDAP_PROVISIONING_BUTTON_CLEAR) == ESP_FAIL);
+    assert(manager_stop_count == stops_before_clear_failure + 1U);
+    assert(mode_event_count == mode_events_before_clear_failure);
+    assert(airdap_ble_provisioning_test_button_action(
+        AIRDAP_PROVISIONING_BUTTON_RELEASED) == ESP_OK);
+    finish_window();
+    assert(restart_count == restarts_before_clear_failure);
 
     puts("BLE provisioning adapter tests passed");
     return 0;
