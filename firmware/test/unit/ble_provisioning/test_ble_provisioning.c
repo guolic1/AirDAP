@@ -13,7 +13,7 @@ static const uint8_t expected_salt[AIRDAP_SEC2_SALT_SIZE] = {
     0x4c, 0x9e, 0xac, 0x97, 0xd9, 0x3d, 0xec, 0xf4,
 };
 
-static void test_button_thresholds_are_one_shot(void)
+static void test_button_defers_clear_until_release(void)
 {
     airdap_provisioning_button_t button;
     airdap_provisioning_button_init(&button);
@@ -23,19 +23,65 @@ static void test_button_thresholds_are_one_shot(void)
             AIRDAP_PROVISIONING_BUTTON_NONE);
     }
     assert(airdap_provisioning_button_step(&button, true, 100U) ==
-        AIRDAP_PROVISIONING_BUTTON_TOGGLE);
+        AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY);
     for (unsigned tick = 0U; tick < 69U; ++tick) {
         assert(airdap_provisioning_button_step(&button, true, 100U) ==
             AIRDAP_PROVISIONING_BUTTON_NONE);
     }
     assert(airdap_provisioning_button_step(&button, true, 100U) ==
-        AIRDAP_PROVISIONING_BUTTON_CLEAR);
+        AIRDAP_PROVISIONING_BUTTON_CLEAR_READY);
     assert(airdap_provisioning_button_step(&button, true, 5000U) ==
         AIRDAP_PROVISIONING_BUTTON_NONE);
     assert(airdap_provisioning_button_step(&button, false, 100U) ==
-        AIRDAP_PROVISIONING_BUTTON_RELEASED);
+        AIRDAP_PROVISIONING_BUTTON_NONE);
+    assert(airdap_provisioning_button_step(&button, false, 100U) ==
+        AIRDAP_PROVISIONING_BUTTON_CLEAR);
     assert(airdap_provisioning_button_step(&button, false, 100U) ==
         AIRDAP_PROVISIONING_BUTTON_NONE);
+}
+
+static void test_button_defers_toggle_until_release(void)
+{
+    airdap_provisioning_button_t button;
+    airdap_provisioning_button_init(&button);
+
+    assert(airdap_provisioning_button_step(&button, true, 3000U) ==
+        AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY);
+    assert(airdap_provisioning_button_step(&button, true, 6000U) ==
+        AIRDAP_PROVISIONING_BUTTON_NONE);
+    assert(airdap_provisioning_button_step(&button, false, 100U) ==
+        AIRDAP_PROVISIONING_BUTTON_NONE);
+    assert(airdap_provisioning_button_step(&button, false, 100U) ==
+        AIRDAP_PROVISIONING_BUTTON_TOGGLE);
+
+    airdap_provisioning_button_init(&button);
+    assert(airdap_provisioning_button_step(&button, true, 1000U) ==
+        AIRDAP_PROVISIONING_BUTTON_NONE);
+    assert(airdap_provisioning_button_step(&button, false, 100U) ==
+        AIRDAP_PROVISIONING_BUTTON_NONE);
+}
+
+static void test_button_ignores_transient_release_while_held(void)
+{
+    airdap_provisioning_button_t button;
+    airdap_provisioning_button_init(&button);
+
+    assert(airdap_provisioning_button_step(&button, true, 3000U) ==
+        AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY);
+    assert(airdap_provisioning_button_step(&button, false, 100U) ==
+        AIRDAP_PROVISIONING_BUTTON_NONE);
+    assert(airdap_provisioning_button_step(&button, true, 6900U) ==
+        AIRDAP_PROVISIONING_BUTTON_NONE);
+    assert(airdap_provisioning_button_step(&button, true, 100U) ==
+        AIRDAP_PROVISIONING_BUTTON_CLEAR_READY);
+    assert(airdap_provisioning_button_step(&button, false, 100U) ==
+        AIRDAP_PROVISIONING_BUTTON_NONE);
+    assert(airdap_provisioning_button_step(&button, true, 100U) ==
+        AIRDAP_PROVISIONING_BUTTON_NONE);
+    assert(airdap_provisioning_button_step(&button, false, 100U) ==
+        AIRDAP_PROVISIONING_BUTTON_NONE);
+    assert(airdap_provisioning_button_step(&button, false, 100U) ==
+        AIRDAP_PROVISIONING_BUTTON_CLEAR);
 }
 
 static void test_public_security2_credentials_load_and_clear(void)
@@ -63,7 +109,9 @@ static void test_public_security2_credentials_load_and_clear(void)
 
 int main(void)
 {
-    test_button_thresholds_are_one_shot();
+    test_button_defers_clear_until_release();
+    test_button_defers_toggle_until_release();
+    test_button_ignores_transient_release_while_held();
     test_public_security2_credentials_load_and_clear();
     puts("BLE provisioning core tests passed");
     return 0;

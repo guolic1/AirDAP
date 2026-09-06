@@ -113,3 +113,15 @@ esp_err_t airdap_boot_key_get_pressed(bool *pressed)
     *pressed = gpio_get_level((gpio_num_t) AIRDAP_PIN_BOOT_KEY) == 0;
     return ESP_OK;
 }
+
+esp_err_t airdap_board_leds_set(bool status_on, bool network_on)
+{
+    const esp_err_t error = gpio_set_level(
+        (gpio_num_t) AIRDAP_PIN_LED_STATUS,
+        status_on ? 0U : 1U);
+    return error == ESP_OK
+        ? gpio_set_level(
+            (gpio_num_t) AIRDAP_PIN_LED_NET,
+            network_on ? 0U : 1U)
+        : error;
+}

@@ -25,6 +25,9 @@ esp_err_t airdap_target_reset_set_asserted(bool asserted);
 /* BOOT_KEY is active low and doubles as the ROM download-mode strap. */
 esp_err_t airdap_boot_key_get_pressed(bool *pressed);
 
+/* Hide the active-low board wiring from user-visible LED state changes. */
+esp_err_t airdap_board_leds_set(bool status_on, bool network_on);
+
 #ifdef __cplusplus
 }
 #endif

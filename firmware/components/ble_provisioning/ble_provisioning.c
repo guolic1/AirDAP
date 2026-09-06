@@ -55,8 +55,7 @@ static bool wifi_manager_suspended;
 static bool window_active;
 static bool stop_requested;
 static bool pending_wifi_credentials_valid;
-static bool restart_after_release;
-static bool button_released;
+static bool restart_pending;
 static window_outcome_t window_outcome;
 
 static void clear_bytes(void *data, size_t size)
@@ -104,9 +103,18 @@ static void stop_window_timer(void)
 
 static void maybe_restart_after_clear(void)
 {
-    if (restart_after_release && button_released && !window_active) {
-        restart_after_release = false;
+    if (restart_pending && !window_active) {
+        restart_pending = false;
         esp_restart();
+    }
+}
+
+static void set_button_indicator(bool status_on, bool network_on)
+{
+    const esp_err_t error = airdap_board_leds_set(status_on, network_on);
+    if (error != ESP_OK) {
+        ESP_LOGE(TAG, "BOOT_KEY indicator update failed: %s",
+            esp_err_to_name(error));
     }
 }
 
@@ -217,7 +225,6 @@ static esp_err_t start_window(void)
     clear_pending_credentials();
     window_active = true;
     stop_requested = false;
-    button_released = false;
     window_outcome = WINDOW_OUTCOME_NONE;
     publish_mode(AIRDAP_MODE_EVENT_PROVISIONING_STARTED);
 
@@ -348,7 +355,14 @@ static esp_err_t handle_button_action(
     airdap_provisioning_button_action_t action)
 {
     switch (action) {
+    case AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY:
+        set_button_indicator(false, true);
+        return ESP_OK;
+    case AIRDAP_PROVISIONING_BUTTON_CLEAR_READY:
+        set_button_indicator(true, false);
+        return ESP_OK;
     case AIRDAP_PROVISIONING_BUTTON_TOGGLE:
+        set_button_indicator(false, false);
         if (window_active) {
             request_window_stop(window_outcome == WINDOW_OUTCOME_SUCCESS
                 ? WINDOW_OUTCOME_SUCCESS
@@ -357,6 +371,7 @@ static esp_err_t handle_button_action(
         }
         return start_window();
     case AIRDAP_PROVISIONING_BUTTON_CLEAR: {
+        set_button_indicator(false, false);
         const esp_err_t error =
             airdap_wifi_manager_clear_network_configuration();
         if (error != ESP_OK) {
@@ -365,8 +380,7 @@ static esp_err_t handle_button_action(
             request_window_stop(WINDOW_OUTCOME_CLEAR_FAILED);
             return error;
         }
-        restart_after_release = true;
-        button_released = false;
+        restart_pending = true;
         if (window_active) {
             request_window_stop(WINDOW_OUTCOME_CLEAR);
         } else {
@@ -375,10 +389,6 @@ static esp_err_t handle_button_action(
         maybe_restart_after_clear();
         return ESP_OK;
     }
-    case AIRDAP_PROVISIONING_BUTTON_RELEASED:
-        button_released = true;
-        maybe_restart_after_clear();
-        return ESP_OK;
     case AIRDAP_PROVISIONING_BUTTON_NONE:
         return ESP_OK;
     }

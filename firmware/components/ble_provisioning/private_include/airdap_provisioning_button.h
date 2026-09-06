@@ -5,16 +5,16 @@
 
 typedef enum {
     AIRDAP_PROVISIONING_BUTTON_NONE = 0,
+    AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY,
+    AIRDAP_PROVISIONING_BUTTON_CLEAR_READY,
     AIRDAP_PROVISIONING_BUTTON_TOGGLE,
     AIRDAP_PROVISIONING_BUTTON_CLEAR,
-    AIRDAP_PROVISIONING_BUTTON_RELEASED,
 } airdap_provisioning_button_action_t;
 
 typedef struct {
     uint32_t held_ms;
-    bool pressed;
-    bool toggle_emitted;
-    bool clear_emitted;
+    uint32_t released_ms;
+    bool active;
 } airdap_provisioning_button_t;
 
 void airdap_provisioning_button_init(airdap_provisioning_button_t *button);

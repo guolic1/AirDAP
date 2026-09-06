@@ -261,6 +261,31 @@ static void test_target_reset_accounts_for_inverting_transistor(void)
     assert(events[1].level == 0U);
 }
 
+static void test_led_control_accounts_for_active_low_wiring(void)
+{
+    reset_fake_gpio();
+
+    assert(airdap_board_leds_set(false, true) == ESP_OK);
+    assert(event_count == 2U);
+    assert(events[0].pin == AIRDAP_PIN_LED_STATUS);
+    assert(events[0].level == 1U);
+    assert(events[1].pin == AIRDAP_PIN_LED_NET);
+    assert(events[1].level == 0U);
+
+    reset_fake_gpio();
+    assert(airdap_board_leds_set(true, false) == ESP_OK);
+    assert(event_count == 2U);
+    assert(events[0].pin == AIRDAP_PIN_LED_STATUS);
+    assert(events[0].level == 0U);
+    assert(events[1].pin == AIRDAP_PIN_LED_NET);
+    assert(events[1].level == 1U);
+
+    reset_fake_gpio();
+    fail_at_call = 0U;
+    assert(airdap_board_leds_set(false, false) == ESP_FAIL);
+    assert(event_count == 1U);
+}
+
 int main(void)
 {
     test_safe_gpio_state();
@@ -269,6 +294,7 @@ int main(void)
     test_target_power_control_uses_open_drain_release_levels();
     test_target_power_active_reads_shared_status_net();
     test_target_reset_accounts_for_inverting_transistor();
+    test_led_control_accounts_for_active_low_wiring();
     test_boot_key_uses_active_low_level();
 
     puts("board safe-state tests passed");

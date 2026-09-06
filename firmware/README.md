@@ -318,21 +318,25 @@ unit test or firmware build.
 
 ## BLE Security 2 provisioning
 
-BLE is disabled during normal operation. Hold `BOOT_KEY` (GPIO0) for three
-seconds to open a 120-second provisioning window. Holding it for three seconds
-again while the window is active cancels the attempt. The BLE service name is
-the shared `ADP-<12 uppercase MAC digits>` device ID. A successful Wi-Fi/DHCP
-check atomically commits the new credentials and marks the device provisioned.
+BLE is disabled during normal operation. Hold `BOOT_KEY` (GPIO0) until the
+green network LED turns on at three seconds, then release it to open a
+120-second provisioning window. The button never starts BLE while it remains
+pressed. Repeating the same hold-and-release while the window is active cancels
+the attempt. The BLE service name is the shared
+`ADP-<12 uppercase MAC digits>` device ID. A successful Wi-Fi/DHCP check
+atomically commits the new credentials and marks the device provisioned.
 The service remains available long enough for the client to query that success,
 then the upstream 30-second auto-stop ends BLE and releases its resources.
 Failure leaves the window open for another client attempt; cancel and timeout
 stop BLE and restore the previously committed Wi-Fi configuration.
 
-Hold `BOOT_KEY` for ten seconds to clear Wi-Fi credentials plus the reserved
-pairing and network-authentication slots. Firmware waits until GPIO0 is
-released before restarting, so the restart does not intentionally enter the
-ROM download mode. After restart the device can open a fresh provisioning
-window using the same public Security 2 credential.
+Continue holding `BOOT_KEY` past the green indication until the red status LED
+turns on at ten seconds. No provisioning or clear action runs while the button
+remains pressed. Release it to turn both indicators off, clear Wi-Fi
+credentials plus the reserved pairing and network-authentication slots, and
+restart without intentionally entering ROM download mode. After restart the
+device can open a fresh provisioning window using the same public Security 2
+credential.
 
 AirDAP intentionally uses Espressif's public Security 2 development credential:
 
@@ -377,11 +381,12 @@ configured ESP-IDF environment and run `idf.py reconfigure` once.
 
 Security 2 still encrypts and authenticates the BLE provisioning session, but
 the published PoP does not identify an owner. Physical access to hold
-`BOOT_KEY` for three seconds is therefore the only provisioning authorization
-boundary. Any nearby party that knows the public credential can race or replace
-Wi-Fi configuration while that window is open. This design is appropriate only
-where physical access to the button is trusted; it is not per-device
-authentication. Follow [`test/hil/ble_provisioning.md`](test/hil/ble_provisioning.md)
+`BOOT_KEY` through the three-second indication and release it is therefore the
+only provisioning authorization boundary. Any nearby party that knows the
+public credential can race or replace Wi-Fi configuration while that window is
+open. This design is appropriate only where physical access to the button is
+trusted; it is not per-device authentication. Follow
+[`test/hil/ble_provisioning.md`](test/hil/ble_provisioning.md)
 before relying on BLE lifecycle, RF behavior, Wi-Fi association, persistence,
 or the GPIO0 reset guard on hardware.
 

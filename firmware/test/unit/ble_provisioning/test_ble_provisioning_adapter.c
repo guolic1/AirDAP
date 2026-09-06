@@ -43,8 +43,12 @@ static unsigned finish_count;
 static unsigned clear_count;
 static unsigned restart_count;
 static unsigned credential_load_count;
+static unsigned led_change_count;
+static bool status_led_on;
+static bool network_led_on;
 static esp_err_t prepare_result = ESP_OK;
 static esp_err_t clear_result = ESP_OK;
+static esp_err_t led_result = ESP_OK;
 static esp_err_t event_post_result = ESP_OK;
 static bool prepared_after_manager_init;
 static airdap_mode_event_t mode_events[32];
@@ -271,6 +275,14 @@ esp_err_t airdap_boot_key_get_pressed(bool *pressed)
     return ESP_OK;
 }
 
+esp_err_t airdap_board_leds_set(bool status_on, bool network_on)
+{
+    status_led_on = status_on;
+    network_led_on = network_on;
+    ++led_change_count;
+    return led_result;
+}
+
 void esp_restart(void)
 {
     ++restart_count;
@@ -296,7 +308,12 @@ int main(void)
     assert(manager_init_count == 0U && manager_start_count == 0U);
 
     assert(airdap_ble_provisioning_test_button_action(
+        AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY) == ESP_OK);
+    assert(led_change_count == 1U && !status_led_on && network_led_on);
+    assert(manager_init_count == 0U && manager_start_count == 0U);
+    assert(airdap_ble_provisioning_test_button_action(
         AIRDAP_PROVISIONING_BUTTON_TOGGLE) == ESP_OK);
+    assert(led_change_count == 2U && !status_led_on && !network_led_on);
     assert(airdap_ble_provisioning_test_window_active());
     assert(credential_load_count == 1U && manager_init_count == 1U);
     assert(manager_start_count == 1U && prepare_count == 1U);
@@ -355,13 +372,17 @@ int main(void)
         AIRDAP_PROVISIONING_BUTTON_TOGGLE) == ESP_OK);
     assert(airdap_ble_provisioning_test_button_action(
         AIRDAP_PROVISIONING_BUTTON_TOGGLE) == ESP_OK);
+    const unsigned clears_before_ready = clear_count;
+    assert(airdap_ble_provisioning_test_button_action(
+        AIRDAP_PROVISIONING_BUTTON_CLEAR_READY) == ESP_OK);
+    assert(status_led_on && !network_led_on);
+    assert(clear_count == clears_before_ready);
     assert(airdap_ble_provisioning_test_button_action(
         AIRDAP_PROVISIONING_BUTTON_CLEAR) == ESP_OK);
+    assert(!status_led_on && !network_led_on);
     assert(clear_count == 1U && restart_count == 0U);
     assert(mode_events[mode_event_count - 1U] ==
         AIRDAP_MODE_EVENT_PROVISIONING_RESET);
-    assert(airdap_ble_provisioning_test_button_action(
-        AIRDAP_PROVISIONING_BUTTON_RELEASED) == ESP_OK);
     finish_window();
     assert(finish_count == 4U && restart_count == 1U);
 
@@ -374,8 +395,6 @@ int main(void)
     assert(clear_count == 2U && restart_count == 1U);
     assert(mode_events[mode_event_count - 1U] ==
         AIRDAP_MODE_EVENT_PROVISIONING_RESET);
-    assert(airdap_ble_provisioning_test_button_action(
-        AIRDAP_PROVISIONING_BUTTON_RELEASED) == ESP_OK);
     assert(restart_count == 1U);
     finish_window();
     assert(finish_count == 5U && restart_count == 2U);
@@ -388,10 +407,7 @@ int main(void)
     assert(manager_deinit_count == 6U && finish_count == 5U);
     assert(airdap_ble_provisioning_test_button_action(
         AIRDAP_PROVISIONING_BUTTON_CLEAR) == ESP_OK);
-    assert(clear_count == 3U && restart_count == 2U);
-    assert(airdap_ble_provisioning_test_button_action(
-        AIRDAP_PROVISIONING_BUTTON_RELEASED) == ESP_OK);
-    assert(restart_count == 3U);
+    assert(clear_count == 3U && restart_count == 3U);
 
     prepare_result = ESP_OK;
     assert(airdap_ble_provisioning_test_button_action(
@@ -422,8 +438,6 @@ int main(void)
         NETWORK_PROV_WIFI_CRED_SUCCESS,
         NULL);
     assert(accept_count == accepts_before_clear);
-    assert(airdap_ble_provisioning_test_button_action(
-        AIRDAP_PROVISIONING_BUTTON_RELEASED) == ESP_OK);
     finish_window();
 
     assert(airdap_ble_provisioning_test_button_action(
@@ -453,10 +467,20 @@ int main(void)
         AIRDAP_PROVISIONING_BUTTON_CLEAR) == ESP_FAIL);
     assert(manager_stop_count == stops_before_clear_failure + 1U);
     assert(mode_event_count == mode_events_before_clear_failure);
-    assert(airdap_ble_provisioning_test_button_action(
-        AIRDAP_PROVISIONING_BUTTON_RELEASED) == ESP_OK);
     finish_window();
     assert(restart_count == restarts_before_clear_failure);
+
+    clear_result = ESP_OK;
+    led_result = ESP_FAIL;
+    const unsigned clears_before_indicator_failure = clear_count;
+    const unsigned restarts_before_indicator_failure = restart_count;
+    assert(airdap_ble_provisioning_test_button_action(
+        AIRDAP_PROVISIONING_BUTTON_CLEAR_READY) == ESP_OK);
+    assert(clear_count == clears_before_indicator_failure);
+    assert(airdap_ble_provisioning_test_button_action(
+        AIRDAP_PROVISIONING_BUTTON_CLEAR) == ESP_OK);
+    assert(clear_count == clears_before_indicator_failure + 1U);
+    assert(restart_count == restarts_before_indicator_failure + 1U);
 
     puts("BLE provisioning adapter tests passed");
     return 0;

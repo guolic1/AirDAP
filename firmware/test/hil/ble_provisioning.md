@@ -24,7 +24,10 @@ idf.py -p <airdap-programming-port> flash
 ```
 
 Restart and monitor AirDAP. Confirm BLE is not advertising before a button
-press. Hold `BOOT_KEY` for three seconds, release it, and confirm:
+press. Hold `BOOT_KEY` until the green network LED turns on at three seconds.
+Before releasing it, confirm BLE has not initialized or started advertising
+and an attached debug-shell session remains connected. Release the button and
+confirm:
 
 - the `ADP-...` BLE service appears;
 - its name matches the USB/device identity;
@@ -59,18 +62,19 @@ python managed_components/espressif__network_provisioning/tool/esp_prov/esp_prov
 ```
 
 Confirm the secure session is rejected, the stored Wi-Fi configuration is
-unchanged, and the BLE window remains available. Hold `BOOT_KEY` for three
-seconds again. Confirm BLE advertising and the provisioning service stop, the
-mode no longer reports an active provisioning attempt, and the prior Wi-Fi
-configuration remains in effect.
+unchanged, and the BLE window remains available. Hold `BOOT_KEY` until the
+green network LED turns on again, then release it. Confirm BLE advertising and
+the provisioning service stop, the mode no longer reports an active
+provisioning attempt, and the prior Wi-Fi configuration remains in effect.
 
 ## 3. Timeout cleanup
 
 Open another window and do not connect a client. Confirm the service disappears
-after 120 seconds and does not return without a new three-second press. Confirm
-the previously committed Wi-Fi configuration and normal USB interfaces remain
-usable. This is the resource-lifecycle acceptance check; a client disconnect
-alone is not evidence that the firmware stopped the BLE service.
+after 120 seconds and does not return without a new three-second
+hold-and-release. Confirm the previously committed Wi-Fi configuration and
+normal USB interfaces remain usable. This is the resource-lifecycle acceptance
+check; a client disconnect alone is not evidence that the firmware stopped the
+BLE service.
 
 ## 4. First provisioning and reboot recovery
 
@@ -83,7 +87,7 @@ password interactively. Required observations:
 - the client reports provisioning success before the service disappears;
 - BLE stops and releases its resources within 30 seconds after success;
 - a power cycle reconnects to the same AP without opening BLE;
-- a fresh three-second press can open a new window using the same public
+- a fresh three-second hold-and-release can open a new window using the same public
   Security 2 credential fingerprint.
 
 Repeat with an incorrect AP password before the successful attempt. Confirm the
@@ -96,14 +100,18 @@ public fingerprint.
 
 ## 5. Ten-second network reset and GPIO0 release guard
 
-With the device provisioned, hold `BOOT_KEY` continuously for ten seconds.
-Keep it pressed briefly after the clear action and confirm AirDAP does not
-restart while GPIO0 remains low. Release the button and confirm it restarts
-normally rather than entering the ROM download mode. After restart:
+With the device provisioned, hold `BOOT_KEY` continuously. Confirm the green
+network LED turns on at three seconds without initializing BLE or disconnecting
+the debug shell. Continue holding until the green LED turns off and the red
+status LED turns on at ten seconds. Keep it pressed briefly and confirm AirDAP
+has not cleared configuration or restarted while GPIO0 remains low. Release the
+button and confirm both LEDs turn off before AirDAP clears configuration and
+restarts normally rather than entering the ROM download mode. The debug shell
+disconnect caused by that restart is expected. After restart:
 
 - provisioning state is `unprovisioned` and Wi-Fi does not reconnect;
 - the reserved pairing and network-authentication slots are absent;
-- BLE remains off until another three-second press;
+- BLE remains off until another three-second hold-and-release;
 - the new window reports the same Security 2 credential fingerprint and
   accepts the public PoP.
 
