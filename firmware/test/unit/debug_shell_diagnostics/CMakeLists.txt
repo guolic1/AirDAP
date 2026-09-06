@@ -28,6 +28,7 @@ target_include_directories(
         ../../../components/ota_manager/include
         ../../../components/usb_device/private_include
         ../../../components/voltage_monitor/include
+        ../../../components/wifi_manager/include
 )
 target_compile_features(debug_shell_diagnostics_test PRIVATE c_std_11)
 target_link_libraries(debug_shell_diagnostics_test PRIVATE Threads::Threads)

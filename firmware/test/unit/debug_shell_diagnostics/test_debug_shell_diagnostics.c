@@ -19,6 +19,7 @@
 #include "airdap_mode_state.h"
 #include "airdap_ota.h"
 #include "airdap_voltage_monitor.h"
+#include "airdap_wifi_manager.h"
 #include "esp_chip_info.h"
 #include "esp_heap_caps.h"
 #include "esp_ipc.h"
@@ -43,6 +44,8 @@ static esp_ota_img_states_t running_image_state;
 static bool target_power_active;
 static airdap_voltage_reading_t voltage;
 static airdap_dap_service_stats_t dap_stats;
+static airdap_wifi_manager_info_t wifi_info;
+static esp_err_t wifi_info_result;
 static TaskStatus_t task_statuses[3];
 static configRUN_TIME_COUNTER_TYPE task_total_runtime;
 static UBaseType_t reported_task_count;
@@ -247,6 +250,14 @@ void airdap_dap_service_get_stats(airdap_dap_service_stats_t *stats)
     *stats = dap_stats;
 }
 
+esp_err_t airdap_wifi_manager_get_info(airdap_wifi_manager_info_t *info)
+{
+    if (wifi_info_result == ESP_OK) {
+        *info = wifi_info;
+    }
+    return wifi_info_result;
+}
+
 UBaseType_t uxTaskGetNumberOfTasks(void)
 {
     assert(atomic_load(&suspended_scheduler_count) == 2U);
@@ -418,6 +429,24 @@ static void set_up(void)
         .stale_responses = 5U,
         .delivery_failures = 6U,
     };
+    wifi_info = (airdap_wifi_manager_info_t) {
+        .started = true,
+        .has_configuration = true,
+        .link_connected = true,
+        .provisioning_suspended = false,
+        .last_failure = AIRDAP_WIFI_MANAGER_FAILURE_NONE,
+        .last_disconnect_reason = 200U,
+        .retry_delay_ms = 0U,
+        .retry_scheduled = false,
+        .ipv4_available = true,
+        .ipv4_address = {192U, 168U, 4U, 20U},
+        .ipv4_netmask = {255U, 255U, 255U, 0U},
+        .ipv4_gateway = {192U, 168U, 4U, 1U},
+        .ap_available = true,
+        .rssi_dbm = -47,
+        .channel = 6U,
+    };
+    wifi_info_result = ESP_OK;
     task_statuses[0] = (TaskStatus_t) {
         .pcTaskName = "wifi",
         .xTaskNumber = 8U,
@@ -504,6 +533,7 @@ static void test_registers_complete_shell_without_legacy_duplicates(void)
         "target-status",
         "tasks",
         "dap-stats",
+        "network-info",
     };
     assert(airdap_debug_shell_command_count(&registry) ==
         sizeof(expected) / sizeof(expected[0]));
@@ -525,6 +555,48 @@ static void test_registers_complete_shell_without_legacy_duplicates(void)
             removed[index],
             strlen(removed[index])) == NULL);
     }
+}
+
+static void test_network_info_reports_non_secret_runtime_state(void)
+{
+    airdap_debug_shell_command_registry_t registry;
+    airdap_debug_shell_command_registry_init(&registry);
+    assert(airdap_debug_shell_register_service_diagnostic_commands(&registry));
+
+    captured_output_t output = {0};
+    assert(run_command(&registry, "network-info", "", &output) == 0);
+    assert(strcmp(
+        output.text,
+        "wifi=online manager_started=yes configured=yes link_connected=yes "
+        "provisioning_suspended=no\n"
+        "last_failure=none last_disconnect_reason=200 retry_delay_ms=0 "
+        "retry_scheduled=no\n"
+        "ipv4=192.168.4.20 netmask=255.255.255.0 gateway=192.168.4.1\n"
+        "ap rssi_dbm=-47 channel=6\n") == 0);
+    assert(strstr(output.text, "ssid") == NULL);
+    assert(strstr(output.text, "bssid") == NULL);
+
+    output = (captured_output_t) {0};
+    wifi_info.ipv4_available = false;
+    wifi_info.ap_available = false;
+    wifi_info.last_failure = AIRDAP_WIFI_MANAGER_FAILURE_AUTHENTICATION;
+    mode_snapshot.wifi = AIRDAP_WIFI_DISCONNECTED;
+    assert(run_command(&registry, "network-info", "", &output) == 0);
+    assert(strstr(output.text, "wifi=disconnected") != NULL);
+    assert(strstr(output.text, "last_failure=authentication") != NULL);
+    assert(strstr(output.text, "ipv4=unavailable\n") != NULL);
+    assert(strstr(output.text, "ap=unavailable\n") != NULL);
+
+    output = (captured_output_t) {0};
+    wifi_info_result = ESP_FAIL;
+    assert(run_command(&registry, "network-info", "", &output) == 1);
+    assert(strcmp(
+        output.text,
+        "network-info: Wi-Fi status read failed: ESP_FAIL\n") == 0);
+
+    output = (captured_output_t) {0};
+    assert(run_command(&registry, "network-info", "extra", &output) == 1);
+    assert(strcmp(output.text, "usage: network-info\n") == 0);
 }
 
 static void test_dap_stats_reports_all_service_counters(void)
@@ -756,6 +828,8 @@ int main(void)
     test_registers_complete_shell_without_legacy_duplicates();
     set_up();
     test_dap_stats_reports_all_service_counters();
+    set_up();
+    test_network_info_reports_non_secret_runtime_state();
     set_up();
     test_system_memory_and_mode_diagnostics();
     set_up();

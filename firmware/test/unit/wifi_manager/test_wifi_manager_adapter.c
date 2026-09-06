@@ -64,6 +64,15 @@ static size_t storage_change_count;
 static size_t provisioning_commit_count;
 static uint32_t last_clear_flags;
 static esp_err_t wifi_storage_result = ESP_OK;
+static esp_err_t ip_info_result = ESP_OK;
+static esp_err_t ap_info_result = ESP_OK;
+static esp_netif_ip_info_t current_ip_info;
+static wifi_ap_record_t current_ap_info;
+
+static void set_ipv4(esp_ip4_addr_t *address, const uint8_t octets[4])
+{
+    memcpy(&address->addr, octets, 4U);
+}
 
 static void dispatch(
     esp_event_base_t base,
@@ -253,6 +262,18 @@ void esp_netif_destroy_default_wifi(void *netif)
     assert(netif == &station_netif);
 }
 
+esp_err_t esp_netif_get_ip_info(
+    esp_netif_t *netif,
+    esp_netif_ip_info_t *ip_info)
+{
+    assert(netif == &station_netif);
+    assert(ip_info != NULL);
+    if (ip_info_result == ESP_OK) {
+        *ip_info = current_ip_info;
+    }
+    return ip_info_result;
+}
+
 esp_err_t esp_timer_create(
     const esp_timer_create_args_t *args,
     esp_timer_handle_t *timer)
@@ -347,8 +368,26 @@ esp_err_t esp_wifi_disconnect(void)
     return ESP_OK;
 }
 
+esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *ap_info)
+{
+    assert(ap_info != NULL);
+    if (ap_info_result == ESP_OK) {
+        *ap_info = current_ap_info;
+    }
+    return ap_info_result;
+}
+
 int main(void)
 {
+    airdap_wifi_manager_info_t info;
+    assert(airdap_wifi_manager_get_info(NULL) == ESP_ERR_INVALID_ARG);
+    assert(airdap_wifi_manager_get_info(&info) == ESP_OK);
+    assert(!info.started);
+    assert(!info.has_configuration);
+    assert(!info.link_connected);
+    assert(!info.ipv4_available);
+    assert(!info.ap_available);
+
     assert(airdap_wifi_manager_clear_network_configuration() == ESP_OK);
     assert(last_clear_flags == AIRDAP_CONFIG_CLEAR_NETWORK);
     assert(posted_event_count == 0U);
@@ -388,6 +427,32 @@ int main(void)
     emit_ip_event(IP_EVENT_STA_GOT_IP);
     assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_ONLINE);
 
+    static const uint8_t ip[] = {192U, 168U, 4U, 20U};
+    static const uint8_t netmask[] = {255U, 255U, 255U, 0U};
+    static const uint8_t gateway[] = {192U, 168U, 4U, 1U};
+    set_ipv4(&current_ip_info.ip, ip);
+    set_ipv4(&current_ip_info.netmask, netmask);
+    set_ipv4(&current_ip_info.gw, gateway);
+    current_ap_info.rssi = -47;
+    current_ap_info.primary = 6U;
+    memcpy(current_ap_info.ssid, "must-not-be-exposed", 19U);
+    memset(current_ap_info.bssid, 0xA5, sizeof(current_ap_info.bssid));
+    assert(airdap_wifi_manager_get_info(&info) == ESP_OK);
+    assert(info.started);
+    assert(info.has_configuration);
+    assert(info.link_connected);
+    assert(!info.provisioning_suspended);
+    assert(info.last_failure == AIRDAP_WIFI_MANAGER_FAILURE_NONE);
+    assert(info.retry_delay_ms == 0U);
+    assert(!info.retry_scheduled);
+    assert(info.ipv4_available);
+    assert(memcmp(info.ipv4_address, ip, sizeof(ip)) == 0);
+    assert(memcmp(info.ipv4_netmask, netmask, sizeof(netmask)) == 0);
+    assert(memcmp(info.ipv4_gateway, gateway, sizeof(gateway)) == 0);
+    assert(info.ap_available);
+    assert(info.rssi_dbm == -47);
+    assert(info.channel == 6U);
+
     emit_ip_event(IP_EVENT_STA_LOST_IP);
     assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_CONNECTING);
     emit_ip_event(IP_EVENT_STA_GOT_IP);
@@ -398,6 +463,14 @@ int main(void)
     assert(retry_timer.active);
     assert(retry_timer.timeout_us == 1000000U);
     assert(timer_start_count == 1U);
+    assert(airdap_wifi_manager_get_info(&info) == ESP_OK);
+    assert(!info.link_connected);
+    assert(info.last_failure == AIRDAP_WIFI_MANAGER_FAILURE_TRANSIENT);
+    assert(info.last_disconnect_reason == WIFI_REASON_BEACON_TIMEOUT);
+    assert(info.retry_delay_ms == 1000U);
+    assert(info.retry_scheduled);
+    assert(!info.ipv4_available);
+    assert(!info.ap_available);
 
     retry_timer.active = false;
     retry_timer.callback(retry_timer.argument);
@@ -409,6 +482,10 @@ int main(void)
     assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_DISCONNECTED);
     assert(retry_timer.active);
     assert(retry_timer.timeout_us == 2000000U);
+    assert(airdap_wifi_manager_get_info(&info) == ESP_OK);
+    assert(info.last_failure == AIRDAP_WIFI_MANAGER_FAILURE_AUTHENTICATION);
+    assert(info.last_disconnect_reason == WIFI_REASON_AUTH_FAIL);
+    assert(info.retry_delay_ms == 2000U);
 
     credentials = make_credentials("third-ap", "third-password");
     assert(airdap_wifi_manager_set_credentials(&credentials) == ESP_OK);
