@@ -10,6 +10,7 @@
 #include "airdap_debug_shell.h"
 #include "airdap_debug_shell_commands.h"
 #include "airdap_debug_shell_config_status.h"
+#include "airdap_debug_shell_diagnostics.h"
 #include "airdap_debug_shell_identity.h"
 #include "airdap_debug_shell_input.h"
 #include "airdap_debug_shell_swd_probe.h"
@@ -1037,6 +1038,9 @@ esp_err_t airdap_debug_shell_start(void)
             AIRDAP_DEBUG_SHELL_COMMAND_REGISTERED) {
             return ESP_ERR_INVALID_STATE;
         }
+    }
+    if (!airdap_debug_shell_register_diagnostic_commands(&command_registry)) {
+        return ESP_ERR_INVALID_STATE;
     }
     airdap_debug_shell_command_registry_freeze(&command_registry);
 

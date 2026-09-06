@@ -517,8 +517,8 @@ run non-interactively:
 
 ```sh
 python tools/airdap-shell.py \
-    -c help -c identity -c config-status -c status -c "wifi status" \
-    -c "swd-idcode 100"
+    -c system-info -c memory-info -c mode-status -c ota-status \
+    -c target-status -c tasks
 ```
 
 `wifi set` is interactive-only so credentials cannot be supplied through shell
@@ -541,14 +541,34 @@ the device disconnects after its acknowledgement is delivered.
 
 The host tool makes Vendor Bulk communication behave like a raw text terminal.
 The firmware accepts printable ASCII, CR/LF line endings, backspace/delete,
-Ctrl-C, Tab, and ANSI navigation sequences. Available commands are:
+Ctrl-C, Tab, and ANSI navigation sequences. `help` lists every registered
+command with a one-line summary; `help <command>` prints its usage and full
+description. Command descriptors are registered during shell startup, so a
+command group can be defined and registered from its own source file without
+extending a single global command table. Available commands are:
 
-- `help` — list commands;
+- `help [command]` — list commands or show detailed help for one command;
 - `identity` — print the USB serial, device ID, UUID, firmware and protocol
   versions, and capability bits from the shared device identity;
 - `config-status` — print only the configuration schema and provisioning state;
   credential values are never included;
 - `status` — print `target_mv`, `usb_vbus_mv`, `uptime_ms`, and `free_heap`;
+- `system-info` — print firmware and ESP-IDF versions, uptime, chip model,
+  revision, core count, feature bits, and the previous reset reason;
+- `memory-info` — print total, free, historical minimum-free, and largest-free
+  block sizes for default, internal, DMA, and SPI RAM heap capabilities; these
+  capability categories can overlap and should not be summed;
+- `mode-status` — print USB presence, Wi-Fi, provisioning, OTA, and DAP-owner
+  state from the shared runtime snapshot;
+- `ota-status` — print running version, OTA protocol/session/rollback state,
+  running image state, and running/boot partition metadata without starting an
+  update;
+- `target-status` — read target power-active status, target/USB voltage, and
+  DAP ownership without changing target pin direction or level;
+- `tasks` — take a bounded FreeRTOS task snapshot and print task number, name,
+  state, core affinity, current/base priorities, stack high-water mark in free
+  bytes, cumulative run time, and dual-core-normalized CPU percentage, sorted
+  by cumulative run time;
 - `wifi status` — print `wifi=stopped`, `disconnected`, `connecting`, or
   `online` without displaying credentials;
 - `wifi set` — interactively replace the stored SSID and password, reset
@@ -558,6 +578,19 @@ Ctrl-C, Tab, and ANSI navigation sequences. Available commands are:
   target DP IDCODE at 100 kHz by default; accepted clocks are 100–10,000 kHz;
 - `restart` — wait for the acknowledgement transfer to complete, then restart
   AirDAP; a bounded transfer timeout leaves the firmware running.
+
+The `tasks` CPU values are cumulative since boot, rather than a sampled moving
+average. On this two-core target, percentages use the combined capacity of both
+cores, so the rows normally total close to 100%. Capturing the snapshot pauses
+scheduling on both cores while it copies task metadata and scans stack
+high-water marks, and is capped at 48 tasks. This debug-only operation can cause
+a perceptible scheduling and USB latency spike, especially with many or large
+task stacks. The debug-shell configuration also enables per-task run-time
+accounting; the standard build keeps both the shell and that bookkeeping
+disabled. `sdkconfig.debug-shell.defaults` selects a 64-bit, 1 MHz ESP Timer
+counter, so values use the `runtime_us` suffix and long-running debug sessions
+do not quickly wrap it. A manually selected alternative clock is reported with
+a `runtime_ticks` suffix instead.
 
 When OpenOCD or another CMSIS-DAP client owns SWD, `swd-idcode` returns `busy`
 without driving the target. After every successful, failed, or USB-detached
@@ -604,8 +637,9 @@ for suite in \
     dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame discovery \
     dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning \
     target_uart usb_descriptors project_version \
-    debug_shell_config_status debug_shell_identity debug_shell_input debug_shell_wifi \
-    debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update \
+    debug_shell_commands debug_shell_diagnostics debug_shell_config_status \
+    debug_shell_identity debug_shell_input debug_shell_wifi debug_shell_swd_probe \
+    debug_shell_tx_state airdap_shell airdap_update \
     airdap_provision wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
     cmake --build "build-host/$suite"

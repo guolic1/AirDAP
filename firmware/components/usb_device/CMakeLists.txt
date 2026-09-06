@@ -4,6 +4,8 @@ set(usb_device_sources
     "usb_device.c"
 )
 set(usb_device_private_requires
+    app_update
+    board
     config_store
     dap_ownership
     dap_protocol
@@ -13,8 +15,10 @@ set(usb_device_private_requires
     esp_tinyusb
     esp_timer
     freertos
+    heap
     log
     mode_state
+    ota_manager
     swd_engine
     target_uart
     voltage_monitor
@@ -30,6 +34,7 @@ if(CONFIG_AIRDAP_DEBUG_SHELL)
         "debug_shell.c"
         "debug_shell_commands.c"
         "debug_shell_config_status.c"
+        "debug_shell_diagnostics.c"
         "debug_shell_identity.c"
         "debug_shell_input.c"
         "debug_shell_swd_probe.c"
