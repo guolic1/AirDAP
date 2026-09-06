@@ -31,12 +31,16 @@
 enum {
     TASK_DIAGNOSTIC_LIMIT = 48,
     TASK_NAME_COLUMN_WIDTH = configMAX_TASK_NAME_LEN,
+    TASK_SAMPLE_MIN_MS = 100,
+    TASK_SAMPLE_MAX_MS = 5000,
 };
 
 #if CONFIG_FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER
 #define TASK_RUNTIME_FIELD "runtime_us"
+#define TASK_RUNTIME_DELTA_FIELD "runtime_delta_us"
 #else
 #define TASK_RUNTIME_FIELD "runtime_ticks"
+#define TASK_RUNTIME_DELTA_FIELD "runtime_delta_ticks"
 #endif
 
 typedef struct {
@@ -57,7 +61,7 @@ typedef struct {
 } task_snapshot_guard_t;
 
 static TaskStatus_t task_status_buffer[TASK_DIAGNOSTIC_LIMIT];
-static task_diagnostic_t task_diagnostic_buffer[TASK_DIAGNOSTIC_LIMIT];
+static task_diagnostic_t task_diagnostic_buffers[2][TASK_DIAGNOSTIC_LIMIT];
 
 /* TaskStatus_t names borrow storage from their TCBs. Keep both schedulers
  * suspended until those names have been copied so an idle task on the other
@@ -676,16 +680,56 @@ static void sort_tasks_by_runtime(task_diagnostic_t *tasks, size_t count)
     }
 }
 
-static int tasks_command(
+static bool parse_task_interval(
     const char *arguments,
-    const airdap_debug_shell_invocation_t *invocation,
-    void *context)
+    bool *sampled,
+    uint32_t *interval_ms)
 {
-    (void) context;
-    if (!has_no_arguments(arguments)) {
-        return usage_error(invocation, "tasks");
+    if (arguments == NULL || sampled == NULL || interval_ms == NULL) {
+        return false;
+    }
+    if (arguments[0] == '\0') {
+        *sampled = false;
+        *interval_ms = 0U;
+        return true;
     }
 
+    static const char prefix[] = "--interval ";
+    if (strncmp(arguments, prefix, sizeof(prefix) - 1U) != 0) {
+        return false;
+    }
+    const char *cursor = arguments + sizeof(prefix) - 1U;
+    if (*cursor == '\0') {
+        return false;
+    }
+
+    uint32_t value = 0U;
+    while (*cursor != '\0') {
+        if (*cursor < '0' || *cursor > '9') {
+            return false;
+        }
+        const uint32_t digit = (uint32_t) (*cursor - '0');
+        if (value > (UINT32_MAX - digit) / 10U) {
+            return false;
+        }
+        value = value * 10U + digit;
+        ++cursor;
+    }
+    if (value < TASK_SAMPLE_MIN_MS || value > TASK_SAMPLE_MAX_MS) {
+        return false;
+    }
+
+    *sampled = true;
+    *interval_ms = value;
+    return true;
+}
+
+static bool capture_task_snapshot(
+    const airdap_debug_shell_invocation_t *invocation,
+    task_diagnostic_t tasks[TASK_DIAGNOSTIC_LIMIT],
+    UBaseType_t *task_count,
+    uint64_t *total_runtime)
+{
     task_snapshot_guard_t guard;
     const esp_err_t guard_error = task_snapshot_guard_enter(&guard);
     if (guard_error != ESP_OK) {
@@ -694,7 +738,7 @@ static int tasks_command(
             AIRDAP_DEBUG_SHELL_STYLE_ERROR,
             "tasks: unable to suspend both schedulers: %s\n",
             esp_err_to_name(guard_error));
-        return 1;
+        return false;
     }
 
     const UBaseType_t reported_count = uxTaskGetNumberOfTasks();
@@ -706,74 +750,128 @@ static int tasks_command(
             "tasks: task count %u exceeds diagnostic limit %u\n",
             (unsigned int) reported_count,
             (unsigned int) TASK_DIAGNOSTIC_LIMIT);
-        return 1;
+        return false;
     }
 
-    configRUN_TIME_COUNTER_TYPE total_runtime = 0;
-    const UBaseType_t task_count = uxTaskGetSystemState(
+    configRUN_TIME_COUNTER_TYPE captured_total_runtime = 0;
+    const UBaseType_t captured_count = uxTaskGetSystemState(
         task_status_buffer,
         TASK_DIAGNOSTIC_LIMIT,
-        &total_runtime);
-    if (task_count == 0U || task_count > TASK_DIAGNOSTIC_LIMIT) {
+        &captured_total_runtime);
+    if (captured_count == 0U || captured_count > TASK_DIAGNOSTIC_LIMIT) {
         task_snapshot_guard_exit(&guard);
         airdap_debug_shell_printf(
             invocation,
             AIRDAP_DEBUG_SHELL_STYLE_ERROR,
             "tasks: unable to capture a stable task snapshot\n");
-        return 1;
+        return false;
     }
 
-    for (UBaseType_t index = 0U; index < task_count; ++index) {
-        copy_task_diagnostic(
-            &task_diagnostic_buffer[index],
-            &task_status_buffer[index]);
+    for (UBaseType_t index = 0U; index < captured_count; ++index) {
+        copy_task_diagnostic(&tasks[index], &task_status_buffer[index]);
     }
     task_snapshot_guard_exit(&guard);
-    sort_tasks_by_runtime(task_diagnostic_buffer, task_count);
+    *task_count = captured_count;
+    *total_runtime = (uint64_t) captured_total_runtime;
+    return true;
+}
 
+static uint64_t task_runtime_delta(
+    const task_diagnostic_t *task,
+    const task_diagnostic_t *previous,
+    UBaseType_t previous_count)
+{
+    for (UBaseType_t index = 0U; index < previous_count; ++index) {
+        if (previous[index].number == task->number &&
+            strcmp(previous[index].name, task->name) == 0) {
+            return task->runtime >= previous[index].runtime
+                ? task->runtime - previous[index].runtime
+                : 0U;
+        }
+    }
+    return 0U;
+}
+
+static void convert_to_task_runtime_deltas(
+    task_diagnostic_t *current,
+    UBaseType_t current_count,
+    const task_diagnostic_t *previous,
+    UBaseType_t previous_count)
+{
+    for (UBaseType_t index = 0U; index < current_count; ++index) {
+        current[index].runtime = task_runtime_delta(
+            &current[index],
+            previous,
+            previous_count);
+    }
+}
+
+static void print_task_table(
+    const airdap_debug_shell_invocation_t *invocation,
+    task_diagnostic_t *tasks,
+    UBaseType_t task_count,
+    uint64_t total_runtime,
+    bool sampled,
+    uint32_t interval_ms)
+{
+    sort_tasks_by_runtime(tasks, task_count);
+    if (sampled) {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+            "tasks=%u sample_ms=%" PRIu32 " total_delta_"
+            TASK_RUNTIME_FIELD "=%" PRIu64 " cpu_capacity_cores=%u\n",
+            (unsigned int) task_count,
+            interval_ms,
+            total_runtime,
+            (unsigned int) CONFIG_FREERTOS_NUMBER_OF_CORES);
+    } else {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+            "tasks=%u total_" TASK_RUNTIME_FIELD "=%" PRIu64
+            " cpu_capacity_cores=%u\n",
+            (unsigned int) task_count,
+            total_runtime,
+            (unsigned int) CONFIG_FREERTOS_NUMBER_OF_CORES);
+    }
     airdap_debug_shell_printf(
         invocation,
         AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
-        "tasks=%u total_" TASK_RUNTIME_FIELD "=%" PRIu64
-        " cpu_capacity_cores=%u\n",
-        (unsigned int) task_count,
-        (uint64_t) total_runtime,
-        (unsigned int) CONFIG_FREERTOS_NUMBER_OF_CORES);
-    airdap_debug_shell_printf(
-        invocation,
-        AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
-        "%-10s %-*s %-9s %-4s %-10s %-13s %-16s %-20s %s\n",
+        "%-10s %-*s %-9s %-8s %-10s %-13s %-16s %-20s %s\n",
         "number",
         TASK_NAME_COLUMN_WIDTH,
         "name",
         "state",
-        "core",
+        "affinity",
         "priority",
         "base_priority",
         "stack_free_bytes",
-        TASK_RUNTIME_FIELD,
+        sampled ? TASK_RUNTIME_DELTA_FIELD : TASK_RUNTIME_FIELD,
         "cpu_pct");
     for (UBaseType_t index = 0U; index < task_count; ++index) {
-        const task_diagnostic_t *task = &task_diagnostic_buffer[index];
-        const uint32_t cpu = cpu_basis_points(
-            task->runtime,
-            (uint64_t) total_runtime);
-        char core[12];
+        const task_diagnostic_t *task = &tasks[index];
+        const uint32_t cpu = cpu_basis_points(task->runtime, total_runtime);
+        char affinity[12];
         if (task->core_id == tskNO_AFFINITY) {
-            (void) snprintf(core, sizeof(core), "any");
+            (void) snprintf(affinity, sizeof(affinity), "any");
         } else {
-            (void) snprintf(core, sizeof(core), "%d", (int) task->core_id);
+            (void) snprintf(
+                affinity,
+                sizeof(affinity),
+                "%d",
+                (int) task->core_id);
         }
         airdap_debug_shell_printf(
             invocation,
             AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
-            "%-10u %-*s %-9s %-4s %-10u %-13u %-16" PRIu64
+            "%-10u %-*s %-9s %-8s %-10u %-13u %-16" PRIu64
             " %-20" PRIu64 " %" PRIu32 ".%02" PRIu32 "\n",
             (unsigned int) task->number,
             TASK_NAME_COLUMN_WIDTH,
             task->name,
             task_state_name(task->state),
-            core,
+            affinity,
             (unsigned int) task->priority,
             (unsigned int) task->base_priority,
             task->stack_free_bytes,
@@ -781,6 +879,61 @@ static int tasks_command(
             cpu / 100U,
             cpu % 100U);
     }
+}
+
+static int tasks_command(
+    const char *arguments,
+    const airdap_debug_shell_invocation_t *invocation,
+    void *context)
+{
+    (void) context;
+    bool sampled;
+    uint32_t interval_ms;
+    if (!parse_task_interval(arguments, &sampled, &interval_ms)) {
+        return usage_error(invocation, "tasks [--interval <ms>]");
+    }
+
+    UBaseType_t first_count;
+    uint64_t first_total_runtime;
+    if (!capture_task_snapshot(
+            invocation,
+            task_diagnostic_buffers[0],
+            &first_count,
+            &first_total_runtime)) {
+        return 1;
+    }
+
+    task_diagnostic_t *output_tasks = task_diagnostic_buffers[0];
+    UBaseType_t output_count = first_count;
+    uint64_t output_total_runtime = first_total_runtime;
+    if (sampled) {
+        vTaskDelay(pdMS_TO_TICKS(interval_ms));
+        uint64_t second_total_runtime;
+        if (!capture_task_snapshot(
+                invocation,
+                task_diagnostic_buffers[1],
+                &output_count,
+                &second_total_runtime)) {
+            return 1;
+        }
+        output_tasks = task_diagnostic_buffers[1];
+        convert_to_task_runtime_deltas(
+            output_tasks,
+            output_count,
+            task_diagnostic_buffers[0],
+            first_count);
+        output_total_runtime = second_total_runtime >= first_total_runtime
+            ? second_total_runtime - first_total_runtime
+            : 0U;
+    }
+
+    print_task_table(
+        invocation,
+        output_tasks,
+        output_count,
+        output_total_runtime,
+        sampled,
+        interval_ms);
     return 0;
 }
 
@@ -834,13 +987,14 @@ static const airdap_debug_shell_command_t diagnostic_commands[] = {
     },
     {
         .name = "tasks",
-        .usage = "tasks",
+        .usage = "tasks [--interval <ms>]",
         .summary = "Analyze FreeRTOS task state, stack, and CPU time",
         .details =
-            "Takes a bounded task snapshot and sorts it by cumulative runtime. "
-            "CPU percentage is normalized across both cores since boot; stack "
-            "high-water marks are free bytes. Scheduling is suspended on both "
-            "cores while the snapshot and task names are copied.",
+            "Takes a bounded task snapshot and sorts it by runtime. With "
+            "--interval, samples 100-5000 ms and reports recent deltas; without "
+            "it, CPU time is cumulative since boot. Core values are affinities, "
+            "and stack high-water marks are free bytes. Each snapshot briefly "
+            "suspends scheduling on both cores while task names are copied.",
         .handler = tasks_command,
     },
 };

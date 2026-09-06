@@ -29,3 +29,4 @@ UBaseType_t uxTaskGetSystemState(
     configRUN_TIME_COUNTER_TYPE *total_runtime);
 void vTaskSuspendAll(void);
 BaseType_t xTaskResumeAll(void);
+void vTaskDelay(TickType_t ticks_to_delay);

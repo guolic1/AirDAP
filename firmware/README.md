@@ -562,10 +562,12 @@ extending a single global command table. Available commands are:
   update;
 - `target-status` — read target power-active status, target/USB voltage, and
   DAP ownership without changing target pin direction or level;
-- `tasks` — take a bounded FreeRTOS task snapshot and print task number, name,
-  state, core affinity, current/base priorities, stack high-water mark in free
-  bytes, cumulative run time, and dual-core-normalized CPU percentage, sorted
-  by cumulative run time;
+- `tasks [--interval <ms>]` — take a bounded FreeRTOS task snapshot and print
+  task number, name, state, core affinity, current/base priorities, stack
+  high-water mark in free bytes, run time, and dual-core-normalized CPU
+  percentage, sorted by run time;
+  values are cumulative without arguments, while a 100–5000 ms interval reports
+  deltas over that sampling window;
 - `dap-stats` — print DAP service request, response, queue saturation, timeout,
   stale-work, and delivery-failure counters without resetting them;
 - `wifi status` — print `wifi=stopped`, `disconnected`, `connecting`, or
@@ -578,18 +580,22 @@ extending a single global command table. Available commands are:
 - `restart` — wait for the acknowledgement transfer to complete, then restart
   AirDAP; a bounded transfer timeout leaves the firmware running.
 
-The `tasks` CPU values are cumulative since boot, rather than a sampled moving
-average. On this two-core target, percentages use the combined capacity of both
-cores, so the rows normally total close to 100%. Capturing the snapshot pauses
-scheduling on both cores while it copies task metadata and scans stack
+Without `--interval`, the `tasks` CPU values are cumulative since boot. With an
+interval, the command takes two snapshots and reports the difference; scheduling
+runs normally between snapshots. Tasks created during the interval have a zero
+delta, and tasks deleted before the second snapshot are omitted. On this two-core
+target, percentages use the combined capacity of both cores, so the rows normally
+total close to 100%. The `affinity` column is the allowed core, not necessarily
+the core on which an unpinned task was executing at capture time. Each snapshot
+pauses scheduling on both cores while it copies task metadata and scans stack
 high-water marks, and is capped at 48 tasks. This debug-only operation can cause
 a perceptible scheduling and USB latency spike, especially with many or large
 task stacks. The debug-shell configuration also enables per-task run-time
 accounting; the standard build keeps both the shell and that bookkeeping
 disabled. `sdkconfig.debug-shell.defaults` selects a 64-bit, 1 MHz ESP Timer
-counter, so values use the `runtime_us` suffix and long-running debug sessions
-do not quickly wrap it. A manually selected alternative clock is reported with
-a `runtime_ticks` suffix instead.
+counter, so values use the `runtime_us` or `runtime_delta_us` suffix and
+long-running debug sessions do not quickly wrap it. A manually selected
+alternative clock uses `runtime_ticks` or `runtime_delta_ticks` instead.
 
 When OpenOCD or another CMSIS-DAP client owns SWD, `swd-idcode` returns `busy`
 without driving the target. After every successful, failed, or USB-detached

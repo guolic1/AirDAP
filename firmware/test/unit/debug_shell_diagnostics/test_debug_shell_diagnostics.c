@@ -53,6 +53,8 @@ static void *ipc_context;
 static atomic_bool ipc_started;
 static atomic_uint suspended_scheduler_count;
 static atomic_uint maximum_suspended_scheduler_count;
+static bool advance_task_runtime_on_delay;
+static TickType_t last_delay_ticks;
 
 static void capture_vprintf(
     airdap_debug_shell_style_t style,
@@ -293,6 +295,23 @@ BaseType_t xTaskResumeAll(void)
     return pdFALSE;
 }
 
+void vTaskDelay(TickType_t ticks_to_delay)
+{
+    assert(atomic_load(&suspended_scheduler_count) == 0U);
+    last_delay_ticks = ticks_to_delay;
+    if (!advance_task_runtime_on_delay) {
+        return;
+    }
+
+    const TaskStatus_t first = task_statuses[0];
+    task_statuses[0] = task_statuses[2];
+    task_statuses[2] = first;
+    task_statuses[0].ulRunTimeCounter += UINT64_C(50000);
+    task_statuses[1].ulRunTimeCounter += UINT64_C(100000);
+    task_statuses[2].ulRunTimeCounter += UINT64_C(50000);
+    task_total_runtime += UINT64_C(100000);
+}
+
 static void *run_ipc_callback(void *context)
 {
     (void) context;
@@ -337,6 +356,8 @@ static void set_up(void)
     reported_task_count = 3U;
     captured_task_count = 3U;
     ipc_result = ESP_OK;
+    advance_task_runtime_on_delay = false;
+    last_delay_ticks = 0U;
     memset(&identity, 0, sizeof(identity));
     (void) snprintf(
         identity.usb_serial,
@@ -614,14 +635,41 @@ static void test_tasks_reports_runtime_stack_and_affinity(void)
     assert(strcmp(
         output.text,
         "tasks=3 total_runtime_us=1000000 cpu_capacity_cores=2\n"
-        "number     name             state     core priority   "
+        "number     name             state     affinity priority   "
         "base_priority stack_free_bytes runtime_us           cpu_pct\n"
-        "1          IDLE0            ready     0    0          "
+        "1          IDLE0            ready     0        0          "
         "0             512              1200000              60.00\n"
-        "8          wifi             blocked   0    5          "
+        "8          wifi             blocked   0        5          "
         "4             768              500000               25.00\n"
-        "12         task-name-12345  running   any  4          "
+        "12         task-name-12345  running   any      4          "
         "4             384              100000               5.00\n") == 0);
+    assert(atomic_load(&maximum_suspended_scheduler_count) == 2U);
+    wait_for_schedulers_to_resume();
+    assert(atomic_load(&suspended_scheduler_count) == 0U);
+}
+
+static void test_tasks_reports_interval_runtime_deltas(void)
+{
+    airdap_debug_shell_command_registry_t registry;
+    airdap_debug_shell_command_registry_init(&registry);
+    assert(airdap_debug_shell_register_diagnostic_commands(&registry));
+    advance_task_runtime_on_delay = true;
+
+    captured_output_t output = {0};
+    assert(run_command(&registry, "tasks", "--interval 1000", &output) == 0);
+    assert(last_delay_ticks == 1000U);
+    assert(strcmp(
+        output.text,
+        "tasks=3 sample_ms=1000 total_delta_runtime_us=100000 "
+        "cpu_capacity_cores=2\n"
+        "number     name             state     affinity priority   "
+        "base_priority stack_free_bytes runtime_delta_us     cpu_pct\n"
+        "1          IDLE0            ready     0        0          "
+        "0             512              100000               50.00\n"
+        "12         task-name-12345  running   any      4          "
+        "4             384              50000                25.00\n"
+        "8          wifi             blocked   0        5          "
+        "4             768              50000                25.00\n") == 0);
     assert(atomic_load(&maximum_suspended_scheduler_count) == 2U);
     wait_for_schedulers_to_resume();
     assert(atomic_load(&suspended_scheduler_count) == 0U);
@@ -636,7 +684,22 @@ static void test_commands_reject_arguments_with_usage(void)
     captured_output_t output = {0};
     assert(run_command(&registry, "tasks", "extra", &output) == 1);
     assert(output.last_style == AIRDAP_DEBUG_SHELL_STYLE_WARNING);
-    assert(strcmp(output.text, "usage: tasks\n") == 0);
+    assert(strcmp(output.text, "usage: tasks [--interval <ms>]\n") == 0);
+
+    static const char *const invalid[] = {
+        "--interval",
+        "--interval 99",
+        "--interval 5001",
+        "--interval 1s",
+        "--interval 1000 extra",
+    };
+    for (size_t index = 0U; index < sizeof(invalid) / sizeof(invalid[0]); ++index) {
+        output = (captured_output_t) {0};
+        assert(run_command(&registry, "tasks", invalid[index], &output) == 1);
+        assert(strcmp(
+            output.text,
+            "usage: tasks [--interval <ms>]\n") == 0);
+    }
 }
 
 static void test_tasks_reports_guard_capacity_and_snapshot_failures(void)
@@ -701,6 +764,8 @@ int main(void)
     test_mode_status_reports_config_read_failure();
     set_up();
     test_tasks_reports_runtime_stack_and_affinity();
+    set_up();
+    test_tasks_reports_interval_runtime_deltas();
     set_up();
     test_commands_reject_arguments_with_usage();
     set_up();
