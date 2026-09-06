@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Interactive host shell for the optional AirDAP Vendor Bulk interface."""
+"""Interactive host shell for the AirDAP Vendor Bulk interface."""
 
 from __future__ import annotations
 
@@ -102,8 +102,8 @@ class VendorShellTransport:
             interface = configuration[(DEBUG_INTERFACE, 0)]
         except (KeyError, IndexError) as error:
             raise ShellError(
-                "AirDAP debug interface is absent; build firmware with "
-                "sdkconfig.debug-shell.defaults"
+                "AirDAP debug interface is absent; rebuild the default firmware "
+                "or enable CONFIG_AIRDAP_DEBUG_SHELL"
             ) from error
 
         interface_class = (
@@ -442,7 +442,7 @@ def interactive_session(
 
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Open the optional AirDAP Vendor Bulk debug shell",
+        description="Open the AirDAP Vendor Bulk debug shell",
     )
     parser.add_argument("--serial", help="select one AirDAP by stable USB serial")
     parser.add_argument(

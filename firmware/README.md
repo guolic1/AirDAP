@@ -75,22 +75,12 @@ full source checkout is needed. The setup script does not remove submodules or
 tools downloaded by an older run; start with an empty `firmware/.airdap-env/`
 to reclaim that space.
 
-The default build keeps the debug shell disabled and preserves the existing
-CMSIS-DAP plus target-UART CDC layout. To build a separate debug variant with
-an additional Vendor Bulk interface:
-
-```sh
-idf.py -B build-debug-shell \
-    -D SDKCONFIG=build-debug-shell/sdkconfig \
-    -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.debug-shell.defaults' \
-    build
-```
-
-The same selection is available in `idf.py menuconfig`: set TinyUSB's Vendor
-interface count to 2, then enable `AirDAP USB device > Enable the USB Vendor
-Bulk debug shell`. The checked-in profile is preferred for reproducible
-builds. CMake stops with an error if the AirDAP option is enabled while TinyUSB
-has fewer than two Vendor interfaces. The CDC count remains one.
+The default build enables the debug shell while preserving the existing
+CMSIS-DAP plus target-UART CDC layout. A normal `idf.py build` appends the
+additional Vendor Bulk interface; no alternate SDKConfig profile is required.
+The same selection is available in `idf.py menuconfig`. CMake stops with an
+error if the AirDAP option is enabled while TinyUSB has fewer than two Vendor
+interfaces. The CDC count remains one.
 
 The main images are generated at:
 
@@ -488,9 +478,9 @@ authorization, resume, or network update support. Follow
 [`test/hil/usb_ota.md`](test/hil/usb_ota.md) before relying on update and
 rollback behavior on hardware.
 
-## Optional Vendor Bulk debug shell
+## Vendor Bulk debug shell
 
-The debug build preserves the existing USB assignments and appends the shell:
+The default build preserves the existing USB assignments and appends the shell:
 
 - interfaces 0, 1, and 2 remain CMSIS-DAP and `AirDAP Target UART`;
 - interface 3 is `AirDAP Debug Shell`, using Bulk OUT `0x04` and Bulk IN

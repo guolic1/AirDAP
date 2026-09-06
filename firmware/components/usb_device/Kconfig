@@ -8,8 +8,7 @@ menu "AirDAP USB device"
             diagnostics. The shell provides device status, Wi-Fi credential
             management, and restart commands, and mirrors ESP logs after the
             host starts a session. Set TinyUSB Vendor Interface Count to 2 when
-            enabling this option. The
-            checked-in sdkconfig.debug-shell.defaults profile sets both values
-            for reproducible debug builds.
+            enabling this option. The checked-in sdkconfig.defaults profile
+            sets both values for reproducible standard builds.
 
 endmenu
