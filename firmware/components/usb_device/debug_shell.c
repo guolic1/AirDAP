@@ -12,6 +12,7 @@
 #include "airdap_debug_shell_core_commands.h"
 #include "airdap_debug_shell_diagnostics.h"
 #include "airdap_debug_shell_input.h"
+#include "airdap_debug_shell_service_diagnostics.h"
 #include "airdap_debug_shell_swd_probe.h"
 #include "airdap_debug_shell_tx_state.h"
 #include "airdap_debug_shell_wifi.h"
@@ -850,6 +851,10 @@ esp_err_t airdap_debug_shell_start(void)
         return ESP_ERR_INVALID_STATE;
     }
     if (!airdap_debug_shell_register_diagnostic_commands(&command_registry)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!airdap_debug_shell_register_service_diagnostic_commands(
+            &command_registry)) {
         return ESP_ERR_INVALID_STATE;
     }
     airdap_debug_shell_command_registry_freeze(&command_registry);

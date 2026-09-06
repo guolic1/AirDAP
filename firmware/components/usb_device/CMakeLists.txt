@@ -38,6 +38,7 @@ if(CONFIG_AIRDAP_DEBUG_SHELL)
         "debug_shell_diagnostics.c"
         "debug_shell_identity.c"
         "debug_shell_input.c"
+        "debug_shell_service_diagnostics.c"
         "debug_shell_swd_probe.c"
         "debug_shell_tx_state.c"
         "debug_shell_wifi.c"

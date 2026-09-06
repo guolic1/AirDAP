@@ -13,6 +13,8 @@
 #include "airdap_debug_shell_commands.h"
 #include "airdap_debug_shell_diagnostics.h"
 #include "airdap_debug_shell_core_commands.h"
+#include "airdap_debug_shell_service_diagnostics.h"
+#include "airdap_dap_service.h"
 #include "airdap_device_identity.h"
 #include "airdap_mode_state.h"
 #include "airdap_ota.h"
@@ -40,6 +42,7 @@ static esp_partition_t boot_partition;
 static esp_ota_img_states_t running_image_state;
 static bool target_power_active;
 static airdap_voltage_reading_t voltage;
+static airdap_dap_service_stats_t dap_stats;
 static TaskStatus_t task_statuses[3];
 static configRUN_TIME_COUNTER_TYPE task_total_runtime;
 static UBaseType_t reported_task_count;
@@ -237,6 +240,11 @@ esp_err_t airdap_voltage_monitor_read(airdap_voltage_reading_t *reading)
     return ESP_OK;
 }
 
+void airdap_dap_service_get_stats(airdap_dap_service_stats_t *stats)
+{
+    *stats = dap_stats;
+}
+
 UBaseType_t uxTaskGetNumberOfTasks(void)
 {
     assert(atomic_load(&suspended_scheduler_count) == 2U);
@@ -379,6 +387,16 @@ static void set_up(void)
         .target_mv = 3301U,
         .usb_vbus_mv = 4998U,
     };
+    dap_stats = (airdap_dap_service_stats_t) {
+        .requests_accepted = 101U,
+        .requests_processed = 99U,
+        .responses_delivered = 97U,
+        .queue_full = 2U,
+        .timed_out = 3U,
+        .stale_requests = 4U,
+        .stale_responses = 5U,
+        .delivery_failures = 6U,
+    };
     task_statuses[0] = (TaskStatus_t) {
         .pcTaskName = "wifi",
         .xTaskNumber = 8U,
@@ -452,6 +470,7 @@ static void test_registers_complete_shell_without_legacy_duplicates(void)
 
     assert(airdap_debug_shell_register_core_commands(&registry));
     assert(airdap_debug_shell_register_diagnostic_commands(&registry));
+    assert(airdap_debug_shell_register_service_diagnostic_commands(&registry));
     static const char *const expected[] = {
         "help",
         "wifi",
@@ -463,6 +482,7 @@ static void test_registers_complete_shell_without_legacy_duplicates(void)
         "ota-status",
         "target-status",
         "tasks",
+        "dap-stats",
     };
     assert(airdap_debug_shell_command_count(&registry) ==
         sizeof(expected) / sizeof(expected[0]));
@@ -484,6 +504,26 @@ static void test_registers_complete_shell_without_legacy_duplicates(void)
             removed[index],
             strlen(removed[index])) == NULL);
     }
+}
+
+static void test_dap_stats_reports_all_service_counters(void)
+{
+    airdap_debug_shell_command_registry_t registry;
+    airdap_debug_shell_command_registry_init(&registry);
+    assert(airdap_debug_shell_register_service_diagnostic_commands(&registry));
+
+    captured_output_t output = {0};
+    assert(run_command(&registry, "dap-stats", "", &output) == 0);
+    assert(strcmp(
+        output.text,
+        "requests accepted=101 processed=99 responses_delivered=97\n"
+        "failures queue_full=2 timed_out=3 stale_requests=4 "
+        "stale_responses=5 delivery=6\n") == 0);
+
+    output = (captured_output_t) {0};
+    assert(run_command(&registry, "dap-stats", "extra", &output) == 1);
+    assert(output.last_style == AIRDAP_DEBUG_SHELL_STYLE_WARNING);
+    assert(strcmp(output.text, "usage: dap-stats\n") == 0);
 }
 
 static void test_system_memory_and_mode_diagnostics(void)
@@ -651,6 +691,8 @@ int main(void)
     test_registers_diagnostics_with_detailed_metadata();
     set_up();
     test_registers_complete_shell_without_legacy_duplicates();
+    set_up();
+    test_dap_stats_reports_all_service_counters();
     set_up();
     test_system_memory_and_mode_diagnostics();
     set_up();

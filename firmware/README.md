@@ -518,7 +518,7 @@ run non-interactively:
 ```sh
 python tools/airdap-shell.py \
     -c system-info -c memory-info -c mode-status -c ota-status \
-    -c target-status -c tasks
+    -c target-status -c tasks -c dap-stats
 ```
 
 `wifi set` is interactive-only so credentials cannot be supplied through shell
@@ -566,6 +566,8 @@ extending a single global command table. Available commands are:
   state, core affinity, current/base priorities, stack high-water mark in free
   bytes, cumulative run time, and dual-core-normalized CPU percentage, sorted
   by cumulative run time;
+- `dap-stats` — print DAP service request, response, queue saturation, timeout,
+  stale-work, and delivery-failure counters without resetting them;
 - `wifi status` — print `wifi=stopped`, `disconnected`, `connecting`, or
   `online` without displaying credentials;
 - `wifi set` — interactively replace the stored SSID and password, reset

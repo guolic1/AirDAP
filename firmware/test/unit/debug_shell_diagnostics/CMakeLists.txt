@@ -13,6 +13,7 @@ add_executable(
     ../../../components/usb_device/debug_shell_core_commands.c
     ../../../components/usb_device/debug_shell_diagnostics.c
     ../../../components/usb_device/debug_shell_identity.c
+    ../../../components/usb_device/debug_shell_service_diagnostics.c
 )
 target_include_directories(
     debug_shell_diagnostics_test
@@ -21,6 +22,7 @@ target_include_directories(
         ../../../components/board/include
         ../../../components/config_store/include
         ../../../components/dap_ownership/include
+        ../../../components/dap_service/include
         ../../../components/device_identity/include
         ../../../components/mode_state/include
         ../../../components/ota_manager/include
