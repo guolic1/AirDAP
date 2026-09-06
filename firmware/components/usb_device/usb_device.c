@@ -16,6 +16,7 @@
 #include "airdap_target_uart.h"
 #include "airdap_usb.h"
 #include "airdap_usb_descriptors.h"
+#include "airdap_usb_status.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -36,6 +37,25 @@ static airdap_dap_stream_t dap_stream;
 static uint8_t dap_usb_read_buffer[AIRDAP_DAP_BUFFER_SIZE];
 static atomic_uint usb_session;
 static atomic_uintptr_t next_response_token = 1U;
+
+void airdap_usb_get_status(airdap_usb_status_t *status)
+{
+    if (status == NULL) {
+        return;
+    }
+    *status = (airdap_usb_status_t) {
+        .bus_mounted = tud_mounted(),
+        .suspended = tud_suspended(),
+        .dap_vendor_mounted = tud_vendor_n_mounted(0U),
+        .target_cdc_connected = tud_cdc_n_connected(0U),
+#if CONFIG_AIRDAP_DEBUG_SHELL
+        .debug_vendor_mounted = tud_vendor_n_mounted(1U),
+#else
+        .debug_vendor_mounted = false,
+#endif
+        .dap_session_active = atomic_load(&usb_session) != 0U,
+    };
+}
 
 static bool send_usb_response(
     void *context,

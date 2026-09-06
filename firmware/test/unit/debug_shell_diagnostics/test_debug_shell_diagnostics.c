@@ -18,6 +18,7 @@
 #include "airdap_device_identity.h"
 #include "airdap_mode_state.h"
 #include "airdap_ota.h"
+#include "airdap_usb_status.h"
 #include "airdap_voltage_monitor.h"
 #include "airdap_wifi_manager.h"
 #include "esp_chip_info.h"
@@ -46,6 +47,7 @@ static airdap_voltage_reading_t voltage;
 static airdap_dap_service_stats_t dap_stats;
 static airdap_wifi_manager_info_t wifi_info;
 static esp_err_t wifi_info_result;
+static airdap_usb_status_t usb_status;
 static TaskStatus_t task_statuses[3];
 static configRUN_TIME_COUNTER_TYPE task_total_runtime;
 static UBaseType_t reported_task_count;
@@ -258,6 +260,11 @@ esp_err_t airdap_wifi_manager_get_info(airdap_wifi_manager_info_t *info)
     return wifi_info_result;
 }
 
+void airdap_usb_get_status(airdap_usb_status_t *status)
+{
+    *status = usb_status;
+}
+
 UBaseType_t uxTaskGetNumberOfTasks(void)
 {
     assert(atomic_load(&suspended_scheduler_count) == 2U);
@@ -447,6 +454,14 @@ static void set_up(void)
         .channel = 6U,
     };
     wifi_info_result = ESP_OK;
+    usb_status = (airdap_usb_status_t) {
+        .bus_mounted = true,
+        .suspended = false,
+        .dap_vendor_mounted = true,
+        .target_cdc_connected = false,
+        .debug_vendor_mounted = true,
+        .dap_session_active = true,
+    };
     task_statuses[0] = (TaskStatus_t) {
         .pcTaskName = "wifi",
         .xTaskNumber = 8U,
@@ -534,6 +549,7 @@ static void test_registers_complete_shell_without_legacy_duplicates(void)
         "tasks",
         "dap-stats",
         "network-info",
+        "usb-status",
     };
     assert(airdap_debug_shell_command_count(&registry) ==
         sizeof(expected) / sizeof(expected[0]));
@@ -555,6 +571,25 @@ static void test_registers_complete_shell_without_legacy_duplicates(void)
             removed[index],
             strlen(removed[index])) == NULL);
     }
+}
+
+static void test_usb_status_reports_bus_interfaces_and_session(void)
+{
+    airdap_debug_shell_command_registry_t registry;
+    airdap_debug_shell_command_registry_init(&registry);
+    assert(airdap_debug_shell_register_service_diagnostic_commands(&registry));
+
+    captured_output_t output = {0};
+    assert(run_command(&registry, "usb-status", "", &output) == 0);
+    assert(strcmp(
+        output.text,
+        "bus_mounted=yes suspended=no dap_vendor_mounted=yes "
+        "target_cdc_connected=no debug_vendor_mounted=yes "
+        "dap_session_active=yes\n") == 0);
+
+    output = (captured_output_t) {0};
+    assert(run_command(&registry, "usb-status", "extra", &output) == 1);
+    assert(strcmp(output.text, "usage: usb-status\n") == 0);
 }
 
 static void test_network_info_reports_non_secret_runtime_state(void)
@@ -830,6 +865,8 @@ int main(void)
     test_dap_stats_reports_all_service_counters();
     set_up();
     test_network_info_reports_non_secret_runtime_state();
+    set_up();
+    test_usb_status_reports_bus_interfaces_and_session();
     set_up();
     test_system_memory_and_mode_diagnostics();
     set_up();

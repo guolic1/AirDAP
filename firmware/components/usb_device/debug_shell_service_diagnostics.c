@@ -5,6 +5,7 @@
 #include "airdap_debug_shell_commands.h"
 #include "airdap_debug_shell_service_diagnostics.h"
 #include "airdap_mode_state.h"
+#include "airdap_usb_status.h"
 #include "airdap_wifi_manager.h"
 #include "esp_err.h"
 
@@ -164,6 +165,37 @@ static int network_info_command(
     return 0;
 }
 
+static int usb_status_command(
+    const char *arguments,
+    const airdap_debug_shell_invocation_t *invocation,
+    void *context)
+{
+    (void) context;
+    if (arguments == NULL || arguments[0] != '\0') {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_WARNING,
+            "usage: usb-status\n");
+        return 1;
+    }
+
+    airdap_usb_status_t status;
+    airdap_usb_get_status(&status);
+    airdap_debug_shell_printf(
+        invocation,
+        AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+        "bus_mounted=%s suspended=%s dap_vendor_mounted=%s "
+        "target_cdc_connected=%s debug_vendor_mounted=%s "
+        "dap_session_active=%s\n",
+        status.bus_mounted ? "yes" : "no",
+        status.suspended ? "yes" : "no",
+        status.dap_vendor_mounted ? "yes" : "no",
+        status.target_cdc_connected ? "yes" : "no",
+        status.debug_vendor_mounted ? "yes" : "no",
+        status.dap_session_active ? "yes" : "no");
+    return 0;
+}
+
 static const airdap_debug_shell_command_t service_diagnostic_commands[] = {
     {
         .name = "dap-stats",
@@ -184,6 +216,16 @@ static const airdap_debug_shell_command_t service_diagnostic_commands[] = {
             "failure class, retry state, IPv4 addressing, RSSI, and channel. "
             "SSID, BSSID, passwords, and authentication material are omitted.",
         .handler = network_info_command,
+    },
+    {
+        .name = "usb-status",
+        .usage = "usb-status",
+        .summary = "Show USB bus, interface, and DAP session state",
+        .details =
+            "Reports TinyUSB mount and suspend state, the DAP Vendor, target "
+            "CDC, and debug Vendor interfaces, and whether a USB DAP service "
+            "session is active without changing the USB connection.",
+        .handler = usb_status_command,
     },
 };
 
