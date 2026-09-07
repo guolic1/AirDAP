@@ -490,17 +490,22 @@ static void release_handshake_slot(void)
 static int complete_tls_handshake(
     esp_tls_cfg_server_t *config,
     int socket_fd,
-    esp_tls_t *tls)
+    esp_tls_t *tls,
+    int64_t deadline_us)
 {
     int result = esp_tls_server_session_init(config, socket_fd, tls);
     if (result != ESP_OK) {
         return result;
     }
-    const int64_t deadline_us = esp_timer_get_time() +
-        (int64_t) AIRDAP_NETWORK_AUTH_TLS_HANDSHAKE_TIMEOUT_MS * 1000;
     for (;;) {
+        if (esp_timer_get_time() >= deadline_us) {
+            return ESP_FAIL;
+        }
         result = esp_tls_server_session_continue_async(tls);
         if (result == ESP_OK) {
+            if (esp_timer_get_time() >= deadline_us) {
+                return ESP_FAIL;
+            }
             return esp_tls_set_conn_state(tls, ESP_TLS_DONE);
         }
         if (result != ESP_TLS_ERR_SSL_WANT_READ &&
@@ -566,6 +571,8 @@ airdap_network_auth_result_t airdap_network_auth_tls_accept(
         return AIRDAP_NETWORK_AUTH_BUSY;
     }
     ++pending_handshakes;
+    const int64_t handshake_deadline_us = esp_timer_get_time() +
+        (int64_t) AIRDAP_NETWORK_AUTH_TLS_HANDSHAKE_TIMEOUT_MS * 1000;
     candidate->credential_generation = active_credential.generation;
     memcpy(candidate->psk, active_credential.psk, sizeof(candidate->psk));
     memcpy(candidate->credential_fingerprint,
@@ -615,7 +622,8 @@ airdap_network_auth_result_t airdap_network_auth_tls_accept(
     const int handshake_error = complete_tls_handshake(
         &config,
         socket_fd,
-        candidate->tls);
+        candidate->tls,
+        handshake_deadline_us);
     const bool socket_mode_restored = !restore_socket_flags ||
         fcntl(socket_fd, F_SETFL, socket_flags) == 0;
 

@@ -56,6 +56,12 @@ static bool rotate_during_handshake;
 static uint8_t rotated_key[AIRDAP_NETWORK_AUTH_PSK_SIZE];
 static bool socket_nonblocking;
 static unsigned poll_calls;
+static int poll_result;
+static int64_t poll_elapsed_us;
+static bool handshake_succeeds_after_poll;
+static unsigned handshake_continue_calls;
+static int64_t handshake_init_delay_us;
+static int64_t handshake_continue_delay_us;
 static pthread_mutex_t interleaving_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t interleaving_condition = PTHREAD_COND_INITIALIZER;
 static bool interleave_clear_and_pair;
@@ -88,9 +94,11 @@ int poll(struct pollfd *descriptors, nfds_t count, int timeout_ms)
     assert(timeout_ms > 0 && timeout_ms <=
         AIRDAP_NETWORK_AUTH_TLS_HANDSHAKE_TIMEOUT_MS);
     ++poll_calls;
-    now_us += (int64_t) timeout_ms * 1000;
+    now_us += poll_elapsed_us > 0
+        ? poll_elapsed_us
+        : (int64_t) timeout_ms * 1000;
     descriptors[0].revents = 0;
-    return 0;
+    return poll_result;
 }
 
 const airdap_device_identity_t *airdap_device_identity_get(void)
@@ -299,6 +307,8 @@ int esp_tls_server_session_init(
     assert(socket_nonblocking);
     assert_tls_config(config);
     ++handshake_calls;
+    handshake_continue_calls = 0U;
+    now_us += handshake_init_delay_us;
 
     if (rotate_during_handshake) {
         rotate_during_handshake = false;
@@ -332,6 +342,11 @@ int esp_tls_server_session_init(
 int esp_tls_server_session_continue_async(esp_tls_t *tls)
 {
     assert(tls != NULL && socket_nonblocking);
+    ++handshake_continue_calls;
+    now_us += handshake_continue_delay_us;
+    if (handshake_succeeds_after_poll && handshake_continue_calls > 1U) {
+        return ESP_OK;
+    }
     return handshake_result;
 }
 
@@ -509,6 +524,50 @@ static void test_handshake_failure_staleness_and_flood_cleanup(void)
     assert(airdap_network_auth_tls_read(connection, io, sizeof(io)) == 4);
     assert(airdap_network_auth_tls_write(connection, io, sizeof(io)) == 4);
     airdap_network_auth_connection_close(connection);
+    assert(tls_created == tls_deleted);
+}
+
+static void reset_handshake_deadline_controls(void)
+{
+    poll_result = 0;
+    poll_elapsed_us = 0;
+    handshake_succeeds_after_poll = false;
+    handshake_init_delay_us = 0;
+    handshake_continue_delay_us = 0;
+}
+
+static void test_handshake_deadline_is_absolute(void)
+{
+    airdap_network_auth_connection_t *connection = NULL;
+    const int64_t timeout_us =
+        (int64_t) AIRDAP_NETWORK_AUTH_TLS_HANDSHAKE_TIMEOUT_MS * 1000;
+
+    now_us = 1000;
+    handshake_result = ESP_TLS_ERR_SSL_WANT_READ;
+    poll_result = 1;
+    poll_elapsed_us = timeout_us + 1;
+    handshake_succeeds_after_poll = true;
+    assert(airdap_network_auth_tls_accept(7, &connection) ==
+        AIRDAP_NETWORK_AUTH_AUTHENTICATION_FAILED);
+    assert(connection == NULL && handshake_continue_calls == 1U);
+    reset_handshake_deadline_controls();
+
+    now_us = 2000;
+    handshake_result = ESP_OK;
+    handshake_init_delay_us = timeout_us + 1;
+    assert(airdap_network_auth_tls_accept(8, &connection) ==
+        AIRDAP_NETWORK_AUTH_AUTHENTICATION_FAILED);
+    assert(connection == NULL && handshake_continue_calls == 0U);
+    reset_handshake_deadline_controls();
+
+    now_us = 3000;
+    handshake_result = ESP_OK;
+    handshake_continue_delay_us = timeout_us + 1;
+    assert(airdap_network_auth_tls_accept(9, &connection) ==
+        AIRDAP_NETWORK_AUTH_AUTHENTICATION_FAILED);
+    assert(connection == NULL && handshake_continue_calls == 1U);
+    reset_handshake_deadline_controls();
+
     assert(tls_created == tls_deleted);
 }
 
@@ -787,6 +846,7 @@ int main(int argument_count, char **arguments)
 
     test_pairing_is_atomic_idempotent_and_versioned();
     test_handshake_failure_staleness_and_flood_cleanup();
+    test_handshake_deadline_is_absolute();
     test_single_owner_join_replay_rotation_and_repair();
     test_timeout_stale_token_and_network_clear_release_owner();
     test_clear_and_pair_commit_are_serialized();
