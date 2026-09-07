@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <stdatomic.h>
 #include <stdint.h>
 
 #include "airdap_board.h"
@@ -6,6 +7,8 @@
 #include "driver/gpio.h"
 
 #define AIRDAP_PIN_MASK(pin) (UINT64_C(1) << (pin))
+
+static atomic_bool boot_key_simulated_pressed;
 
 static esp_err_t configure_pins(uint64_t pin_mask, gpio_mode_t mode)
 {
@@ -110,7 +113,23 @@ esp_err_t airdap_boot_key_get_pressed(bool *pressed)
     if (pressed == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    *pressed = gpio_get_level((gpio_num_t) AIRDAP_PIN_BOOT_KEY) == 0;
+    *pressed = gpio_get_level((gpio_num_t) AIRDAP_PIN_BOOT_KEY) == 0 ||
+        atomic_load(&boot_key_simulated_pressed);
+    return ESP_OK;
+}
+
+esp_err_t airdap_boot_key_set_simulated_pressed(bool pressed)
+{
+    atomic_store(&boot_key_simulated_pressed, pressed);
+    return ESP_OK;
+}
+
+esp_err_t airdap_boot_key_get_simulated_pressed(bool *pressed)
+{
+    if (pressed == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *pressed = atomic_load(&boot_key_simulated_pressed);
     return ESP_OK;
 }
 

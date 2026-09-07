@@ -94,19 +94,39 @@ int gpio_get_level(gpio_num_t gpio_num)
     return input_level;
 }
 
-static void test_boot_key_uses_active_low_level(void)
+static void test_boot_key_combines_active_low_and_simulated_levels(void)
 {
     bool pressed = false;
+    bool simulated = true;
     reset_fake_gpio();
     input_pin = AIRDAP_PIN_BOOT_KEY;
 
+    assert(airdap_boot_key_get_simulated_pressed(&simulated) == ESP_OK);
+    assert(!simulated);
+
     input_level = 0;
+    assert(airdap_boot_key_set_simulated_pressed(false) == ESP_OK);
     assert(airdap_boot_key_get_pressed(&pressed) == ESP_OK);
     assert(pressed);
+
     input_level = 1;
     assert(airdap_boot_key_get_pressed(&pressed) == ESP_OK);
     assert(!pressed);
+
+    assert(airdap_boot_key_set_simulated_pressed(true) == ESP_OK);
+    assert(airdap_boot_key_get_pressed(&pressed) == ESP_OK);
+    assert(pressed);
+    assert(airdap_boot_key_get_simulated_pressed(&simulated) == ESP_OK);
+    assert(simulated);
+
+    input_level = 0;
+    assert(airdap_boot_key_set_simulated_pressed(false) == ESP_OK);
+    assert(airdap_boot_key_get_pressed(&pressed) == ESP_OK);
+    assert(pressed);
+
     assert(airdap_boot_key_get_pressed(NULL) == ESP_ERR_INVALID_ARG);
+    assert(airdap_boot_key_get_simulated_pressed(NULL) == ESP_ERR_INVALID_ARG);
+    input_level = 1;
 }
 
 static const event_t *find_level_event(gpio_num_t pin)
@@ -295,7 +315,7 @@ int main(void)
     test_target_power_active_reads_shared_status_net();
     test_target_reset_accounts_for_inverting_transistor();
     test_led_control_accounts_for_active_low_wiring();
-    test_boot_key_uses_active_low_level();
+    test_boot_key_combines_active_low_and_simulated_levels();
 
     puts("board safe-state tests passed");
     return 0;

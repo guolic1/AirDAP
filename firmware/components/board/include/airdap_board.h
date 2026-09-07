@@ -25,6 +25,11 @@ esp_err_t airdap_target_reset_set_asserted(bool asserted);
 /* BOOT_KEY is active low and doubles as the ROM download-mode strap. */
 esp_err_t airdap_boot_key_get_pressed(bool *pressed);
 
+/* Development-only RAM input used by USB HIL control. It is combined with the
+ * physical level and remains set until explicitly released or rebooted. */
+esp_err_t airdap_boot_key_set_simulated_pressed(bool pressed);
+esp_err_t airdap_boot_key_get_simulated_pressed(bool *pressed);
+
 /* Hide the active-low board wiring from user-visible LED state changes. */
 esp_err_t airdap_board_leds_set(bool status_on, bool network_on);
 
