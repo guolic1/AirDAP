@@ -1,6 +1,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdatomic.h>
+#include <string.h>
 
 #include "airdap_board_pins.h"
 #include "airdap_target_uart.h"
@@ -13,7 +15,53 @@ enum {
     TARGET_UART_MAX_BAUD = 5000000,
 };
 
-static bool initialized;
+static atomic_bool initialized;
+
+typedef struct {
+    atomic_uint sequence;
+    atomic_uint baud_rate;
+    atomic_uint data_bits;
+    atomic_uint parity;
+    atomic_uint stop_bits;
+    atomic_uint rx_bytes;
+    atomic_uint tx_bytes;
+    atomic_uint read_failures;
+    atomic_uint write_failures;
+} target_uart_diagnostic_state_t;
+
+static target_uart_diagnostic_state_t diagnostic_state;
+
+static void publish_configuration(
+    uint32_t baud_rate,
+    uint8_t stop_bits,
+    uint8_t parity,
+    uint8_t data_bits)
+{
+    (void) atomic_fetch_add_explicit(
+        &diagnostic_state.sequence,
+        1U,
+        memory_order_acq_rel);
+    atomic_store_explicit(
+        &diagnostic_state.baud_rate,
+        baud_rate,
+        memory_order_relaxed);
+    atomic_store_explicit(
+        &diagnostic_state.stop_bits,
+        stop_bits,
+        memory_order_relaxed);
+    atomic_store_explicit(
+        &diagnostic_state.parity,
+        parity,
+        memory_order_relaxed);
+    atomic_store_explicit(
+        &diagnostic_state.data_bits,
+        data_bits,
+        memory_order_relaxed);
+    (void) atomic_fetch_add_explicit(
+        &diagnostic_state.sequence,
+        1U,
+        memory_order_release);
+}
 
 static bool map_data_bits(uint8_t value, uart_word_length_t *data_bits)
 {
@@ -94,12 +142,16 @@ esp_err_t airdap_target_uart_configure(
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
-    return uart_param_config(TARGET_UART_PORT, &config);
+    const esp_err_t error = uart_param_config(TARGET_UART_PORT, &config);
+    if (error == ESP_OK) {
+        publish_configuration(baud_rate, stop_bits, parity, data_bits);
+    }
+    return error;
 }
 
 esp_err_t airdap_target_uart_init(void)
 {
-    if (initialized) {
+    if (atomic_load(&initialized)) {
         return ESP_OK;
     }
 
@@ -130,7 +182,61 @@ esp_err_t airdap_target_uart_init(void)
         NULL,
         0);
     if (error == ESP_OK) {
-        initialized = true;
+        atomic_store(&initialized, true);
+    }
+    return error;
+}
+
+esp_err_t airdap_target_uart_get_status(
+    airdap_target_uart_status_t *status)
+{
+    if (status == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(status, 0, sizeof(*status));
+
+    unsigned int before;
+    unsigned int after;
+    do {
+        before = atomic_load_explicit(
+            &diagnostic_state.sequence,
+            memory_order_acquire);
+        if ((before & 1U) != 0U) {
+            continue;
+        }
+        status->baud_rate = atomic_load_explicit(
+            &diagnostic_state.baud_rate,
+            memory_order_relaxed);
+        status->stop_bits = (uint8_t) atomic_load_explicit(
+            &diagnostic_state.stop_bits,
+            memory_order_relaxed);
+        status->parity = (uint8_t) atomic_load_explicit(
+            &diagnostic_state.parity,
+            memory_order_relaxed);
+        status->data_bits = (uint8_t) atomic_load_explicit(
+            &diagnostic_state.data_bits,
+            memory_order_relaxed);
+        after = atomic_load_explicit(
+            &diagnostic_state.sequence,
+            memory_order_acquire);
+    } while (before != after || (after & 1U) != 0U);
+
+    status->initialized = atomic_load(&initialized);
+    status->rx_bytes = atomic_load(&diagnostic_state.rx_bytes);
+    status->tx_bytes = atomic_load(&diagnostic_state.tx_bytes);
+    status->read_failures = atomic_load(&diagnostic_state.read_failures);
+    status->write_failures = atomic_load(&diagnostic_state.write_failures);
+    if (!status->initialized) {
+        return ESP_OK;
+    }
+
+    esp_err_t error = uart_get_buffered_data_len(
+        TARGET_UART_PORT,
+        &status->rx_buffered_bytes);
+    if (error == ESP_OK) {
+        error = uart_get_tx_buffer_free_size(
+            TARGET_UART_PORT,
+            &status->tx_buffer_free_bytes);
     }
     return error;
 }
@@ -140,16 +246,36 @@ int airdap_target_uart_read(
     size_t capacity,
     TickType_t timeout_ticks)
 {
-    if (!initialized || data == NULL || capacity == 0U) {
+    if (!atomic_load(&initialized) || data == NULL || capacity == 0U) {
         return -1;
     }
-    return uart_read_bytes(TARGET_UART_PORT, data, capacity, timeout_ticks);
+    const int received = uart_read_bytes(
+        TARGET_UART_PORT,
+        data,
+        capacity,
+        timeout_ticks);
+    if (received > 0) {
+        (void) atomic_fetch_add(
+            &diagnostic_state.rx_bytes,
+            (unsigned int) received);
+    } else if (received < 0) {
+        (void) atomic_fetch_add(&diagnostic_state.read_failures, 1U);
+    }
+    return received;
 }
 
 int airdap_target_uart_write(const uint8_t *data, size_t length)
 {
-    if (!initialized || data == NULL || length == 0U) {
+    if (!atomic_load(&initialized) || data == NULL || length == 0U) {
         return -1;
     }
-    return uart_write_bytes(TARGET_UART_PORT, data, length);
+    const int written = uart_write_bytes(TARGET_UART_PORT, data, length);
+    if (written > 0) {
+        (void) atomic_fetch_add(
+            &diagnostic_state.tx_bytes,
+            (unsigned int) written);
+    } else if (written < 0) {
+        (void) atomic_fetch_add(&diagnostic_state.write_failures, 1U);
+    }
+    return written;
 }

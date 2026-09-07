@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <string.h>
 
 #include "airdap_config_store.h"
@@ -45,6 +46,76 @@ static bool link_active;
 static bool connection_in_progress;
 static bool reconfiguration_pending;
 static bool provisioning_suspended;
+static uint8_t last_disconnect_reason;
+
+typedef struct {
+    atomic_uint sequence;
+    atomic_bool started;
+    atomic_bool has_configuration;
+    atomic_bool link_connected;
+    atomic_bool provisioning_suspended;
+    atomic_uint last_failure;
+    atomic_uint last_disconnect_reason;
+    atomic_uint retry_delay_ms;
+} airdap_wifi_diagnostic_state_t;
+
+static airdap_wifi_diagnostic_state_t diagnostic_state;
+
+static airdap_wifi_manager_failure_t diagnostic_failure(
+    airdap_wifi_failure_t failure)
+{
+    switch (failure) {
+    case AIRDAP_WIFI_FAILURE_AUTHENTICATION:
+        return AIRDAP_WIFI_MANAGER_FAILURE_AUTHENTICATION;
+    case AIRDAP_WIFI_FAILURE_TRANSIENT:
+        return AIRDAP_WIFI_MANAGER_FAILURE_TRANSIENT;
+    case AIRDAP_WIFI_FAILURE_NONE:
+    default:
+        return AIRDAP_WIFI_MANAGER_FAILURE_NONE;
+    }
+}
+
+/* Wi-Fi lifecycle writes are serialized by startup and the default event loop.
+ * The sequence makes the separately atomic fields coherent for shell readers. */
+static void publish_diagnostic_state(void)
+{
+    (void) atomic_fetch_add_explicit(
+        &diagnostic_state.sequence,
+        1U,
+        memory_order_acq_rel);
+    atomic_store_explicit(
+        &diagnostic_state.started,
+        started,
+        memory_order_relaxed);
+    atomic_store_explicit(
+        &diagnostic_state.has_configuration,
+        state_machine.has_configuration,
+        memory_order_relaxed);
+    atomic_store_explicit(
+        &diagnostic_state.link_connected,
+        link_active,
+        memory_order_relaxed);
+    atomic_store_explicit(
+        &diagnostic_state.provisioning_suspended,
+        provisioning_suspended,
+        memory_order_relaxed);
+    atomic_store_explicit(
+        &diagnostic_state.last_failure,
+        (unsigned int) diagnostic_failure(state_machine.last_failure),
+        memory_order_relaxed);
+    atomic_store_explicit(
+        &diagnostic_state.last_disconnect_reason,
+        last_disconnect_reason,
+        memory_order_relaxed);
+    atomic_store_explicit(
+        &diagnostic_state.retry_delay_ms,
+        state_machine.retry_delay_ms,
+        memory_order_relaxed);
+    (void) atomic_fetch_add_explicit(
+        &diagnostic_state.sequence,
+        1U,
+        memory_order_release);
+}
 
 static void clear_bytes(void *data, size_t size)
 {
@@ -278,6 +349,7 @@ static void handle_state_event(airdap_wifi_sm_event_t event)
         return;
     }
     apply_effects(&effects);
+    publish_diagnostic_state();
 }
 
 static void handle_wifi_event(int32_t event_id, void *event_data)
@@ -290,8 +362,13 @@ static void handle_wifi_event(int32_t event_id, void *event_data)
         } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
             connection_in_progress = false;
             link_active = false;
+            const wifi_event_sta_disconnected_t *disconnected = event_data;
+            last_disconnect_reason = disconnected == NULL
+                ? WIFI_REASON_UNSPECIFIED
+                : disconnected->reason;
             publish_state(AIRDAP_WIFI_SM_DISCONNECTED);
         }
+        publish_diagnostic_state();
         return;
     }
 
@@ -319,6 +396,7 @@ static void handle_wifi_event(int32_t event_id, void *event_data)
         const uint8_t reason = disconnected == NULL
             ? WIFI_REASON_UNSPECIFIED
             : disconnected->reason;
+        last_disconnect_reason = reason;
         if (airdap_wifi_disconnect_is_authentication_failure(reason)) {
             ESP_LOGW(TAG, "Wi-Fi authentication failed (reason=%u)", reason);
             handle_state_event(AIRDAP_WIFI_SM_EVENT_AUTHENTICATION_FAILED);
@@ -446,6 +524,8 @@ static void cleanup_failed_start(void)
     connection_in_progress = false;
     reconfiguration_pending = false;
     provisioning_suspended = false;
+    last_disconnect_reason = 0U;
+    publish_diagnostic_state();
 }
 
 esp_err_t airdap_wifi_manager_start(void)
@@ -464,6 +544,8 @@ esp_err_t airdap_wifi_manager_start(void)
         return error;
     }
     airdap_wifi_state_machine_init(&state_machine, has_configuration);
+    last_disconnect_reason = 0U;
+    publish_diagnostic_state();
 
     /* config_store owns global NVS initialization and runs before this call.
      * Wi-Fi may use that initialized NVS, but must never initialize or erase it. */
@@ -529,10 +611,87 @@ esp_err_t airdap_wifi_manager_start(void)
     }
 
     started = true;
+    publish_diagnostic_state();
     error = esp_wifi_start();
     if (error != ESP_OK) {
         cleanup_failed_start();
         return error;
+    }
+    return ESP_OK;
+}
+
+static void copy_ipv4_octets(
+    uint8_t destination[4],
+    const esp_ip4_addr_t *source)
+{
+    for (size_t index = 0U; index < 4U; ++index) {
+        destination[index] = esp_ip4_addr_get_byte(source, index);
+    }
+}
+
+esp_err_t airdap_wifi_manager_get_info(airdap_wifi_manager_info_t *info)
+{
+    if (info == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(info, 0, sizeof(*info));
+
+    unsigned int before;
+    unsigned int after;
+    do {
+        before = atomic_load_explicit(
+            &diagnostic_state.sequence,
+            memory_order_acquire);
+        if ((before & 1U) != 0U) {
+            continue;
+        }
+        info->started = atomic_load_explicit(
+            &diagnostic_state.started,
+            memory_order_relaxed);
+        info->has_configuration = atomic_load_explicit(
+            &diagnostic_state.has_configuration,
+            memory_order_relaxed);
+        info->link_connected = atomic_load_explicit(
+            &diagnostic_state.link_connected,
+            memory_order_relaxed);
+        info->provisioning_suspended = atomic_load_explicit(
+            &diagnostic_state.provisioning_suspended,
+            memory_order_relaxed);
+        info->last_failure = (airdap_wifi_manager_failure_t)
+            atomic_load_explicit(
+                &diagnostic_state.last_failure,
+                memory_order_relaxed);
+        info->last_disconnect_reason = (uint8_t) atomic_load_explicit(
+            &diagnostic_state.last_disconnect_reason,
+            memory_order_relaxed);
+        info->retry_delay_ms = atomic_load_explicit(
+            &diagnostic_state.retry_delay_ms,
+            memory_order_relaxed);
+        after = atomic_load_explicit(
+            &diagnostic_state.sequence,
+            memory_order_acquire);
+    } while (before != after || (after & 1U) != 0U);
+
+    info->retry_scheduled = info->started && retry_timer != NULL &&
+        esp_timer_is_active(retry_timer);
+    if (!info->started || !info->link_connected || station_netif == NULL) {
+        return ESP_OK;
+    }
+
+    esp_netif_ip_info_t ip_info;
+    if (esp_netif_get_ip_info(station_netif, &ip_info) == ESP_OK &&
+        ip_info.ip.addr != 0U) {
+        info->ipv4_available = true;
+        copy_ipv4_octets(info->ipv4_address, &ip_info.ip);
+        copy_ipv4_octets(info->ipv4_netmask, &ip_info.netmask);
+        copy_ipv4_octets(info->ipv4_gateway, &ip_info.gw);
+    }
+
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        info->ap_available = true;
+        info->rssi_dbm = ap_info.rssi;
+        info->channel = ap_info.primary;
     }
     return ESP_OK;
 }
@@ -618,6 +777,7 @@ esp_err_t airdap_wifi_manager_prepare_provisioning(void)
     cancel_retry();
     reconfiguration_pending = false;
     provisioning_suspended = true;
+    publish_diagnostic_state();
     return ESP_OK;
 }
 
@@ -688,6 +848,7 @@ esp_err_t airdap_wifi_manager_finish_provisioning(void)
         return ESP_ERR_INVALID_STATE;
     }
     provisioning_suspended = false;
+    publish_diagnostic_state();
     handle_configuration_changed();
     return ESP_OK;
 }

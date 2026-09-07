@@ -3,12 +3,17 @@ menu "AirDAP USB device"
     config AIRDAP_DEBUG_SHELL
         bool "Enable the USB Vendor Bulk debug shell"
         default n
+        select FREERTOS_GENERATE_RUN_TIME_STATS
+        select FREERTOS_VTASKLIST_INCLUDE_COREID if !FREERTOS_SMP
         help
             Add a Vendor-specific Bulk interface for AirDAP firmware
-            diagnostics. The shell provides device status, Wi-Fi credential
-            management, and restart commands, and mirrors ESP logs after the
-            host starts a session. Set TinyUSB Vendor Interface Count to 2 when
-            enabling this option. The checked-in sdkconfig.defaults profile
-            sets both values for reproducible standard builds.
+            diagnostics. The shell provides detailed read-only system, heap,
+            mode, OTA, target, and FreeRTOS task diagnostics, along with Wi-Fi
+            credential management and restart commands. It also mirrors ESP
+            logs after the host starts a session. Enabling the shell collects
+            FreeRTOS task run-time statistics and includes task core affinity.
+            Set TinyUSB Vendor Interface Count to 2 when enabling this option.
+            The checked-in sdkconfig.defaults profile sets the interface count
+            and uses a 64-bit run-time counter for reproducible standard builds.
 
 endmenu

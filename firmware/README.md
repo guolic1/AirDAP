@@ -514,8 +514,9 @@ run non-interactively:
 
 ```sh
 python tools/airdap-shell.py \
-    -c help -c identity -c config-status -c status -c "wifi status" \
-    -c "swd-idcode 100"
+    -c system-info -c memory-info -c mode-status -c ota-status \
+    -c target-status -c tasks -c dap-stats -c network-info -c usb-status \
+    -c uart-status -c discovery-status
 ```
 
 `wifi set` is interactive-only so credentials cannot be supplied through shell
@@ -538,14 +539,46 @@ the device disconnects after its acknowledgement is delivered.
 
 The host tool makes Vendor Bulk communication behave like a raw text terminal.
 The firmware accepts printable ASCII, CR/LF line endings, backspace/delete,
-Ctrl-C, Tab, and ANSI navigation sequences. Available commands are:
+Ctrl-C, Tab, and ANSI navigation sequences. `help` lists every registered
+command with a one-line summary; `help <command>` prints its usage and full
+description. Command descriptors are registered during shell startup, so a
+command group can be defined and registered from its own source file without
+extending a single global command table. Available commands are:
 
-- `help` — list commands;
-- `identity` — print the USB serial, device ID, UUID, firmware and protocol
-  versions, and capability bits from the shared device identity;
-- `config-status` — print only the configuration schema and provisioning state;
-  credential values are never included;
-- `status` — print `target_mv`, `usb_vbus_mv`, `uptime_ms`, and `free_heap`;
+- `help [command]` — list commands or show detailed help for one command;
+- `system-info` — print the USB serial, device ID, UUID, firmware and protocol
+  versions, capability bits, ESP-IDF version, uptime, chip model, revision,
+  core count, feature bits, and the previous reset reason;
+- `memory-info` — print total, free, historical minimum-free, and largest-free
+  block sizes for default, internal, DMA, and SPI RAM heap capabilities; these
+  capability categories can overlap and should not be summed;
+- `mode-status` — print the safe persistent configuration schema and provisioned
+  state, followed by USB, Wi-Fi, provisioning, OTA, and DAP-owner state from the
+  shared runtime snapshot; credential values are never included;
+- `ota-status` — print running version, OTA protocol/session/rollback state,
+  running image state, and running/boot partition metadata without starting an
+  update;
+- `target-status` — read target power-active status, target/USB voltage, and
+  DAP ownership without changing target pin direction or level;
+- `tasks [--interval <ms>]` — take a bounded FreeRTOS task snapshot and print
+  task number, name, state, core affinity, current/base priorities, stack
+  high-water mark in free bytes, run time, and dual-core-normalized CPU
+  percentage, sorted by run time;
+  values are cumulative without arguments, while a 100–5000 ms interval reports
+  deltas over that sampling window;
+- `dap-stats` — print DAP service request, response, queue saturation, timeout,
+  stale-work, and delivery-failure counters without resetting them;
+- `network-info` — print Wi-Fi manager/link/configuration state, failure and
+  retry diagnostics, IPv4 address information, RSSI, and channel without
+  displaying SSID, BSSID, credentials, or authentication material;
+- `usb-status` — print TinyUSB mount/suspend state, DAP Vendor, target CDC and
+  debug Vendor interface state, and whether the USB DAP session is active;
+- `uart-status` — print the target UART's last accepted line coding, RX queued
+  bytes, TX free space, cumulative transferred bytes, and driver I/O failures
+  without consuming UART data;
+- `discovery-status` — print mDNS initialization, lifecycle/publication state,
+  advertised hostname and service ports, and the latest lifecycle error without
+  publishing or withdrawing the service;
 - `wifi status` — print `wifi=stopped`, `disconnected`, `connecting`, or
   `online` without displaying credentials;
 - `wifi set` — interactively replace the stored SSID and password, reset
@@ -555,6 +588,22 @@ Ctrl-C, Tab, and ANSI navigation sequences. Available commands are:
   target DP IDCODE at 100 kHz by default; accepted clocks are 100–10,000 kHz;
 - `restart` — wait for the acknowledgement transfer to complete, then restart
   AirDAP; a bounded transfer timeout leaves the firmware running.
+
+Without `--interval`, the `tasks` CPU values are cumulative since boot. With an
+interval, the command takes two snapshots and reports the difference; scheduling
+runs normally between snapshots. Tasks created during the interval have a zero
+delta, and tasks deleted before the second snapshot are omitted. On this two-core
+target, percentages use the combined capacity of both cores, so the rows normally
+total close to 100%. The `affinity` column is the allowed core, not necessarily
+the core on which an unpinned task was executing at capture time. Each snapshot
+pauses scheduling on both cores while it copies task metadata and scans stack
+high-water marks, and is capped at 48 tasks. This debug-only operation can cause
+a perceptible scheduling and USB latency spike, especially with many or large
+task stacks. The standard configuration enables per-task run-time accounting
+and `sdkconfig.defaults` selects a 64-bit, 1 MHz ESP Timer counter, so values
+use the `runtime_us` or `runtime_delta_us` suffix and long-running debug
+sessions do not quickly wrap it. A manually selected alternative clock uses
+`runtime_ticks` or `runtime_delta_ticks` instead.
 
 When OpenOCD or another CMSIS-DAP client owns SWD, `swd-idcode` returns `busy`
 without driving the target. After every successful, failed, or USB-detached
@@ -601,8 +650,9 @@ for suite in \
     dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame discovery \
     dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning \
     target_uart usb_descriptors project_version \
-    debug_shell_config_status debug_shell_identity debug_shell_input debug_shell_wifi \
-    debug_shell_swd_probe debug_shell_tx_state airdap_shell airdap_update \
+    debug_shell_commands debug_shell_diagnostics debug_shell_config_status \
+    debug_shell_identity debug_shell_input debug_shell_wifi debug_shell_swd_probe \
+    debug_shell_tx_state airdap_shell airdap_update \
     airdap_provision wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
     cmake --build "build-host/$suite"
@@ -613,7 +663,7 @@ done
 These tests prove GPIO ordering, bootloader artifact-contract validation,
 versioned configuration validation, commit-before-publish behavior, serialized
 concurrent writes, fake-NVS restart recovery, selective configuration clearing,
-safe configuration-status command behavior, ADC scaling, SWD transaction
+safe persistent-configuration formatting and `mode-status` reporting, ADC scaling, SWD transaction
 framing, Wi-Fi credential encoding, wrong-password classification, DHCP-gated
 online state, IP-loss handling, bounded reconnect backoff, actual timer/driver
 coordination, configuration-change event ordering and recovery, Security 2

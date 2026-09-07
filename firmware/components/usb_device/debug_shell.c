@@ -9,19 +9,17 @@
 
 #include "airdap_debug_shell.h"
 #include "airdap_debug_shell_commands.h"
-#include "airdap_debug_shell_config_status.h"
-#include "airdap_debug_shell_identity.h"
+#include "airdap_debug_shell_core_commands.h"
+#include "airdap_debug_shell_diagnostics.h"
 #include "airdap_debug_shell_input.h"
+#include "airdap_debug_shell_service_diagnostics.h"
 #include "airdap_debug_shell_swd_probe.h"
 #include "airdap_debug_shell_tx_state.h"
 #include "airdap_debug_shell_wifi.h"
-#include "airdap_device_identity.h"
 #include "airdap_swd.h"
-#include "airdap_voltage_monitor.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_system.h"
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -46,16 +44,6 @@ enum {
 
 typedef struct shell_session shell_session_t;
 
-typedef int (*shell_command_handler_t)(
-    const char *arguments,
-    shell_session_t *session);
-
-typedef struct {
-    const char *name;
-    const char *help;
-    shell_command_handler_t handler;
-} shell_command_t;
-
 typedef struct {
     uint32_t session_generation;
     size_t length;
@@ -67,23 +55,7 @@ struct shell_session {
     airdap_debug_shell_wifi_session_t wifi;
 };
 
-static int help_command(const char *arguments, shell_session_t *session);
-static int identity_command(const char *arguments, shell_session_t *session);
-static int config_status_command(
-    const char *arguments,
-    shell_session_t *session);
-static int status_command(const char *arguments, shell_session_t *session);
-static int wifi_command(const char *arguments, shell_session_t *session);
-static int swd_idcode_command(const char *arguments, shell_session_t *session);
-static int restart_command(const char *arguments, shell_session_t *session);
-
-static const shell_command_t commands[] = {
-#define AIRDAP_DEBUG_SHELL_COMMAND(name_, help_, handler_) \
-    {.name = name_, .help = help_, .handler = handler_},
-    AIRDAP_DEBUG_SHELL_COMMAND_LIST(AIRDAP_DEBUG_SHELL_COMMAND)
-#undef AIRDAP_DEBUG_SHELL_COMMAND
-};
-
+static airdap_debug_shell_command_registry_t command_registry;
 static SemaphoreHandle_t output_mutex;
 static QueueHandle_t log_queue;
 static atomic_bool session_active = ATOMIC_VAR_INIT(false);
@@ -335,6 +307,33 @@ static void shell_printf_styled(const char *style, const char *format, ...)
     va_end(arguments);
 }
 
+static const char *command_ansi_style(airdap_debug_shell_style_t style)
+{
+    switch (style) {
+    case AIRDAP_DEBUG_SHELL_STYLE_SUCCESS:
+        return ansi_green;
+    case AIRDAP_DEBUG_SHELL_STYLE_WARNING:
+        return ansi_yellow;
+    case AIRDAP_DEBUG_SHELL_STYLE_ERROR:
+        return ansi_red;
+    case AIRDAP_DEBUG_SHELL_STYLE_COMMAND:
+        return ansi_cyan;
+    case AIRDAP_DEBUG_SHELL_STYLE_DEFAULT:
+    default:
+        return NULL;
+    }
+}
+
+static void shell_command_vprintf(
+    airdap_debug_shell_style_t style,
+    const char *format,
+    va_list arguments,
+    void *context)
+{
+    (void) context;
+    shell_vprintf_styled(command_ansi_style(style), format, arguments);
+}
+
 static int mirror_log_vprintf(const char *format, va_list arguments)
 {
     va_list primary_arguments;
@@ -445,13 +444,21 @@ static void shell_execute(const char *line, void *context)
         ++arguments;
     }
 
-    for (size_t index = 0U; index < sizeof(commands) / sizeof(commands[0]); ++index) {
-        const shell_command_t *command = &commands[index];
-        if (strlen(command->name) == command_length &&
-            strncmp(line, command->name, command_length) == 0) {
-            (void) command->handler(arguments, session);
-            return;
-        }
+    const airdap_debug_shell_command_t *command =
+        airdap_debug_shell_command_find(
+            &command_registry,
+            line,
+            command_length);
+    if (command != NULL) {
+        const airdap_debug_shell_invocation_t invocation = {
+            .session = session,
+            .vprintf = shell_command_vprintf,
+        };
+        (void) command->handler(
+            arguments,
+            &invocation,
+            command->context);
+        return;
     }
 
     shell_printf_styled(
@@ -466,121 +473,34 @@ static const char *shell_complete(
     size_t match_index,
     void *context)
 {
-    const size_t prefix_length = strlen(prefix);
-    size_t current_match = 0U;
-
     (void) context;
-    for (size_t index = 0U; index < sizeof(commands) / sizeof(commands[0]); ++index) {
-        if (strncmp(commands[index].name, prefix, prefix_length) != 0) {
-            continue;
-        }
-        if (current_match == match_index) {
-            return commands[index].name;
-        }
-        ++current_match;
-    }
-    return NULL;
+    return airdap_debug_shell_command_complete(
+        &command_registry,
+        prefix,
+        match_index);
 }
 
-static int help_command(const char *arguments, shell_session_t *session)
-{
-    (void) session;
-    if (*arguments != '\0') {
-        shell_printf_styled(ansi_yellow, "usage: help\n");
-        return 1;
-    }
-
-    for (size_t index = 0U; index < sizeof(commands) / sizeof(commands[0]); ++index) {
-        if (atomic_load(&session_color_enabled)) {
-            shell_printf(
-                "%s%-8s%s %s\n",
-                ansi_cyan,
-                commands[index].name,
-                ansi_reset,
-                commands[index].help);
-        } else {
-            shell_printf("%-8s %s\n", commands[index].name, commands[index].help);
-        }
-    }
-    return 0;
-}
-
-static int identity_command(const char *arguments, shell_session_t *session)
-{
-    (void) session;
-    if (*arguments != '\0') {
-        shell_printf("usage: identity\n");
-        return 1;
-    }
-
-    const airdap_device_identity_t *identity = airdap_device_identity_get();
-    if (identity == NULL) {
-        shell_printf("identity: device identity unavailable\n");
-        return 1;
-    }
-
-    char output[AIRDAP_DEBUG_SHELL_IDENTITY_OUTPUT_SIZE];
-    if (!airdap_debug_shell_identity_format(identity, output, sizeof(output))) {
-        shell_printf("identity: formatting failed\n");
-        return 1;
-    }
-    shell_printf("%s", output);
-    return 0;
-}
-
-static int config_status_command(
+int airdap_debug_shell_help_command(
     const char *arguments,
-    shell_session_t *session)
+    const airdap_debug_shell_invocation_t *invocation,
+    void *context)
 {
-    (void) session;
-    char output[AIRDAP_DEBUG_SHELL_CONFIG_STATUS_OUTPUT_SIZE];
-    airdap_debug_shell_config_status_style_t style;
-    const int result = airdap_debug_shell_config_status_execute(
+    (void) context;
+    return airdap_debug_shell_command_help(
+        &command_registry,
         arguments,
-        output,
-        sizeof(output),
-        &style);
-    const char *ansi_style = ansi_red;
-    if (style == AIRDAP_DEBUG_SHELL_CONFIG_STATUS_STYLE_YELLOW) {
-        ansi_style = ansi_yellow;
-    } else if (style == AIRDAP_DEBUG_SHELL_CONFIG_STATUS_STYLE_GREEN) {
-        ansi_style = ansi_green;
-    }
-    shell_printf_styled(ansi_style, "%s", output);
-    return result;
+        invocation);
 }
 
-static int status_command(const char *arguments, shell_session_t *session)
+int airdap_debug_shell_wifi_command(
+    const char *arguments,
+    const airdap_debug_shell_invocation_t *invocation,
+    void *context)
 {
-    (void) session;
-    if (*arguments != '\0') {
-        shell_printf_styled(ansi_yellow, "usage: status\n");
-        return 1;
-    }
-
-    airdap_voltage_reading_t voltage;
-    const esp_err_t error = airdap_voltage_monitor_read(&voltage);
-    if (error != ESP_OK) {
-        shell_printf_styled(
-            ansi_red,
-            "status: voltage read failed: %s\n",
-            esp_err_to_name(error));
-        return 1;
-    }
-
-    shell_printf_styled(
-        ansi_green,
-        "target_mv=%" PRIu32 " usb_vbus_mv=%" PRIu32
-        " uptime_ms=%" PRId64 " free_heap=%" PRIu32 "\n",
-        voltage.target_mv,
-        voltage.usb_vbus_mv,
-        esp_timer_get_time() / 1000,
-        esp_get_free_heap_size());
-    return 0;
-}
-
-static int wifi_command(const char *arguments, shell_session_t *session)
-{
+    (void) context;
+    shell_session_t *session = invocation != NULL
+        ? invocation->session
+        : NULL;
     if (session == NULL || session->input == NULL) {
         shell_printf_styled(ansi_red, "wifi: shell session unavailable\n");
         return 1;
@@ -653,11 +573,13 @@ static bool shell_swd_cancelled(void *context)
         !tud_vendor_n_mounted(DEBUG_VENDOR_INSTANCE);
 }
 
-static int swd_idcode_command(
+int airdap_debug_shell_swd_idcode_command(
     const char *arguments,
-    shell_session_t *session)
+    const airdap_debug_shell_invocation_t *invocation,
+    void *context)
 {
-    (void) session;
+    (void) invocation;
+    (void) context;
     static const airdap_debug_shell_swd_backend_t backend = {
         .context = NULL,
         .set_clock = shell_swd_set_clock,
@@ -777,9 +699,13 @@ static int swd_idcode_command(
     return 1;
 }
 
-static int restart_command(const char *arguments, shell_session_t *session)
+int airdap_debug_shell_restart_command(
+    const char *arguments,
+    const airdap_debug_shell_invocation_t *invocation,
+    void *context)
 {
-    (void) session;
+    (void) invocation;
+    (void) context;
     static const char acknowledgement[] = "Restarting AirDAP...\n";
     static const char colored_acknowledgement[] =
         "\x1b[33mRestarting AirDAP...\n\x1b[0m";
@@ -920,6 +846,19 @@ static void shell_task(void *argument)
 
 esp_err_t airdap_debug_shell_start(void)
 {
+    airdap_debug_shell_command_registry_init(&command_registry);
+    if (!airdap_debug_shell_register_core_commands(&command_registry)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!airdap_debug_shell_register_diagnostic_commands(&command_registry)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!airdap_debug_shell_register_service_diagnostic_commands(
+            &command_registry)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    airdap_debug_shell_command_registry_freeze(&command_registry);
+
     airdap_debug_shell_tx_state_init(&tx_state);
     output_mutex = xSemaphoreCreateMutex();
     if (output_mutex == NULL) {

@@ -76,6 +76,13 @@ static copied_txt_item_t copied_txt[MAX_TXT_ITEMS];
 static size_t copied_txt_count;
 static handler_registration_t handlers[MAX_HANDLERS];
 
+static airdap_discovery_status_t get_discovery_status(void)
+{
+    airdap_discovery_status_t status;
+    assert(airdap_discovery_get_status(&status) == ESP_OK);
+    return status;
+}
+
 static void copy_text(char destination[MAX_TEXT_SIZE], const char *source)
 {
     assert(source != NULL);
@@ -239,9 +246,18 @@ static void assert_txt(size_t index, const char *key, const char *value)
 
 static void test_start_failure_is_clean_and_retryable(void)
 {
+    assert(airdap_discovery_get_status(NULL) == ESP_ERR_INVALID_ARG);
+    airdap_discovery_status_t status = get_discovery_status();
+    assert(!status.initialized);
+    assert(!status.started);
+    assert(!status.service_published);
+    assert(status.last_error == ESP_OK);
+
     identity_result = NULL;
     assert(airdap_discovery_start() == ESP_ERR_INVALID_STATE);
     assert(mdns_init_calls == 0U);
+    status = get_discovery_status();
+    assert(status.last_error == ESP_ERR_INVALID_STATE);
 
     identity_result = &identity;
     mdns_hostname_result = ESP_FAIL;
@@ -257,6 +273,10 @@ static void test_start_failure_is_clean_and_retryable(void)
     assert(mdns_free_calls == 2U);
     assert(register_calls == 2U);
     assert(unregister_calls == 2U);
+    status = get_discovery_status();
+    assert(!status.initialized);
+    assert(!status.started);
+    assert(status.last_error == ESP_FAIL);
 }
 
 static void test_start_configures_stable_identity_without_advertising_offline(void)
@@ -272,7 +292,19 @@ static void test_start_configures_stable_identity_without_advertising_offline(vo
     assert(post_calls == 2U);
     assert(add_calls == 0U);
     assert(remove_calls == 0U);
+
+    airdap_discovery_status_t status = get_discovery_status();
+    assert(status.initialized);
+    assert(status.started);
+    assert(!status.service_published);
+    assert(strcmp(status.hostname, "airdap-001122334455") == 0);
+    assert(status.dap_port == 3260U);
+    assert(status.uart_port == 3261U);
+    assert(status.last_error == ESP_OK);
+
     assert(airdap_discovery_start() == ESP_ERR_INVALID_STATE);
+    status = get_discovery_status();
+    assert(status.last_error == ESP_ERR_INVALID_STATE);
 }
 
 static void test_reconcile_and_ip_events_control_exact_service_record(void)
@@ -295,6 +327,9 @@ static void test_reconcile_and_ip_events_control_exact_service_record(void)
     assert_txt(4U, "state", "idle");
     assert_txt(5U, "dap_port", "3260");
     assert_txt(6U, "uart_port", "3261");
+    airdap_discovery_status_t status = get_discovery_status();
+    assert(status.service_published);
+    assert(status.last_error == ESP_OK);
 
     wifi_state = AIRDAP_WIFI_CONNECTING;
     dispatch_event(IP_EVENT, IP_EVENT_STA_GOT_IP, NULL);
@@ -314,15 +349,24 @@ static void test_reconcile_and_ip_events_control_exact_service_record(void)
     dispatch_event(IP_EVENT, IP_EVENT_STA_GOT_IP, NULL);
     assert(remove_calls == 3U);
     assert(add_calls == 3U);
+    status = get_discovery_status();
+    assert(status.service_published);
+    assert(status.last_error == ESP_FAIL);
 
     mdns_remove_result = ESP_OK;
     dispatch_event(IP_EVENT, IP_EVENT_STA_LOST_IP, NULL);
     assert(remove_calls == 4U);
     assert(add_calls == 3U);
+    status = get_discovery_status();
+    assert(!status.service_published);
+    assert(status.last_error == ESP_OK);
 
     mdns_add_result = ESP_FAIL;
     dispatch_event(IP_EVENT, IP_EVENT_STA_GOT_IP, NULL);
     assert(add_calls == 4U);
+    status = get_discovery_status();
+    assert(!status.service_published);
+    assert(status.last_error == ESP_FAIL);
     dispatch_event(IP_EVENT, IP_EVENT_STA_LOST_IP, NULL);
     assert(remove_calls == 4U);
 

@@ -53,6 +53,13 @@ typedef struct {
     wifi_sta_config_t sta;
 } wifi_config_t;
 
+typedef struct {
+    uint8_t bssid[6];
+    uint8_t ssid[33];
+    uint8_t primary;
+    int8_t rssi;
+} wifi_ap_record_t;
+
 esp_err_t esp_wifi_init(const wifi_init_config_t *config);
 esp_err_t esp_wifi_deinit(void);
 esp_err_t esp_wifi_set_storage(int storage);
@@ -61,3 +68,4 @@ esp_err_t esp_wifi_set_config(int interface, const wifi_config_t *config);
 esp_err_t esp_wifi_start(void);
 esp_err_t esp_wifi_connect(void);
 esp_err_t esp_wifi_disconnect(void);
+esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *ap_info);

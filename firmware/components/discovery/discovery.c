@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -16,10 +17,7 @@
 #include "mdns.h"
 
 enum {
-    AIRDAP_DAP_TCP_PORT = 3260,
-    AIRDAP_UART_TCP_PORT = 3261,
     AIRDAP_DISCOVERY_TXT_ITEM_COUNT = 7,
-    AIRDAP_DISCOVERY_HOSTNAME_SIZE = 24,
     AIRDAP_DISCOVERY_CAPABILITIES_SIZE = 48,
 };
 
@@ -47,9 +45,39 @@ static const capability_name_t CAPABILITY_NAMES[] = {
 
 static esp_event_handler_instance_t ip_event_instance;
 static esp_event_handler_instance_t internal_event_instance;
-static bool mdns_initialized;
-static bool started;
-static bool service_published;
+static atomic_bool mdns_initialized;
+static atomic_bool started;
+static atomic_bool service_published;
+static atomic_int last_error;
+static char configured_hostname[AIRDAP_DISCOVERY_HOSTNAME_SIZE];
+
+static void record_error(esp_err_t error)
+{
+    atomic_store(&last_error, error);
+}
+
+esp_err_t airdap_discovery_get_status(airdap_discovery_status_t *status)
+{
+    if (status == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *status = (airdap_discovery_status_t) {
+        .initialized = atomic_load(&mdns_initialized),
+        .started = atomic_load_explicit(&started, memory_order_acquire),
+        .service_published = atomic_load(&service_published),
+        .dap_port = AIRDAP_DISCOVERY_DAP_TCP_PORT,
+        .uart_port = AIRDAP_DISCOVERY_UART_TCP_PORT,
+        .last_error = atomic_load(&last_error),
+    };
+    if (status->started) {
+        (void) snprintf(
+            status->hostname,
+            sizeof(status->hostname),
+            "%s",
+            configured_hostname);
+    }
+    return ESP_OK;
+}
 
 static esp_err_t format_hostname(
     const char *device_id,
@@ -105,7 +133,7 @@ static esp_err_t format_capabilities(
 
 static esp_err_t withdraw_service(void)
 {
-    if (!service_published) {
+    if (!atomic_load(&service_published)) {
         return ESP_OK;
     }
 
@@ -113,9 +141,10 @@ static esp_err_t withdraw_service(void)
         SERVICE_TYPE,
         SERVICE_PROTOCOL);
     if (error == ESP_OK) {
-        service_published = false;
+        atomic_store(&service_published, false);
         ESP_LOGI(TAG, "mDNS service withdrawn");
     }
+    record_error(error);
     return error;
 }
 
@@ -128,6 +157,7 @@ static esp_err_t publish_service(void)
 
     const airdap_device_identity_t *identity = airdap_device_identity_get();
     if (identity == NULL || identity->firmware_version == NULL) {
+        record_error(ESP_ERR_INVALID_STATE);
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -144,12 +174,12 @@ static esp_err_t publish_service(void)
         dap_port,
         sizeof(dap_port),
         "%u",
-        AIRDAP_DAP_TCP_PORT);
+        AIRDAP_DISCOVERY_DAP_TCP_PORT);
     const int uart_port_length = snprintf(
         uart_port,
         sizeof(uart_port),
         "%u",
-        AIRDAP_UART_TCP_PORT);
+        AIRDAP_DISCOVERY_UART_TCP_PORT);
     if (protocol_length < 0 ||
         (size_t) protocol_length >= sizeof(protocol_version) ||
         dap_port_length < 0 ||
@@ -157,6 +187,7 @@ static esp_err_t publish_service(void)
         uart_port_length < 0 ||
         (size_t) uart_port_length >= sizeof(uart_port) ||
         format_capabilities(identity->capabilities, capabilities) != ESP_OK) {
+        record_error(ESP_FAIL);
         return ESP_FAIL;
     }
 
@@ -173,13 +204,14 @@ static esp_err_t publish_service(void)
         identity->device_id,
         SERVICE_TYPE,
         SERVICE_PROTOCOL,
-        AIRDAP_DAP_TCP_PORT,
+        AIRDAP_DISCOVERY_DAP_TCP_PORT,
         txt,
         AIRDAP_DISCOVERY_TXT_ITEM_COUNT);
     if (error == ESP_OK) {
-        service_published = true;
+        atomic_store(&service_published, true);
         ESP_LOGI(TAG, "mDNS service published");
     }
+    record_error(error);
     return error;
 }
 
@@ -189,11 +221,12 @@ static void reconcile_service(bool refresh_online)
     const airdap_mode_state_result_t result = airdap_mode_state_get(&mode);
     esp_err_t error;
     if (result != AIRDAP_MODE_STATE_OK) {
+        record_error(ESP_ERR_INVALID_STATE);
         ESP_LOGE(TAG, "Cannot reconcile mDNS with mode state: %d", result);
         return;
     }
     if (mode.wifi == AIRDAP_WIFI_ONLINE) {
-        if ((refresh_online || !service_published) &&
+        if ((refresh_online || !atomic_load(&service_published)) &&
             (error = publish_service()) != ESP_OK) {
             ESP_LOGE(TAG, "Failed to publish mDNS service: %d", error);
         }
@@ -210,7 +243,7 @@ static void event_handler(
 {
     (void) argument;
     (void) event_data;
-    if (!started) {
+    if (!atomic_load(&started)) {
         return;
     }
 
@@ -249,17 +282,18 @@ static void cleanup_failed_start(void)
             ip_event_instance);
         ip_event_instance = NULL;
     }
-    if (mdns_initialized) {
+    if (atomic_load(&mdns_initialized)) {
         mdns_free();
-        mdns_initialized = false;
+        atomic_store(&mdns_initialized, false);
     }
-    started = false;
-    service_published = false;
+    atomic_store_explicit(&started, false, memory_order_release);
+    atomic_store(&service_published, false);
 }
 
 esp_err_t airdap_discovery_start(void)
 {
-    if (started) {
+    if (atomic_load(&started)) {
+        record_error(ESP_ERR_INVALID_STATE);
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -267,14 +301,16 @@ esp_err_t airdap_discovery_start(void)
     char hostname[AIRDAP_DISCOVERY_HOSTNAME_SIZE];
     if (identity == NULL || identity->firmware_version == NULL ||
         format_hostname(identity->device_id, hostname) != ESP_OK) {
+        record_error(ESP_ERR_INVALID_STATE);
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t error = mdns_init();
     if (error != ESP_OK) {
+        record_error(error);
         return error;
     }
-    mdns_initialized = true;
+    atomic_store(&mdns_initialized, true);
     if ((error = mdns_hostname_set(hostname)) != ESP_OK ||
         (error = mdns_instance_name_set(identity->device_id)) != ESP_OK ||
         (error = esp_event_handler_instance_register(
@@ -290,10 +326,16 @@ esp_err_t airdap_discovery_start(void)
             NULL,
             &internal_event_instance)) != ESP_OK) {
         cleanup_failed_start();
+        record_error(error);
         return error;
     }
 
-    started = true;
+    (void) snprintf(
+        configured_hostname,
+        sizeof(configured_hostname),
+        "%s",
+        hostname);
+    atomic_store_explicit(&started, true, memory_order_release);
     error = esp_event_post(
         AIRDAP_DISCOVERY_INTERNAL_EVENT,
         AIRDAP_DISCOVERY_INTERNAL_RECONCILE,
@@ -302,7 +344,9 @@ esp_err_t airdap_discovery_start(void)
         portMAX_DELAY);
     if (error != ESP_OK) {
         cleanup_failed_start();
+        record_error(error);
         return error;
     }
+    record_error(ESP_OK);
     return ESP_OK;
 }
