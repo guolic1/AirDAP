@@ -1,7 +1,10 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "esp_err.h"
 
 enum {
     AIRDAP_NETWORK_AUTH_PSK_SIZE = 32,
@@ -24,3 +27,5 @@ airdap_network_auth_result_t airdap_network_auth_pair(
     const uint8_t *request,
     size_t request_size,
     uint8_t fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE]);
+
+esp_err_t airdap_network_auth_set_pairing_window_active(bool active);

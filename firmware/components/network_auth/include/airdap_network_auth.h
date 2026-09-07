@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -64,6 +65,11 @@ esp_err_t airdap_network_auth_set_revoke_handler(
     airdap_network_auth_revoke_fn handler,
     void *context);
 
+/* Pairing is accepted only while the physically authorized BLE Security 2
+ * window is active. Closing the window waits for an in-progress pairing
+ * commit and prevents later requests from committing. */
+esp_err_t airdap_network_auth_set_pairing_window_active(bool active);
+
 /* The Security 2 endpoint passes exactly version || 32-byte PSK. A successful
  * NVS commit publishes the new generation, invalidates the old owner, and
  * returns only the non-secret SHA-256 fingerprint. Repeating the active PSK is
@@ -118,9 +124,10 @@ airdap_network_auth_result_t airdap_network_auth_session_validate(
 void airdap_network_auth_connection_close(
     airdap_network_auth_connection_t *connection);
 
-/* Atomically commits AIRDAP_CONFIG_CLEAR_NETWORK while pairing is excluded,
- * then clears the active credential and revokes the owner. A failed commit
- * leaves the persistent credential, in-memory credential, and owner intact. */
+/* Closes pairing, atomically commits AIRDAP_CONFIG_CLEAR_NETWORK, then clears
+ * the active credential and revokes the owner. A failed commit leaves the
+ * persistent credential, in-memory credential, and owner intact while pairing
+ * remains closed until a new physically authorized window opens. */
 esp_err_t airdap_network_auth_clear_network_configuration(void);
 
 #ifdef __cplusplus

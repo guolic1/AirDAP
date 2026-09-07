@@ -62,6 +62,7 @@ static uint8_t captured_salt[AIRDAP_SEC2_SALT_SIZE];
 static uint8_t captured_verifier[AIRDAP_SEC2_VERIFIER_SIZE];
 static protocomm_req_handler_t pairing_handler;
 static unsigned pair_count;
+static bool pairing_window_active;
 static bool manager_active;
 static bool endpoint_created_for_window;
 static bool provisioning_started_for_window;
@@ -71,11 +72,18 @@ const airdap_device_identity_t *airdap_device_identity_get(void)
     return &identity;
 }
 
+esp_err_t airdap_network_auth_set_pairing_window_active(bool active)
+{
+    pairing_window_active = active;
+    return ESP_OK;
+}
+
 airdap_network_auth_result_t airdap_network_auth_pair(
     const uint8_t *request,
     size_t request_size,
     uint8_t fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE])
 {
+    assert(pairing_window_active);
     assert(request != NULL && fingerprint != NULL);
     assert(request_size == AIRDAP_NETWORK_AUTH_PAIR_REQUEST_SIZE);
     assert(request[0] == AIRDAP_NETWORK_AUTH_PAIR_REQUEST_VERSION);
@@ -149,6 +157,7 @@ esp_err_t airdap_wifi_manager_finish_provisioning(void)
 
 esp_err_t airdap_wifi_manager_clear_network_configuration(void)
 {
+    assert(!pairing_window_active);
     ++clear_count;
     return clear_result;
 }
@@ -158,6 +167,7 @@ esp_err_t network_prov_mgr_init(network_prov_mgr_config_t config)
     assert(config.scheme.marker == network_prov_scheme_ble.marker);
     assert(config.network_prov_wifi_conn_cfg.wifi_conn_attempts == 3U);
     assert(!manager_active);
+    assert(!pairing_window_active);
     manager_active = true;
     endpoint_created_for_window = false;
     provisioning_started_for_window = false;
@@ -169,6 +179,7 @@ esp_err_t network_prov_mgr_init(network_prov_mgr_config_t config)
 esp_err_t network_prov_mgr_deinit(void)
 {
     assert(manager_active);
+    assert(!pairing_window_active);
     manager_active = false;
     ++manager_deinit_count;
     return ESP_OK;
@@ -218,6 +229,7 @@ esp_err_t network_prov_mgr_endpoint_register(
     assert(handler != NULL && user_context == NULL);
     assert(manager_active && endpoint_created_for_window &&
         provisioning_started_for_window);
+    assert(pairing_window_active);
     pairing_handler = handler;
     ++endpoint_register_count;
     return ESP_OK;
@@ -230,6 +242,7 @@ void network_prov_mgr_endpoint_unregister(const char *endpoint_name)
 
 void network_prov_mgr_stop_provisioning(void)
 {
+    assert(!pairing_window_active);
     ++manager_stop_count;
 }
 
@@ -382,6 +395,7 @@ int main(void)
     assert(credential_load_count == 1U && manager_init_count == 1U);
     assert(manager_start_count == 1U && prepare_count == 1U);
     assert(endpoint_create_count == 1U && endpoint_register_count == 1U);
+    assert(pairing_window_active);
     assert(timer.active && timer.timeout_us == 120000000U);
     assert(mode_events[mode_event_count - 1U] ==
         AIRDAP_MODE_EVENT_PROVISIONING_STARTED);

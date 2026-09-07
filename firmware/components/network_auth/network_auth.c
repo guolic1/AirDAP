@@ -99,6 +99,7 @@ static bool initialized;
 static char active_identity[PSK_IDENTITY_SIZE];
 static active_credential_t active_credential;
 static owner_session_t owner_session;
+static bool pairing_window_active;
 static unsigned int pending_handshakes;
 static uint32_t next_session_id = 1U;
 static airdap_network_auth_revoke_fn revoke_handler;
@@ -406,6 +407,19 @@ esp_err_t airdap_network_auth_set_revoke_handler(
     return ESP_OK;
 }
 
+esp_err_t airdap_network_auth_set_pairing_window_active(bool active)
+{
+    if (!initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!lock_auth()) {
+        return ESP_FAIL;
+    }
+    pairing_window_active = active;
+    unlock_auth();
+    return ESP_OK;
+}
+
 airdap_network_auth_result_t airdap_network_auth_pair(
     const uint8_t *request,
     size_t request_size,
@@ -422,6 +436,10 @@ airdap_network_auth_result_t airdap_network_auth_pair(
         return AIRDAP_NETWORK_AUTH_UNSUPPORTED_VERSION;
     }
     if (!lock_auth()) {
+        return AIRDAP_NETWORK_AUTH_INVALID_STATE;
+    }
+    if (!pairing_window_active) {
+        unlock_auth();
         return AIRDAP_NETWORK_AUTH_INVALID_STATE;
     }
 
@@ -830,6 +848,7 @@ esp_err_t airdap_network_auth_clear_network_configuration(void)
     if (!lock_auth()) {
         return ESP_FAIL;
     }
+    pairing_window_active = false;
     const esp_err_t error = airdap_config_store_clear(
         AIRDAP_CONFIG_CLEAR_NETWORK);
     if (error != ESP_OK) {

@@ -86,6 +86,17 @@ static void clear_pending_credentials(void)
     pending_wifi_credentials_valid = false;
 }
 
+static esp_err_t set_pairing_window_active(bool active)
+{
+    const esp_err_t error =
+        airdap_network_auth_set_pairing_window_active(active);
+    if (error != ESP_OK) {
+        ESP_LOGE(TAG, "Network pairing window update failed: %s",
+            esp_err_to_name(error));
+    }
+    return error;
+}
+
 static esp_err_t pairing_endpoint_handler(
     uint32_t session_id,
     const uint8_t *input,
@@ -190,6 +201,7 @@ static void request_window_stop(window_outcome_t outcome)
         outcome == WINDOW_OUTCOME_RESTORE) {
         return;
     }
+    (void) set_pairing_window_active(false);
     if (stop_requested) {
         if (outcome == WINDOW_OUTCOME_CLEAR &&
             window_outcome != WINDOW_OUTCOME_CLEAR) {
@@ -211,6 +223,7 @@ static void request_window_stop(window_outcome_t outcome)
 
 static void cleanup_failed_window_start(void)
 {
+    (void) set_pairing_window_active(false);
     if (manager_initialized) {
         const esp_err_t error = network_prov_mgr_deinit();
         if (error != ESP_OK) {
@@ -291,11 +304,18 @@ static esp_err_t start_window(void)
         cleanup_failed_window_start();
         return error;
     }
+    error = set_pairing_window_active(true);
+    if (error != ESP_OK) {
+        network_prov_mgr_stop_provisioning();
+        cleanup_failed_window_start();
+        return error;
+    }
     error = network_prov_mgr_endpoint_register(
         PAIRING_ENDPOINT,
         pairing_endpoint_handler,
         NULL);
     if (error != ESP_OK) {
+        (void) set_pairing_window_active(false);
         network_prov_mgr_stop_provisioning();
         cleanup_failed_window_start();
         return error;
@@ -353,6 +373,7 @@ static esp_err_t capture_candidate_credentials(const wifi_sta_config_t *station)
 static void handle_window_end(void)
 {
     stop_window_timer();
+    (void) set_pairing_window_active(false);
     if (manager_initialized) {
         const esp_err_t error = network_prov_mgr_deinit();
         if (error != ESP_OK) {
@@ -450,6 +471,11 @@ static esp_err_t handle_button_action(
         return start_window();
     case AIRDAP_PROVISIONING_BUTTON_CLEAR: {
         set_button_indicator(false, false);
+        const esp_err_t pairing_error = set_pairing_window_active(false);
+        if (pairing_error != ESP_OK) {
+            request_window_stop(WINDOW_OUTCOME_CLEAR_FAILED);
+            return pairing_error;
+        }
         const esp_err_t error =
             airdap_wifi_manager_clear_network_configuration();
         if (error != ESP_OK) {

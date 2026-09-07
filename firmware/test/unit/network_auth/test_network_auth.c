@@ -449,6 +449,10 @@ static void test_pairing_is_atomic_idempotent_and_versioned(void)
     uint8_t retry_fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE];
     make_pair_request(0U, request);
 
+    assert(airdap_network_auth_pair(request, sizeof(request), first_fingerprint) ==
+        AIRDAP_NETWORK_AUTH_INVALID_STATE);
+    assert(airdap_network_auth_set_pairing_window_active(true) == ESP_OK);
+
     assert(airdap_network_auth_pair(NULL, sizeof(request), first_fingerprint) ==
         AIRDAP_NETWORK_AUTH_INVALID_ARGUMENT);
     assert(airdap_network_auth_pair(request, sizeof(request) - 1U,
@@ -710,11 +714,12 @@ static void test_timeout_stale_token_and_network_clear_release_owner(void)
     airdap_network_auth_connection_close(stale);
 }
 
-static void test_clear_and_pair_commit_are_serialized(void)
+static void test_clear_excludes_a_waiting_pair(void)
 {
     uint8_t current_request[AIRDAP_NETWORK_AUTH_PAIR_REQUEST_SIZE];
     uint8_t current_fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE];
     make_pair_request(0x30U, current_request);
+    assert(airdap_network_auth_set_pairing_window_active(true) == ESP_OK);
     assert(airdap_network_auth_pair(
         current_request,
         sizeof(current_request),
@@ -764,19 +769,14 @@ static void test_clear_and_pair_commit_are_serialized(void)
     assert(pair_auth_probe_complete && pair_was_blocked_by_clear);
     assert(pthread_mutex_unlock(&interleaving_mutex) == 0);
     assert(clear_result == ESP_OK);
-    assert(replacement.result == AIRDAP_NETWORK_AUTH_OK);
-    assert(stored_record_size == 44U);
+    assert(replacement.result == AIRDAP_NETWORK_AUTH_INVALID_STATE);
+    assert(stored_record_size == 0U);
     assert(revoke_count == 5U && revoked_session == owner_info.session_id);
 
-    airdap_network_auth_connection_t *replacement_connection =
-        accept_connection(31);
-    airdap_network_auth_session_info_t replacement_info;
-    assert(airdap_network_auth_session_bind(
-        replacement_connection,
-        NULL,
-        0U,
-        &replacement_info) == AIRDAP_NETWORK_AUTH_OK);
-    airdap_network_auth_connection_close(replacement_connection);
+    airdap_network_auth_connection_t *replacement_connection = NULL;
+    assert(airdap_network_auth_tls_accept(31, &replacement_connection) ==
+        AIRDAP_NETWORK_AUTH_NO_CREDENTIAL);
+    assert(replacement_connection == NULL);
     airdap_network_auth_connection_close(owner);
 }
 
@@ -802,6 +802,7 @@ static void test_persisted_record_load(void)
 {
     prepare_persisted_record(7U, 0U);
     assert(airdap_network_auth_init() == ESP_OK);
+    assert(airdap_network_auth_set_pairing_window_active(true) == ESP_OK);
 
     uint8_t request[AIRDAP_NETWORK_AUTH_PAIR_REQUEST_SIZE];
     uint8_t fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE];
@@ -849,7 +850,7 @@ int main(int argument_count, char **arguments)
     test_handshake_deadline_is_absolute();
     test_single_owner_join_replay_rotation_and_repair();
     test_timeout_stale_token_and_network_clear_release_owner();
-    test_clear_and_pair_commit_are_serialized();
+    test_clear_excludes_a_waiting_pair();
 
     puts("Network authentication tests passed");
     return 0;
