@@ -648,10 +648,23 @@ extending a single global command table. Available commands are:
 - `wifi set` — interactively replace the stored SSID and password, reset
   reconnect backoff, and reconnect immediately;
 - `wifi clear` — remove stored Wi-Fi credentials and stop reconnect attempts;
+- `button press|release|status` — set or inspect a RAM-only simulated
+  `BOOT_KEY`; physical and simulated presses pass through the same 3-second,
+  10-second, and release-confirmation behavior;
 - `swd-idcode [clock_khz]` — reset the SWD line, select SWD, and read the
   target DP IDCODE at 100 kHz by default; accepted clocks are 100–10,000 kHz;
 - `restart` — wait for the acknowledgement transfer to complete, then restart
   AirDAP; a bounded transfer timeout leaves the firmware running.
+
+For HIL automation, press and release may be separate host invocations so the
+normal hold thresholds elapse on the device:
+
+```powershell
+uv run python firmware/tools/airdap-shell.py -c "button press"
+# Wait for the desired physical-button hold duration.
+uv run python firmware/tools/airdap-shell.py -c "button release"
+uv run python firmware/tools/airdap-shell.py -c "button status"
+```
 
 Without `--interval`, the `tasks` CPU values are cumulative since boot. With an
 interval, the command takes two snapshots and reports the difference; scheduling
@@ -682,10 +695,13 @@ may drop burst logs instead of blocking application tasks. ROM, bootloader,
 early application messages, and direct standard output are not captured by the
 Vendor interface. The shell is intended for physically connected development
 systems: it has no authentication, and anyone with access to it can replace or
-clear persistent Wi-Fi credentials. The current development profile does not
+clear persistent Wi-Fi credentials or simulate the physical provisioning/reset
+button. A simulated press remains active across shell sessions until
+`button release` or a device restart. The current development profile does not
 enable Flash Encryption, so those credentials remain plaintext at rest. The
-shell provides only bounded diagnostics and Wi-Fi credential management; it
-deliberately provides no arbitrary DP/AP access, target memory access,
+shell provides only bounded diagnostics, Wi-Fi credential management, and
+BOOT_KEY simulation; it deliberately provides no arbitrary DP/AP access,
+target memory access,
 programming, persistent history, or dynamic log-control commands.
 
 ## Host unit tests
@@ -715,7 +731,8 @@ for suite in \
     dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning network_auth \
     target_uart usb_descriptors project_version \
     debug_shell_commands debug_shell_diagnostics debug_shell_config_status \
-    debug_shell_identity debug_shell_input debug_shell_wifi debug_shell_swd_probe \
+    debug_shell_identity debug_shell_input debug_shell_wifi debug_shell_button \
+    debug_shell_swd_probe \
     debug_shell_tx_state airdap_shell airdap_update \
     airdap_provision airdap_pair airdap_tls_probe wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
@@ -746,7 +763,8 @@ stale-session response suppression, bounded queue failures, host update
 ordering, automatic AirDAP BLE discovery and public-credential command
 construction, UART line-coding
 mapping, both compile-time USB descriptor variants, bounded shell input, the
-bounded SWD IDCODE command flow, debug TX completion state, host tools, and
+simulated BOOT_KEY command/input merge, bounded SWD IDCODE command flow, debug
+TX completion state, host tools, and
 wired HIL helper's protocol checks. They do not prove USB enumeration, real NVS
 power-loss persistence or purge behavior, BLE enumeration or radio lifetime,
 real Wi-Fi provisioning, physical OTA persistence, bootloader rollback on a

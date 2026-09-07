@@ -120,6 +120,14 @@ int airdap_debug_shell_wifi_command(
     return airdap_debug_shell_help_command(arguments, invocation, context);
 }
 
+int airdap_debug_shell_button_command(
+    const char *arguments,
+    const airdap_debug_shell_invocation_t *invocation,
+    void *context)
+{
+    return airdap_debug_shell_help_command(arguments, invocation, context);
+}
+
 int airdap_debug_shell_swd_idcode_command(
     const char *arguments,
     const airdap_debug_shell_invocation_t *invocation,
@@ -585,6 +593,7 @@ static void test_registers_complete_shell_without_legacy_duplicates(void)
     static const char *const expected[] = {
         "help",
         "wifi",
+        "button",
         "swd-idcode",
         "restart",
         "system-info",

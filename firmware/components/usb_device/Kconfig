@@ -9,7 +9,9 @@ menu "AirDAP USB device"
             Add a Vendor-specific Bulk interface for AirDAP firmware
             diagnostics. The shell provides detailed read-only system, heap,
             mode, OTA, target, and FreeRTOS task diagnostics, along with Wi-Fi
-            credential management and restart commands. It also mirrors ESP
+            credential management, BOOT_KEY simulation, and restart commands.
+            Simulating BOOT_KEY can open BLE provisioning or clear network
+            configuration and restart the device. The shell also mirrors ESP
             logs after the host starts a session. Enabling the shell collects
             FreeRTOS task run-time statistics and includes task core affinity.
             Set TinyUSB Vendor Interface Count to 2 when enabling this option.

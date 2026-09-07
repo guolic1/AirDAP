@@ -1,5 +1,6 @@
 #include <stddef.h>
 
+#include "airdap_debug_shell_button.h"
 #include "airdap_debug_shell_core_commands.h"
 
 static const airdap_debug_shell_command_t core_commands[] = {
@@ -20,6 +21,16 @@ static const airdap_debug_shell_command_t core_commands[] = {
             "Status is read-only. Set prompts for an SSID and hidden password; "
             "clear removes stored Wi-Fi credentials.",
         .handler = airdap_debug_shell_wifi_command,
+    },
+    {
+        .name = "button",
+        .usage = "button press|release|status",
+        .summary = "Simulate the BOOT_KEY input",
+        .details =
+            "Press or release the RAM-only simulated BOOT_KEY input, or show "
+            "its state. Physical and simulated input use the same hold and "
+            "release state machine.",
+        .handler = airdap_debug_shell_button_command,
     },
     {
         .name = "swd-idcode",
