@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import math
 import os
 import select
 import sys
@@ -290,6 +291,11 @@ def validate_command_sequence(commands: Sequence[str]) -> None:
             raise ShellError("restart must be the last command in a -c sequence")
 
 
+def validate_sleep_seconds(sleep_seconds: float) -> None:
+    if not math.isfinite(sleep_seconds) or sleep_seconds < 0.0:
+        raise ShellError("--sleep must be a non-negative finite number")
+
+
 def run_command(
     transport: CommandTransport,
     command: str,
@@ -311,6 +317,28 @@ def run_command(
         timeout_seconds,
         COLORED_PROMPT if color else PROMPT,
     )
+
+
+def run_command_sequence(
+    transport: CommandTransport,
+    commands: Sequence[str],
+    timeout_seconds: float,
+    sleep_seconds: float,
+    output_stream: BinaryIO,
+    color: bool = False,
+) -> None:
+    for index, command in enumerate(commands):
+        output_stream.write(
+            run_command(
+                transport,
+                command,
+                timeout_seconds,
+                color=color,
+            )
+        )
+        if sleep_seconds > 0.0 and index + 1 < len(commands):
+            output_stream.flush()
+            time.sleep(sleep_seconds)
 
 
 def _color_enabled(
@@ -460,6 +488,13 @@ def make_parser() -> argparse.ArgumentParser:
         help="seconds to wait for each shell prompt",
     )
     parser.add_argument(
+        "--sleep",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="seconds to wait between repeated -c commands",
+    )
+    parser.add_argument(
         "--color",
         choices=("auto", "always", "never"),
         default="auto",
@@ -474,6 +509,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ShellError("--timeout-ms must be positive")
     if args.command_timeout <= 0:
         raise ShellError("--command-timeout must be positive")
+    validate_sleep_seconds(args.sleep)
     validate_command_sequence(args.command)
 
     try:
@@ -519,15 +555,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     COLORED_PROMPT if color else PROMPT,
                 )
             )
-            for command in args.command:
-                sys.stdout.buffer.write(
-                    run_command(
-                        transport,
-                        command,
-                        args.command_timeout,
-                        color=color,
-                    )
-                )
+            run_command_sequence(
+                transport,
+                args.command,
+                args.command_timeout,
+                args.sleep,
+                sys.stdout.buffer,
+                color=color,
+            )
             sys.stdout.buffer.flush()
         else:
             interactive_session(transport, sys.stdin.buffer, sys.stdout.buffer)

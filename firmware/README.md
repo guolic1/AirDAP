@@ -583,6 +583,10 @@ python tools/airdap-shell.py \
     -c uart-status -c discovery-status
 ```
 
+Use `--sleep SECONDS` to wait between each adjacent pair of repeated `-c`
+commands. The delay begins only after the preceding command has completed and
+the firmware prompt has returned; no delay is added after the final command.
+
 `wifi set` is interactive-only so credentials cannot be supplied through shell
 command history or `-c` process arguments. It first prompts for an SSID and then
 for a password; password input is not echoed, is not added to shell history,
@@ -656,13 +660,12 @@ extending a single global command table. Available commands are:
 - `restart` — wait for the acknowledgement transfer to complete, then restart
   AirDAP; a bounded transfer timeout leaves the firmware running.
 
-For HIL automation, press and release may be separate host invocations so the
-normal hold thresholds elapse on the device:
+For HIL automation, one host invocation can hold the simulated button across
+the normal device-side threshold before releasing it:
 
 ```powershell
-uv run python firmware/tools/airdap-shell.py -c "button press"
-# Wait for the desired physical-button hold duration.
-uv run python firmware/tools/airdap-shell.py -c "button release"
+uv run python firmware/tools/airdap-shell.py `
+    -c "button press" --sleep 3.5 -c "button release"
 uv run python firmware/tools/airdap-shell.py -c "button status"
 ```
 

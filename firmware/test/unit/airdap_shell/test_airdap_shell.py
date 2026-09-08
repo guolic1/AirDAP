@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import sys
 import threading
 import time
@@ -257,6 +258,87 @@ class AirDapShellTests(unittest.TestCase):
 
         self.assertEqual(args.color, "always")
 
+    def test_parser_accepts_sleep_between_repeated_commands(self) -> None:
+        args = airdap_shell.make_parser().parse_args(
+            [
+                "-c",
+                "button press",
+                "--sleep",
+                "3.5",
+                "-c",
+                "button release",
+            ]
+        )
+
+        self.assertEqual(args.command, ["button press", "button release"])
+        self.assertEqual(args.sleep, 3.5)
+
+    def test_sleep_seconds_must_be_non_negative_and_finite(self) -> None:
+        for value in (-0.1, float("nan"), float("inf"), -float("inf")):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(airdap_shell.ShellError, "--sleep"):
+                    airdap_shell.validate_sleep_seconds(value)
+
+    def test_main_passes_sleep_to_command_sequence(self) -> None:
+        device = object()
+        transport = mock.Mock()
+        output = io.BytesIO()
+        usb_package = types.ModuleType("usb")
+        usb_package.__path__ = []
+        usb_core = types.ModuleType("usb.core")
+        usb_core.find = mock.Mock(return_value=[device])
+        usb_util = types.ModuleType("usb.util")
+        usb_package.core = usb_core
+        usb_package.util = usb_util
+
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "usb": usb_package,
+                "usb.core": usb_core,
+                "usb.util": usb_util,
+            },
+        ), mock.patch.object(
+            airdap_shell,
+            "select_airdap_device",
+            return_value=device,
+        ), mock.patch.object(
+            airdap_shell,
+            "VendorShellTransport",
+            return_value=transport,
+        ), mock.patch.object(
+            airdap_shell,
+            "read_until_prompt",
+            return_value=b"airdap> ",
+        ), mock.patch.object(
+            airdap_shell,
+            "run_command_sequence",
+        ) as run_sequence, mock.patch.object(
+            airdap_shell.sys,
+            "stdout",
+            types.SimpleNamespace(buffer=output),
+        ):
+            result = airdap_shell.main(
+                [
+                    "-c",
+                    "button press",
+                    "--sleep",
+                    "3.5",
+                    "-c",
+                    "button release",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        run_sequence.assert_called_once_with(
+            transport,
+            ["button press", "button release"],
+            3.0,
+            3.5,
+            output,
+            color=False,
+        )
+
     def test_rejects_wrong_interface_endpoint_contract(self) -> None:
         wrong = FakeDevice(FakeInterface([FakeEndpoint(0x05), FakeEndpoint(0x85)]))
 
@@ -294,6 +376,48 @@ class AirDapShellTests(unittest.TestCase):
         self.assertIn(b"target_mv=3300", transcript)
         self.assertTrue(transcript.endswith(b"airdap> "))
         self.assertTrue(all(timeout <= 200 for timeout in transport.read_timeouts))
+
+    def test_command_sequence_sleeps_only_between_commands(self) -> None:
+        transport = FakeCommandTransport([])
+        output = io.BytesIO()
+        events: list[tuple[str, object]] = []
+
+        def fake_run_command(
+            _transport,
+            command,
+            _timeout_seconds,
+            color=False,
+        ):
+            events.append(("command", command))
+            self.assertFalse(color)
+            return f"{command}\n".encode("ascii")
+
+        with mock.patch.object(
+            airdap_shell,
+            "run_command",
+            side_effect=fake_run_command,
+        ), mock.patch.object(
+            airdap_shell.time,
+            "sleep",
+            side_effect=lambda seconds: events.append(("sleep", seconds)),
+        ):
+            airdap_shell.run_command_sequence(
+                transport,
+                ["button press", "button release"],
+                timeout_seconds=3.0,
+                sleep_seconds=3.5,
+                output_stream=output,
+            )
+
+        self.assertEqual(
+            events,
+            [
+                ("command", "button press"),
+                ("sleep", 3.5),
+                ("command", "button release"),
+            ],
+        )
+        self.assertEqual(output.getvalue(), b"button press\nbutton release\n")
 
     def test_colored_command_waits_for_prompt_reset_suffix(self) -> None:
         transport = FakeCommandTransport([
