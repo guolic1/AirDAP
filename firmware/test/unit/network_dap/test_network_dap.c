@@ -161,6 +161,30 @@ static void append_request(
     tls_input_size += encoded_size;
 }
 
+static void append_oversized_dap_header(
+    uint32_t session_id,
+    uint32_t sequence,
+    uint16_t payload_size)
+{
+    assert(tls_input_size + AIRDAP_FRAME_HEADER_SIZE <= sizeof(tls_input));
+    uint8_t *header = tls_input + tls_input_size;
+    memset(header, 0, AIRDAP_FRAME_HEADER_SIZE);
+    memcpy(header, "ADAP", 4U);
+    header[4] = AIRDAP_FRAME_PROTOCOL_VERSION;
+    header[5] = AIRDAP_FRAME_TYPE_DAP_REQUEST;
+    header[8] = (uint8_t) (session_id >> 24U);
+    header[9] = (uint8_t) (session_id >> 16U);
+    header[10] = (uint8_t) (session_id >> 8U);
+    header[11] = (uint8_t) session_id;
+    header[12] = (uint8_t) (sequence >> 24U);
+    header[13] = (uint8_t) (sequence >> 16U);
+    header[14] = (uint8_t) (sequence >> 8U);
+    header[15] = (uint8_t) sequence;
+    header[16] = (uint8_t) (payload_size >> 8U);
+    header[17] = (uint8_t) payload_size;
+    tls_input_size += AIRDAP_FRAME_HEADER_SIZE;
+}
+
 static airdap_frame_header_t next_response(
     size_t *offset,
     const uint8_t **payload)
@@ -659,6 +683,57 @@ static void test_dap_before_auth_is_rejected_without_dispatch(void)
         AIRDAP_FRAME_ERROR_UNAUTHENTICATED);
 }
 
+static void test_non_hello_first_frame_is_rejected_and_closed(void)
+{
+    static const uint8_t types[] = {
+        AIRDAP_FRAME_TYPE_AUTH,
+        AIRDAP_FRAME_TYPE_DAP_REQUEST,
+        AIRDAP_FRAME_TYPE_CONTROL_REQUEST,
+        AIRDAP_FRAME_TYPE_KEEPALIVE,
+    };
+    for (size_t index = 0U; index < sizeof(types); ++index) {
+        reset_connection_fakes();
+        append_request(types[index], 20U + (uint32_t) index, 1U,
+            NULL, 0U);
+        append_request(AIRDAP_FRAME_TYPE_HELLO,
+            20U + (uint32_t) index, 2U, NULL, 0U);
+        airdap_network_dap_handle_socket(TEST_CLIENT_FD);
+
+        assert(auth_bind_calls == 0U && dap_open_calls == 0U);
+        size_t offset = 0U;
+        const uint8_t *payload = NULL;
+        const airdap_frame_header_t error = next_response(&offset, &payload);
+        assert(error.type == AIRDAP_FRAME_TYPE_ERROR && error.sequence == 1U);
+        assert_error_payload(payload, error.payload_length,
+            AIRDAP_FRAME_ERROR_UNAUTHENTICATED);
+        assert(offset == tls_output_size);
+    }
+}
+
+static void test_oversized_dap_payload_returns_stable_error(void)
+{
+    static const uint16_t payload_sizes[] = {509U, 4096U};
+    for (size_t index = 0U;
+         index < sizeof(payload_sizes) / sizeof(payload_sizes[0]);
+         ++index) {
+        reset_connection_fakes();
+        append_oversized_dap_header(
+            30U + (uint32_t) index,
+            1U,
+            payload_sizes[index]);
+        airdap_network_dap_handle_socket(TEST_CLIENT_FD);
+
+        size_t offset = 0U;
+        const uint8_t *payload = NULL;
+        const airdap_frame_header_t error = next_response(&offset, &payload);
+        assert(error.type == AIRDAP_FRAME_TYPE_ERROR && error.sequence == 1U);
+        assert_error_payload(payload, error.payload_length,
+            AIRDAP_FRAME_ERROR_PAYLOAD_TOO_LARGE);
+        assert(offset == tls_output_size);
+        assert(auth_bind_calls == 0U && dap_open_calls == 0U);
+    }
+}
+
 static void test_usb_owner_returns_busy_without_dap_dispatch(void)
 {
     reset_connection_fakes();
@@ -841,6 +916,8 @@ int main(void)
     start_component_once();
     test_authenticated_hello_dap_info_and_keepalive();
     test_dap_before_auth_is_rejected_without_dispatch();
+    test_non_hello_first_frame_is_rejected_and_closed();
+    test_oversized_dap_payload_returns_stable_error();
     test_usb_owner_returns_busy_without_dap_dispatch();
     test_invalid_auth_payload_never_marks_connection_authenticated();
     test_usb_ota_vendor_commands_are_not_exposed_over_dap_tcp();

@@ -88,6 +88,7 @@ typedef enum {
     FRAME_READ_OK = 0,
     FRAME_READ_CLOSED,
     FRAME_READ_TIMEOUT,
+    FRAME_READ_DAP_PAYLOAD_TOO_LARGE,
     FRAME_READ_INVALID,
     FRAME_READ_FAILED,
 } frame_read_result_t;
@@ -289,6 +290,27 @@ static frame_read_result_t read_frame(
         &frame_size,
         &error_code);
     if (decode_status == AIRDAP_FRAME_DECODE_INVALID_FRAME) {
+        if (error_code == AIRDAP_FRAME_ERROR_PAYLOAD_TOO_LARGE) {
+            const uint8_t length_high = connection->frame_buffer[16];
+            const uint8_t length_low = connection->frame_buffer[17];
+            connection->frame_buffer[16] = 0U;
+            connection->frame_buffer[17] = 0U;
+            decode_status = airdap_frame_decode(
+                connection->frame_buffer,
+                AIRDAP_FRAME_HEADER_SIZE,
+                header,
+                payload,
+                &frame_size,
+                &error_code);
+            connection->frame_buffer[16] = length_high;
+            connection->frame_buffer[17] = length_low;
+            if (decode_status == AIRDAP_FRAME_DECODE_OK &&
+                header->type == AIRDAP_FRAME_TYPE_DAP_REQUEST) {
+                header->payload_length =
+                    ((uint16_t) length_high << 8U) | length_low;
+                return FRAME_READ_DAP_PAYLOAD_TOO_LARGE;
+            }
+        }
         return FRAME_READ_INVALID;
     }
     if (decode_status == AIRDAP_FRAME_DECODE_OK) {
@@ -841,6 +863,13 @@ static void run_connection(network_connection_t *connection)
             authenticated ? INT64_MAX : pre_auth_deadline,
             &request,
             &payload);
+        if (read_result == FRAME_READ_DAP_PAYLOAD_TOO_LARGE) {
+            (void) send_error(
+                connection,
+                &request,
+                AIRDAP_FRAME_ERROR_PAYLOAD_TOO_LARGE);
+            return;
+        }
         if (read_result != FRAME_READ_OK) {
             return;
         }
@@ -859,6 +888,13 @@ static void run_connection(network_connection_t *connection)
                 return;
             }
             continue;
+        }
+        if (!hello_complete && request.type != AIRDAP_FRAME_TYPE_HELLO) {
+            (void) send_error(
+                connection,
+                &request,
+                AIRDAP_FRAME_ERROR_UNAUTHENTICATED);
+            return;
         }
 
         switch (request.type) {
