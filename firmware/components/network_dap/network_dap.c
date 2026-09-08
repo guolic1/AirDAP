@@ -36,6 +36,7 @@ enum {
     CONNECTION_TASK_PRIORITY = 5,
     LISTENER_POLL_MS = 100,
     APPLICATION_IO_TIMEOUT_US = 5000000,
+    REVOKE_QUEUE_DEPTH = 4,
     FRAME_BUFFER_SIZE = AIRDAP_FRAME_HEADER_SIZE +
         AIRDAP_FRAME_MAX_PAYLOAD_SIZE,
     RESPONSE_BUFFER_SIZE = AIRDAP_FRAME_HEADER_SIZE +
@@ -70,7 +71,6 @@ typedef struct {
     QueueHandle_t response_queue;
     atomic_uint auth_session_id;
     atomic_uint dap_session;
-    atomic_bool revoked;
     atomic_uintptr_t pending_response_token;
     uintptr_t next_response_token;
     uint8_t frame_buffer[FRAME_BUFFER_SIZE];
@@ -94,9 +94,11 @@ typedef enum {
 
 static const char *TAG = "airdap_net_dap";
 static SemaphoreHandle_t registry_mutex;
+static QueueHandle_t revoke_queue;
 static network_connection_t connections[AIRDAP_NETWORK_DAP_MAX_CONNECTIONS];
 static const airdap_device_identity_t *device_identity;
 static atomic_bool initialization_started;
+static atomic_bool revoke_all;
 static bool dap_claimed;
 static int listener_socket = -1;
 
@@ -398,7 +400,6 @@ static network_connection_t *allocate_connection(int socket_fd)
             selected->next_response_token = 1U;
             atomic_store(&selected->auth_session_id, 0U);
             atomic_store(&selected->dap_session, 0U);
-            atomic_store(&selected->revoked, false);
             atomic_store(&selected->pending_response_token, 0U);
             break;
         }
@@ -486,40 +487,61 @@ static void revoke_session(void *context, uint32_t session_id)
     if (session_id == 0U) {
         return;
     }
+    if (revoke_queue == NULL ||
+        xQueueSend(revoke_queue, &session_id, 0U) != pdTRUE) {
+        /* Losing a revocation is unsafe. A saturated queue therefore asks the
+         * listener to close every authenticated connection on its next pass. */
+        atomic_store(&revoke_all, true);
+    }
+}
+
+static void process_revoked_session(uint32_t session_id, bool all_sessions)
+{
+    airdap_dap_session_id_t dap_sessions[
+        AIRDAP_NETWORK_DAP_MAX_CONNECTIONS] = {0};
+    size_t dap_session_count = 0U;
+    if (!registry_lock()) {
+        atomic_store(&revoke_all, true);
+        return;
+    }
     for (size_t index = 0U;
          index < AIRDAP_NETWORK_DAP_MAX_CONNECTIONS;
          ++index) {
-        if (atomic_load(&connections[index].auth_session_id) == session_id) {
-            atomic_store(&connections[index].revoked, true);
+        network_connection_t *connection = &connections[index];
+        const uint32_t current_session =
+            atomic_load(&connection->auth_session_id);
+        if (connection->allocated && connection->registered &&
+            current_session != 0U &&
+            (all_sessions || current_session == session_id)) {
+            (void) shutdown(connection->socket_fd, SHUT_RDWR);
+            const airdap_dap_session_id_t dap_session =
+                atomic_load(&connection->dap_session);
+            if (dap_session != 0U) {
+                dap_sessions[dap_session_count++] = dap_session;
+            }
         }
+    }
+    registry_unlock();
+
+    /* Do not clear dap_session here. The connection task remains the teardown
+     * owner and must also pass through session_close before deleting its
+     * response queue. Concurrent closes serialize on dap_service's mutex. */
+    for (size_t index = 0U; index < dap_session_count; ++index) {
+        (void) airdap_dap_service_session_close(
+            AIRDAP_DAP_TRANSPORT_NETWORK,
+            dap_sessions[index]);
     }
 }
 
 void airdap_network_dap_process_revocations(void)
 {
-    for (size_t index = 0U;
-         index < AIRDAP_NETWORK_DAP_MAX_CONNECTIONS;
-         ++index) {
-        network_connection_t *connection = &connections[index];
-        if (!atomic_exchange(&connection->revoked, false)) {
-            continue;
-        }
-        if (!registry_lock()) {
-            atomic_store(&connection->revoked, true);
-            continue;
-        }
-        airdap_dap_session_id_t dap_session = 0U;
-        if (connection->allocated && connection->registered &&
-            atomic_load(&connection->auth_session_id) != 0U) {
-            (void) shutdown(connection->socket_fd, SHUT_RDWR);
-            dap_session = atomic_exchange(&connection->dap_session, 0U);
-        }
-        registry_unlock();
-        if (dap_session != 0U) {
-            (void) airdap_dap_service_session_close(
-                AIRDAP_DAP_TRANSPORT_NETWORK,
-                dap_session);
-        }
+    if (atomic_exchange(&revoke_all, false)) {
+        process_revoked_session(0U, true);
+    }
+    uint32_t session_id = 0U;
+    while (revoke_queue != NULL &&
+           xQueueReceive(revoke_queue, &session_id, 0U) == pdTRUE) {
+        process_revoked_session(session_id, false);
     }
 }
 
@@ -996,6 +1018,10 @@ esp_err_t airdap_network_dap_start(void)
     }
     registry_mutex = xSemaphoreCreateMutex();
     if (registry_mutex == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    revoke_queue = xQueueCreate(REVOKE_QUEUE_DEPTH, sizeof(uint32_t));
+    if (revoke_queue == NULL) {
         return ESP_ERR_NO_MEM;
     }
 

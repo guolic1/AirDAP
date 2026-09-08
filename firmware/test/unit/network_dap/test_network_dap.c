@@ -37,8 +37,11 @@ struct airdap_network_auth_connection {
 
 struct fake_queue {
     size_t item_size;
-    bool occupied;
-    uint8_t *item;
+    size_t capacity;
+    size_t count;
+    size_t head;
+    size_t tail;
+    uint8_t *items;
 };
 
 struct fake_semaphore {
@@ -72,7 +75,7 @@ static airdap_dap_service_result_t dap_open_result;
 static airdap_dap_service_result_t dap_submit_result;
 static airdap_mode_dap_result_t admission_result;
 static bool deliver_dap_response;
-static bool revoke_at_end_of_input;
+static uint32_t revoke_session_id_at_end;
 static bool revoke_during_submit;
 static bool timeout_at_end_of_input;
 static bool socket_shutdown;
@@ -93,6 +96,7 @@ static void *revoke_context;
 static airdap_dap_response_fn saved_response_callback;
 static void *saved_response_context;
 static airdap_dap_response_token_t saved_response_token;
+static bool callback_delivered_during_close;
 
 static void reset_connection_fakes(void)
 {
@@ -108,7 +112,7 @@ static void reset_connection_fakes(void)
     dap_submit_result = AIRDAP_DAP_SERVICE_OK;
     admission_result = AIRDAP_MODE_DAP_ALLOWED;
     deliver_dap_response = true;
-    revoke_at_end_of_input = false;
+    revoke_session_id_at_end = 0U;
     revoke_during_submit = false;
     timeout_at_end_of_input = false;
     socket_shutdown = false;
@@ -128,6 +132,7 @@ static void reset_connection_fakes(void)
     saved_response_callback = NULL;
     saved_response_context = NULL;
     saved_response_token = 0U;
+    callback_delivered_during_close = false;
 }
 
 static void append_request(
@@ -230,10 +235,11 @@ ssize_t airdap_network_auth_tls_read(
 {
     assert(connection == &auth_connection);
     if (tls_input_offset == tls_input_size) {
-        if (revoke_at_end_of_input) {
-            revoke_at_end_of_input = false;
+        if (revoke_session_id_at_end != 0U) {
+            const uint32_t revoked_session_id = revoke_session_id_at_end;
+            revoke_session_id_at_end = 0U;
             assert(revoke_handler != NULL);
-            revoke_handler(revoke_context, 77U);
+            revoke_handler(revoke_context, revoked_session_id);
             airdap_network_dap_process_revocations();
         }
         if (timeout_at_end_of_input) {
@@ -326,13 +332,13 @@ airdap_dap_service_result_t airdap_dap_service_session_close(
     assert(session == 55U);
     ++dap_close_calls;
     if (saved_response_callback != NULL) {
-        assert(!saved_response_callback(
+        callback_delivered_during_close = saved_response_callback(
             saved_response_context,
             transport,
             session,
             saved_response_token,
             dap_response,
-            dap_response_size));
+            dap_response_size);
         saved_response_callback = NULL;
     }
     return AIRDAP_DAP_SERVICE_OK;
@@ -386,12 +392,13 @@ airdap_mode_dap_result_t airdap_mode_state_dap_admission(
 
 QueueHandle_t xQueueCreate(UBaseType_t length, UBaseType_t item_size)
 {
-    assert(length == 1U);
+    assert(length > 0U && item_size > 0U);
     struct fake_queue *queue = calloc(1U, sizeof(*queue));
     assert(queue != NULL);
-    queue->item = malloc(item_size);
-    assert(queue->item != NULL);
+    queue->items = malloc((size_t) length * item_size);
+    assert(queue->items != NULL);
     queue->item_size = item_size;
+    queue->capacity = length;
     return queue;
 }
 
@@ -401,11 +408,15 @@ BaseType_t xQueueSend(
     TickType_t ticks_to_wait)
 {
     assert(queue != NULL && item != NULL && ticks_to_wait == 0U);
-    if (queue->occupied) {
+    if (queue->count == queue->capacity) {
         return pdFALSE;
     }
-    memcpy(queue->item, item, queue->item_size);
-    queue->occupied = true;
+    memcpy(
+        queue->items + queue->tail * queue->item_size,
+        item,
+        queue->item_size);
+    queue->tail = (queue->tail + 1U) % queue->capacity;
+    ++queue->count;
     return pdTRUE;
 }
 
@@ -415,22 +426,29 @@ BaseType_t xQueueReceive(
     TickType_t ticks_to_wait)
 {
     assert(queue != NULL && item != NULL);
-    if (!queue->occupied) {
+    if (queue->count == 0U) {
+        if (ticks_to_wait == 0U) {
+            return pdFALSE;
+        }
         assert(ticks_to_wait == pdMS_TO_TICKS(
             AIRDAP_DAP_SERVICE_REQUEST_TIMEOUT_US / 1000U));
         ++queue_timeout_count;
         now_us += AIRDAP_DAP_SERVICE_REQUEST_TIMEOUT_US;
         return pdFALSE;
     }
-    memcpy(item, queue->item, queue->item_size);
-    queue->occupied = false;
+    memcpy(
+        item,
+        queue->items + queue->head * queue->item_size,
+        queue->item_size);
+    queue->head = (queue->head + 1U) % queue->capacity;
+    --queue->count;
     return pdTRUE;
 }
 
 void vQueueDelete(QueueHandle_t queue)
 {
     assert(queue != NULL);
-    free(queue->item);
+    free(queue->items);
     free(queue);
 }
 
@@ -719,6 +737,7 @@ static void test_dap_timeout_discards_late_callback(void)
 
     assert(queue_timeout_count == 1U);
     assert(saved_response_callback == NULL);
+    assert(!callback_delivered_during_close);
     size_t offset = 0U;
     const uint8_t *payload = NULL;
     (void) next_response(&offset, &payload);
@@ -758,12 +777,24 @@ static void test_malformed_header_is_closed_without_trusting_response_fields(voi
 static void test_revoke_shuts_down_registered_connection(void)
 {
     reset_connection_fakes();
-    revoke_at_end_of_input = true;
+    revoke_session_id_at_end = 77U;
     append_request(AIRDAP_FRAME_TYPE_HELLO, 14U, 1U, NULL, 0U);
     append_request(AIRDAP_FRAME_TYPE_AUTH, 14U, 2U, NULL, 0U);
     airdap_network_dap_handle_socket(TEST_CLIENT_FD);
 
     assert(shutdown_calls == 1U);
+    assert(dap_close_calls == 2U && auth_close_calls == 1U);
+}
+
+static void test_unrelated_revoke_does_not_shutdown_registered_connection(void)
+{
+    reset_connection_fakes();
+    revoke_session_id_at_end = 88U;
+    append_request(AIRDAP_FRAME_TYPE_HELLO, 19U, 1U, NULL, 0U);
+    append_request(AIRDAP_FRAME_TYPE_AUTH, 19U, 2U, NULL, 0U);
+    airdap_network_dap_handle_socket(TEST_CLIENT_FD);
+
+    assert(shutdown_calls == 0U);
     assert(dap_close_calls == 1U && auth_close_calls == 1U);
 }
 
@@ -779,8 +810,11 @@ static void test_revoke_closes_service_before_queued_dap_can_respond(void)
     airdap_network_dap_handle_socket(TEST_CLIENT_FD);
 
     assert(shutdown_calls == 1U);
-    assert(dap_close_calls == 1U);
+    /* The revoke path and the connection teardown both synchronize through
+     * session_close before the response queue is deleted. */
+    assert(dap_close_calls == 2U);
     assert(saved_response_callback == NULL);
+    assert(callback_delivered_during_close);
     size_t offset = 0U;
     const uint8_t *payload = NULL;
     (void) next_response(&offset, &payload);
@@ -814,6 +848,7 @@ int main(void)
     test_sequence_error_is_stable_and_not_dispatched();
     test_malformed_header_is_closed_without_trusting_response_fields();
     test_revoke_shuts_down_registered_connection();
+    test_unrelated_revoke_does_not_shutdown_registered_connection();
     test_revoke_closes_service_before_queued_dap_can_respond();
     test_pre_auth_partial_frame_times_out();
     puts("Network DAP transport tests passed");
