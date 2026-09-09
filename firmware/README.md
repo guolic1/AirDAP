@@ -40,10 +40,14 @@ On Windows x64, use PowerShell:
 
 ```powershell
 Set-Location firmware
-python tools/setup.py
+uv run --locked python tools/setup.py
 . .\get_env.ps1
 idf.py build
 ```
+
+PowerShell activation prefers `uv` and uses the repository's locked Python
+environment. If `uv` is unavailable, `get_env.ps1` falls back to the `python`
+command already available on `PATH`.
 
 If ESP-IDF v6.1.0 source is already present, pass its directory to avoid
 downloading another copy. AirDAP still installs the same minimal ESP32-S3

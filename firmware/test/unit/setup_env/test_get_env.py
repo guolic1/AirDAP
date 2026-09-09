@@ -24,6 +24,13 @@ class GetEnvironmentTests(unittest.TestCase):
 
     def make_idf(self, path: Path) -> Path:
         path.mkdir(parents=True)
+        tools = path / "tools"
+        tools.mkdir()
+        (tools / "activate.py").write_text(
+            "from pathlib import Path\n"
+            "print(Path(__file__).resolve().parents[1] / 'export.ps1')\n",
+            encoding="utf-8",
+        )
         (path / "export.sh").write_text(
             'export IDF_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"\n'
             'export AIRDAP_TEST_ACTIVATED="$IDF_PATH"\n',
@@ -248,6 +255,136 @@ class GetEnvironmentTests(unittest.TestCase):
         self.assertEqual(output_lines[-3].casefold(), configured_path.casefold())
         self.assertEqual(output_lines[-2], "1")
         self.assertEqual(output_lines[-1], "<unset>")
+
+    def test_powershell_prefers_uv_launcher_when_available(self) -> None:
+        powershell = shutil.which("pwsh") or shutil.which("pwsh.exe")
+        if powershell is None:
+            self.skipTest("PowerShell is unavailable on this host")
+
+        shutil.copy2(GET_ENV_PS1, self.firmware / "get_env.ps1")
+        idf_path = self.make_idf(Path(self.temporary_directory.name) / "external idf")
+        script_path = self._powershell_path(self.firmware / "get_env.ps1", powershell)
+        configured_path = self._powershell_path(idf_path, powershell)
+        project_path = self._powershell_path(self.firmware.parent, powershell)
+        activate_path = self._powershell_path(
+            idf_path / "tools" / "activate.py", powershell
+        )
+        export_path = self._powershell_path(idf_path / "export.ps1", powershell)
+        self.configure(configured_path, "external")
+        escaped_script = script_path.replace("'", "''")
+        escaped_export = export_path.replace("'", "''")
+
+        result = subprocess.run(
+            [
+                powershell,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "function global:uv { "
+                "$env:AIRDAP_TEST_UV_ARGS = $args -join '|'; "
+                "$global:LASTEXITCODE = 0; "
+                f"Write-Output '{escaped_export}' }}; "
+                "function global:python { "
+                "$env:AIRDAP_TEST_PYTHON_CALLED = 'yes'; "
+                "throw 'python fallback must not run' }; "
+                f". '{escaped_script}'; "
+                "Write-Output \"uv=[$env:AIRDAP_TEST_UV_ARGS]\"; "
+                "Write-Output \"python=[$env:AIRDAP_TEST_PYTHON_CALLED]\"",
+            ],
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected_args = (
+            f"run|--project|{project_path}|--locked|python|"
+            f"{activate_path}|--export|--shell|powershell"
+        )
+        self.assertIn(f"uv=[{expected_args}]", result.stdout)
+        self.assertIn("python=[]", result.stdout)
+
+    def test_powershell_falls_back_to_python_when_uv_is_unavailable(self) -> None:
+        powershell = shutil.which("pwsh") or shutil.which("pwsh.exe")
+        if powershell is None:
+            self.skipTest("PowerShell is unavailable on this host")
+
+        shutil.copy2(GET_ENV_PS1, self.firmware / "get_env.ps1")
+        idf_path = self.make_idf(Path(self.temporary_directory.name) / "external idf")
+        script_path = self._powershell_path(self.firmware / "get_env.ps1", powershell)
+        configured_path = self._powershell_path(idf_path, powershell)
+        activate_path = self._powershell_path(
+            idf_path / "tools" / "activate.py", powershell
+        )
+        export_path = self._powershell_path(idf_path / "export.ps1", powershell)
+        self.configure(configured_path, "external")
+        escaped_script = script_path.replace("'", "''")
+        escaped_export = export_path.replace("'", "''")
+
+        result = subprocess.run(
+            [
+                powershell,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "$env:PATH = ''; "
+                "function global:python { "
+                "$env:AIRDAP_TEST_PYTHON_ARGS = $args -join '|'; "
+                "$global:LASTEXITCODE = 0; "
+                f"Write-Output '{escaped_export}' }}; "
+                f". '{escaped_script}'; "
+                "Write-Output \"python=[$env:AIRDAP_TEST_PYTHON_ARGS]\"",
+            ],
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected_args = f"{activate_path}|--export|--shell|powershell"
+        self.assertIn(f"python=[{expected_args}]", result.stdout)
+
+    def test_powershell_does_not_fallback_when_uv_fails(self) -> None:
+        powershell = shutil.which("pwsh") or shutil.which("pwsh.exe")
+        if powershell is None:
+            self.skipTest("PowerShell is unavailable on this host")
+
+        shutil.copy2(GET_ENV_PS1, self.firmware / "get_env.ps1")
+        idf_path = self.make_idf(Path(self.temporary_directory.name) / "external idf")
+        script_path = self._powershell_path(self.firmware / "get_env.ps1", powershell)
+        configured_path = self._powershell_path(idf_path, powershell)
+        self.configure(configured_path, "external")
+        escaped_script = script_path.replace("'", "''")
+
+        result = subprocess.run(
+            [
+                powershell,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "function global:uv { $global:LASTEXITCODE = 23 }; "
+                "function global:python { "
+                "$env:AIRDAP_TEST_PYTHON_CALLED = 'yes' }; "
+                "try { "
+                f". '{escaped_script}'; Write-Output 'unexpected-success' "
+                "} catch { Write-Output \"error=[$($_.Exception.Message)]\" }; "
+                "Write-Output \"python=[$env:AIRDAP_TEST_PYTHON_CALLED]\"",
+            ],
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "error=[get_env.ps1: uv failed to activate ESP-IDF (exit 23)]",
+            result.stdout,
+        )
+        self.assertIn("python=[]", result.stdout)
+        self.assertNotIn("unexpected-success", result.stdout)
 
     def test_powershell_accepts_legacy_one_line_configuration_when_available(
         self,
