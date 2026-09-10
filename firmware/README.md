@@ -40,10 +40,14 @@ On Windows x64, use PowerShell:
 
 ```powershell
 Set-Location firmware
-python tools/setup.py
+uv run --locked python tools/setup.py
 . .\get_env.ps1
 idf.py build
 ```
+
+PowerShell activation prefers `uv` and uses the repository's locked Python
+environment. If `uv` is unavailable, `get_env.ps1` falls back to the `python`
+command already available on `PATH`.
 
 If ESP-IDF v6.1.0 source is already present, pass its directory to avoid
 downloading another copy. AirDAP still installs the same minimal ESP32-S3
@@ -136,6 +140,8 @@ not part of this repository. The application currently provides:
   a public credential gated by physical button access;
 - a TLS 1.3 PSK-DHE authentication layer with one rotatable credential and
   one authenticated network-owner session;
+- a bounded authenticated DAP listener on TCP 3260 with AirDAP v1 framing,
+  strict session/sequence checks, and disconnect-safe response routing;
 - a bounded transport-independent DAP service with session-safe response
   routing for USB and future network sessions;
 - target reset, power/status GPIO, VTref, and USB VBUS monitoring.
@@ -147,7 +153,7 @@ digits. Its 128-bit UUID is the first 16 bytes of
 development identifiers; product firmware must use identifiers the project is
 authorized to ship. The checked-in layout is for the confirmed 8 MiB module
 and provides two 4032 KiB OTA application slots. Secure Boot, Flash Encryption,
-authenticated updates, authenticated network listeners, and a production
+authenticated updates, authenticated UART/control listeners, and a production
 credential lifecycle remain deferred.
 
 The firmware version is the single tag pointing directly at the built commit.
@@ -301,8 +307,9 @@ TTL and are not evidence that the device is still advertising it.
 
 mDNS fields are unauthenticated hints. They contain no Wi-Fi or pairing secret
 and must never be used to authorize a connection. TCP ports 3260 and 3261 are
-the reserved AirDAP protocol ports; the authenticated DAP/control and target
-UART listeners remain deferred to their network-transport slices.
+the reserved AirDAP protocol ports. TCP 3260 now provides authenticated DAP;
+control operations and the target-UART listener remain deferred to their
+network-transport slices.
 
 Follow [`test/hil/mdns.md`](test/hil/mdns.md) to validate live announcements,
 address replacement, offline withdrawal, and firmware-version consistency from
@@ -428,13 +435,49 @@ only with that token. Privileged dispatch must revalidate the binding, and a
 disconnect, 60-second idle timeout, network clear, credential rotation, or
 restart releases it.
 
-This P4-T2 slice supplies the authentication/session boundary but deliberately
-does not open TCP port 3260 or dispatch DAP frames; those belong to P4-T3. Once
-that listener or a dedicated HIL harness is present, the standard-library
-Python TLS-PSK probe can verify the negotiated version and cipher:
+The standard-library Python TLS-PSK probe verifies only the negotiated version
+and cipher:
 
 ```sh
 python tools/airdap-tls-probe.py 192.0.2.10 \
+    --credential "${XDG_CONFIG_HOME:-$HOME/.config}/airdap/ADP-001122334455.json"
+```
+
+The DAP listener starts only after the Wi-Fi manager starts successfully, and
+mDNS is published only after that listener is ready. Each connection completes
+TLS before reading AirDAP data and then requires `HELLO` followed by `AUTH`.
+The frame `session_id` is a non-zero client-selected connection ID with sequence
+numbers starting at one; the logical authenticated owner session remains a
+separate value returned by `AUTH`.
+
+V1 uses these payloads on TCP 3260:
+
+- `HELLO` request is empty. Its response is the 16-byte device UUID, a 32-bit
+  big-endian capability mask, the fixed 16-byte `ADP-...` device ID, and the
+  remaining UTF-8 bytes as the firmware version.
+- `AUTH` request is empty for the first owner, or carries the existing 32-byte
+  owner token when a later service joins. Its response is the 32-bit big-endian
+  logical owner session ID followed by the 32-byte random owner token.
+- `DAP_REQUEST` and `DAP_RESPONSE` carry raw CMSIS-DAP packets. Requests remain
+  limited to 508 bytes and each DAP connection permits one in-flight request.
+  The USB-development OTA vendor commands `0x80` through `0x85` are rejected;
+  authenticated network OTA remains deferred to its dedicated control slice.
+- `KEEPALIVE` has an empty request and response and refreshes the authenticated
+  owner idle deadline.
+
+The response callback only enters a bounded queue; the network connection task
+writes TLS responses after leaving the DAP service critical section. DAP work
+uses the existing one-second service deadline. A timeout consumes its AirDAP
+sequence and suppresses a late response. Authentication expiry, credential
+rotation, network clear, or disconnect shuts down the matching registered
+socket, closes the NETWORK DAP service session, and releases ownership before
+the slot can be reused.
+
+Use the authenticated probe to verify `HELLO`, `AUTH`, product firmware
+`DAP_Info`, and `KEEPALIVE` without printing the returned session token:
+
+```sh
+python tools/airdap-dap-probe.py 192.0.2.10 \
     --credential "${XDG_CONFIG_HOME:-$HOME/.config}/airdap/ADP-001122334455.json"
 ```
 
@@ -731,13 +774,13 @@ The other hardware-independent tests use the same pattern:
 for suite in \
     bootloader_artifact ota_layout setup_env board config_store device_identity voltage_monitor swd_protocol \
     dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame discovery \
-    dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning network_auth \
+    dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning network_auth network_dap \
     target_uart usb_descriptors project_version \
     debug_shell_commands debug_shell_diagnostics debug_shell_config_status \
     debug_shell_identity debug_shell_input debug_shell_wifi debug_shell_button \
     debug_shell_swd_probe \
     debug_shell_tx_state airdap_shell airdap_update \
-    airdap_provision airdap_pair airdap_tls_probe wired_hil; do
+    airdap_provision airdap_pair airdap_tls_probe airdap_dap_probe wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
     cmake --build "build-host/$suite"
     ctest --test-dir "build-host/$suite" --output-on-failure
@@ -756,7 +799,9 @@ provisioning-button thresholds, BLE window cleanup, atomic provisioning commit,
 network-credential commit/rotation, exact TLS 1.3 PSK-DHE configuration,
 bounded handshake admission and cleanup, fingerprint vectors, authenticated
 session binding, single-owner/token admission, expiry/replay/revocation, the
-Python pairing/TLS-PSK tools, and reset-after-release behavior, DAP owner
+Python pairing/TLS-PSK/DAP probe tools, authenticated AirDAP HELLO/AUTH framing,
+DAP dispatch/timeout response routing, revoke/disconnect cleanup, and
+reset-after-release behavior, DAP owner
 transitions and physical-backend release calls, unified
 USB/Wi-Fi/provisioning/OTA mode transitions and DAP admission, CMSIS-DAP and OTA
 command framing, mDNS identity/TXT formatting and IP-driven publish/refresh/
@@ -772,6 +817,6 @@ wired HIL helper's protocol checks. They do not prove USB enumeration, real NVS
 power-loss persistence or purge behavior, BLE enumeration or radio lifetime,
 real Wi-Fi provisioning, physical OTA persistence, bootloader rollback on a
 board, a live ESP32-S3 TLS handshake/resource profile, authenticated TCP/DAP
-dispatch, or electrical SWD timing.
+dispatch over a real network link, or electrical SWD timing.
 Follow `test/hil/wired.md` on a populated AirDAP board before marking roadmap
 Stage 1 complete.

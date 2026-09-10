@@ -22,13 +22,15 @@ typedef enum {
     CALL_OTA_CONFIRM,
     CALL_DEFAULT_EVENT_LOOP_CREATE,
     CALL_WIFI_MANAGER_START,
+    CALL_NETWORK_DAP_START,
     CALL_DISCOVERY_START,
     CALL_BLE_PROVISIONING_START,
 } call_t;
 
-static call_t calls[15];
+static call_t calls[17];
 static size_t call_count;
 static esp_err_t wifi_start_result = ESP_OK;
+static esp_err_t network_dap_start_result = ESP_OK;
 static esp_err_t discovery_start_result = ESP_OK;
 
 static void record(call_t call)
@@ -124,6 +126,12 @@ esp_err_t airdap_discovery_start(void)
     return discovery_start_result;
 }
 
+esp_err_t airdap_network_dap_start(void)
+{
+    record(CALL_NETWORK_DAP_START);
+    return network_dap_start_result;
+}
+
 esp_err_t airdap_ble_provisioning_start(void)
 {
     record(CALL_BLE_PROVISIONING_START);
@@ -152,6 +160,7 @@ static void test_wifi_failure_does_not_start_discovery(void)
     };
 
     wifi_start_result = ESP_FAIL;
+    network_dap_start_result = ESP_OK;
     discovery_start_result = ESP_OK;
     app_main();
 
@@ -161,7 +170,7 @@ static void test_wifi_failure_does_not_start_discovery(void)
     }
 }
 
-static void test_discovery_starts_after_wifi_and_does_not_block_startup(void)
+static void test_network_listener_failure_does_not_publish_discovery(void)
 {
     static const call_t expected[] = {
         CALL_MODE_STATE_INITIALIZE,
@@ -177,12 +186,45 @@ static void test_discovery_starts_after_wifi_and_does_not_block_startup(void)
         CALL_OTA_CONFIRM,
         CALL_DEFAULT_EVENT_LOOP_CREATE,
         CALL_WIFI_MANAGER_START,
+        CALL_NETWORK_DAP_START,
+        CALL_BLE_PROVISIONING_START,
+    };
+
+    call_count = 0U;
+    wifi_start_result = ESP_OK;
+    network_dap_start_result = ESP_FAIL;
+    discovery_start_result = ESP_OK;
+    app_main();
+    assert(call_count == sizeof(expected) / sizeof(expected[0]));
+    for (size_t index = 0U; index < call_count; ++index) {
+        assert(calls[index] == expected[index]);
+    }
+}
+
+static void test_discovery_starts_after_network_listener(void)
+{
+    static const call_t expected[] = {
+        CALL_MODE_STATE_INITIALIZE,
+        CALL_OTA_INITIALIZE,
+        CALL_BOARD_INITIALIZE,
+        CALL_DEVICE_IDENTITY_INITIALIZE,
+        CALL_CONFIG_STORE_INITIALIZE,
+        CALL_NETWORK_AUTH_INITIALIZE,
+        CALL_VOLTAGE_INITIALIZE,
+        CALL_SWD_INITIALIZE,
+        CALL_VOLTAGE_READ,
+        CALL_USB_INITIALIZE,
+        CALL_OTA_CONFIRM,
+        CALL_DEFAULT_EVENT_LOOP_CREATE,
+        CALL_WIFI_MANAGER_START,
+        CALL_NETWORK_DAP_START,
         CALL_DISCOVERY_START,
         CALL_BLE_PROVISIONING_START,
     };
 
     call_count = 0U;
     wifi_start_result = ESP_OK;
+    network_dap_start_result = ESP_OK;
     discovery_start_result = ESP_FAIL;
     app_main();
     assert(call_count == sizeof(expected) / sizeof(expected[0]));
@@ -194,7 +236,8 @@ static void test_discovery_starts_after_wifi_and_does_not_block_startup(void)
 int main(void)
 {
     test_wifi_failure_does_not_start_discovery();
-    test_discovery_starts_after_wifi_and_does_not_block_startup();
+    test_network_listener_failure_does_not_publish_discovery();
+    test_discovery_starts_after_network_listener();
     puts("app_main initialization-order test passed");
     return 0;
 }

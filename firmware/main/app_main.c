@@ -9,6 +9,7 @@
 #include "airdap_discovery.h"
 #include "airdap_mode_state.h"
 #include "airdap_network_auth.h"
+#include "airdap_network_dap.h"
 #include "airdap_ota.h"
 #include "airdap_swd.h"
 #include "airdap_usb.h"
@@ -45,10 +46,16 @@ void app_main(void)
     if (wifi_error != ESP_OK) {
         ESP_LOGW(TAG, "Wi-Fi unavailable: %s", esp_err_to_name(wifi_error));
     } else {
-        const esp_err_t discovery_error = airdap_discovery_start();
-        if (discovery_error != ESP_OK) {
-            ESP_LOGW(TAG, "mDNS discovery unavailable: %s",
-                esp_err_to_name(discovery_error));
+        const esp_err_t network_dap_error = airdap_network_dap_start();
+        if (network_dap_error != ESP_OK) {
+            ESP_LOGW(TAG, "DAP TCP unavailable: %s",
+                esp_err_to_name(network_dap_error));
+        } else {
+            const esp_err_t discovery_error = airdap_discovery_start();
+            if (discovery_error != ESP_OK) {
+                ESP_LOGW(TAG, "mDNS discovery unavailable: %s",
+                    esp_err_to_name(discovery_error));
+            }
         }
     }
     const esp_err_t provisioning_error = airdap_ble_provisioning_start();
