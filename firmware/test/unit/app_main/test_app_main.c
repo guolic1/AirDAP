@@ -18,6 +18,7 @@ typedef enum {
     CALL_VOLTAGE_INITIALIZE,
     CALL_SWD_INITIALIZE,
     CALL_VOLTAGE_READ,
+    CALL_TARGET_UART_INITIALIZE,
     CALL_USB_INITIALIZE,
     CALL_OTA_CONFIRM,
     CALL_DEFAULT_EVENT_LOOP_CREATE,
@@ -27,7 +28,7 @@ typedef enum {
     CALL_BLE_PROVISIONING_START,
 } call_t;
 
-static call_t calls[17];
+static call_t calls[18];
 static size_t call_count;
 static esp_err_t wifi_start_result = ESP_OK;
 static esp_err_t network_dap_start_result = ESP_OK;
@@ -102,6 +103,12 @@ esp_err_t airdap_usb_init(void)
     return ESP_OK;
 }
 
+esp_err_t airdap_target_uart_init(void)
+{
+    record(CALL_TARGET_UART_INITIALIZE);
+    return ESP_OK;
+}
+
 esp_err_t airdap_ota_confirm_running_image(void)
 {
     record(CALL_OTA_CONFIRM);
@@ -152,6 +159,7 @@ static void test_wifi_failure_does_not_start_discovery(void)
         CALL_VOLTAGE_INITIALIZE,
         CALL_SWD_INITIALIZE,
         CALL_VOLTAGE_READ,
+        CALL_TARGET_UART_INITIALIZE,
         CALL_USB_INITIALIZE,
         CALL_OTA_CONFIRM,
         CALL_DEFAULT_EVENT_LOOP_CREATE,
@@ -182,6 +190,7 @@ static void test_network_listener_failure_does_not_publish_discovery(void)
         CALL_VOLTAGE_INITIALIZE,
         CALL_SWD_INITIALIZE,
         CALL_VOLTAGE_READ,
+        CALL_TARGET_UART_INITIALIZE,
         CALL_USB_INITIALIZE,
         CALL_OTA_CONFIRM,
         CALL_DEFAULT_EVENT_LOOP_CREATE,
@@ -213,6 +222,7 @@ static void test_discovery_starts_after_network_listener(void)
         CALL_VOLTAGE_INITIALIZE,
         CALL_SWD_INITIALIZE,
         CALL_VOLTAGE_READ,
+        CALL_TARGET_UART_INITIALIZE,
         CALL_USB_INITIALIZE,
         CALL_OTA_CONFIRM,
         CALL_DEFAULT_EVENT_LOOP_CREATE,

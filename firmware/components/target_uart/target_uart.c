@@ -1,3 +1,4 @@
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -6,16 +7,35 @@
 
 #include "airdap_board_pins.h"
 #include "airdap_target_uart.h"
+#include "airdap_target_uart_internal.h"
 #include "driver/uart.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 
 enum {
     TARGET_UART_PORT = UART_NUM_1,
     TARGET_UART_RX_BUFFER_SIZE = 2048,
     TARGET_UART_TX_BUFFER_SIZE = 2048,
     TARGET_UART_MAX_BAUD = 5000000,
+    TARGET_UART_WORKER_STACK_SIZE = 3072,
+    TARGET_UART_WORKER_PRIORITY = 5,
+    TARGET_UART_IO_CHUNK = 256,
+    TARGET_UART_READ_POLL_MS = 20,
 };
 
-static atomic_bool initialized;
+typedef struct {
+    airdap_target_uart_session_id_t session;
+    size_t rx_head;
+    size_t rx_count;
+    uint32_t rx_dropped_bytes;
+    uint8_t rx_buffer[AIRDAP_TARGET_UART_SUBSCRIBER_BUFFER_SIZE];
+} target_uart_session_slot_t;
+
+typedef struct {
+    airdap_target_uart_transport_t transport;
+    airdap_target_uart_session_id_t session;
+} target_uart_tx_owner_t;
 
 typedef struct {
     atomic_uint sequence;
@@ -29,7 +49,81 @@ typedef struct {
     atomic_uint write_failures;
 } target_uart_diagnostic_state_t;
 
+static atomic_bool initialization_started;
+static atomic_bool initialized;
+static atomic_uint next_session = 1U;
+static SemaphoreHandle_t state_mutex;
+static SemaphoreHandle_t tx_operation_mutex;
+static target_uart_session_slot_t session_slots[
+    AIRDAP_TARGET_UART_TRANSPORT_COUNT];
+static target_uart_tx_owner_t tx_owner = {
+    .transport = AIRDAP_TARGET_UART_TRANSPORT_NONE,
+};
 static target_uart_diagnostic_state_t diagnostic_state;
+
+static bool valid_transport(airdap_target_uart_transport_t transport)
+{
+    return transport >= AIRDAP_TARGET_UART_TRANSPORT_USB &&
+        transport < AIRDAP_TARGET_UART_TRANSPORT_COUNT;
+}
+
+static bool state_lock(void)
+{
+    return state_mutex != NULL &&
+        xSemaphoreTake(state_mutex, portMAX_DELAY) == pdTRUE;
+}
+
+static void state_unlock(void)
+{
+    (void) xSemaphoreGive(state_mutex);
+}
+
+static bool tx_operation_lock(void)
+{
+    return tx_operation_mutex != NULL &&
+        xSemaphoreTake(tx_operation_mutex, portMAX_DELAY) == pdTRUE;
+}
+
+static void tx_operation_unlock(void)
+{
+    (void) xSemaphoreGive(tx_operation_mutex);
+}
+
+static target_uart_session_slot_t *session_slot(
+    airdap_target_uart_transport_t transport)
+{
+    return &session_slots[(unsigned int) transport];
+}
+
+static bool session_is_live_locked(
+    airdap_target_uart_transport_t transport,
+    airdap_target_uart_session_id_t session)
+{
+    return session_slot(transport)->session == session;
+}
+
+static airdap_target_uart_result_t validate_live_session_locked(
+    airdap_target_uart_transport_t transport,
+    airdap_target_uart_session_id_t session)
+{
+    return session_is_live_locked(transport, session)
+        ? AIRDAP_TARGET_UART_OK
+        : AIRDAP_TARGET_UART_STALE_SESSION;
+}
+
+static airdap_target_uart_result_t validate_tx_owner_locked(
+    airdap_target_uart_transport_t transport,
+    airdap_target_uart_session_id_t session)
+{
+    const airdap_target_uart_result_t session_result =
+        validate_live_session_locked(transport, session);
+    if (session_result != AIRDAP_TARGET_UART_OK) {
+        return session_result;
+    }
+    return tx_owner.transport == transport && tx_owner.session == session
+        ? AIRDAP_TARGET_UART_OK
+        : AIRDAP_TARGET_UART_NOT_OWNER;
+}
 
 static void publish_configuration(
     uint32_t baud_rate,
@@ -117,7 +211,7 @@ static bool map_parity(uint8_t value, uart_parity_t *parity)
     }
 }
 
-esp_err_t airdap_target_uart_configure(
+static esp_err_t configure_driver(
     uint32_t baud_rate,
     uint8_t stop_bits,
     uint8_t parity,
@@ -149,18 +243,131 @@ esp_err_t airdap_target_uart_configure(
     return error;
 }
 
+static void add_dropped_bytes(
+    target_uart_session_slot_t *slot,
+    size_t dropped)
+{
+    if (dropped >= UINT32_MAX - slot->rx_dropped_bytes) {
+        slot->rx_dropped_bytes = UINT32_MAX;
+    } else {
+        slot->rx_dropped_bytes += (uint32_t) dropped;
+    }
+}
+
+static void reset_session_slot(target_uart_session_slot_t *slot)
+{
+    memset(slot, 0, sizeof(*slot));
+}
+
+void airdap_target_uart_publish_rx(const uint8_t *data, size_t length)
+{
+    if (!atomic_load(&initialized) || data == NULL || length == 0U ||
+        !state_lock()) {
+        return;
+    }
+
+    for (unsigned int index = AIRDAP_TARGET_UART_TRANSPORT_USB;
+         index < AIRDAP_TARGET_UART_TRANSPORT_COUNT;
+         ++index) {
+        target_uart_session_slot_t *slot = &session_slots[index];
+        if (slot->session == 0U) {
+            continue;
+        }
+        const size_t available =
+            AIRDAP_TARGET_UART_SUBSCRIBER_BUFFER_SIZE - slot->rx_count;
+        const size_t accepted = length < available ? length : available;
+        const size_t tail = (slot->rx_head + slot->rx_count) %
+            AIRDAP_TARGET_UART_SUBSCRIBER_BUFFER_SIZE;
+        const size_t first = accepted <
+            AIRDAP_TARGET_UART_SUBSCRIBER_BUFFER_SIZE - tail
+            ? accepted
+            : AIRDAP_TARGET_UART_SUBSCRIBER_BUFFER_SIZE - tail;
+        memcpy(slot->rx_buffer + tail, data, first);
+        memcpy(slot->rx_buffer, data + first, accepted - first);
+        slot->rx_count += accepted;
+        add_dropped_bytes(slot, length - accepted);
+    }
+    state_unlock();
+}
+
+bool airdap_target_uart_process_rx_once(void)
+{
+    if (!atomic_load(&initialized)) {
+        return false;
+    }
+
+    uint8_t data[TARGET_UART_IO_CHUNK];
+    const int received = uart_read_bytes(
+        TARGET_UART_PORT,
+        data,
+        sizeof(data),
+        pdMS_TO_TICKS(TARGET_UART_READ_POLL_MS));
+    if (received < 0) {
+        (void) atomic_fetch_add(&diagnostic_state.read_failures, 1U);
+        return false;
+    }
+    if (received == 0) {
+        return false;
+    }
+    (void) atomic_fetch_add(
+        &diagnostic_state.rx_bytes,
+        (unsigned int) received);
+    airdap_target_uart_publish_rx(data, (size_t) received);
+    return true;
+}
+
+static void target_uart_worker(void *argument)
+{
+    (void) argument;
+    for (;;) {
+        (void) airdap_target_uart_process_rx_once();
+    }
+}
+
+static void cleanup_failed_initialization(bool driver_installed)
+{
+    atomic_store(&initialized, false);
+    if (driver_installed) {
+        (void) uart_driver_delete(TARGET_UART_PORT);
+    }
+    if (tx_operation_mutex != NULL) {
+        vSemaphoreDelete(tx_operation_mutex);
+        tx_operation_mutex = NULL;
+    }
+    if (state_mutex != NULL) {
+        vSemaphoreDelete(state_mutex);
+        state_mutex = NULL;
+    }
+    atomic_store(&initialization_started, false);
+}
+
 esp_err_t airdap_target_uart_init(void)
 {
     if (atomic_load(&initialized)) {
         return ESP_OK;
     }
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(
+        &initialization_started,
+        &expected,
+        true)) {
+        return ESP_ERR_INVALID_STATE;
+    }
 
-    esp_err_t error = airdap_target_uart_configure(
+    state_mutex = xSemaphoreCreateMutex();
+    tx_operation_mutex = xSemaphoreCreateMutex();
+    if (state_mutex == NULL || tx_operation_mutex == NULL) {
+        cleanup_failed_initialization(false);
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_err_t error = configure_driver(
         AIRDAP_TARGET_UART_DEFAULT_BAUD,
         0U,
         0U,
         8U);
     if (error != ESP_OK) {
+        cleanup_failed_initialization(false);
         return error;
     }
 
@@ -171,6 +378,7 @@ esp_err_t airdap_target_uart_init(void)
         UART_PIN_NO_CHANGE,
         UART_PIN_NO_CHANGE);
     if (error != ESP_OK) {
+        cleanup_failed_initialization(false);
         return error;
     }
 
@@ -181,10 +389,26 @@ esp_err_t airdap_target_uart_init(void)
         0,
         NULL,
         0);
-    if (error == ESP_OK) {
-        atomic_store(&initialized, true);
+    if (error != ESP_OK) {
+        cleanup_failed_initialization(false);
+        return error;
     }
-    return error;
+
+    /* The new worker may preempt this task immediately. Publish readiness
+     * before creation so its first iteration enters the blocking UART read. */
+    atomic_store(&initialized, true);
+    if (xTaskCreatePinnedToCore(
+        target_uart_worker,
+        "target_uart",
+        TARGET_UART_WORKER_STACK_SIZE,
+        NULL,
+        TARGET_UART_WORKER_PRIORITY,
+        NULL,
+        1) != pdPASS) {
+        cleanup_failed_initialization(true);
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
 }
 
 esp_err_t airdap_target_uart_get_status(
@@ -241,41 +465,270 @@ esp_err_t airdap_target_uart_get_status(
     return error;
 }
 
-int airdap_target_uart_read(
-    uint8_t *data,
-    size_t capacity,
-    TickType_t timeout_ticks)
+airdap_target_uart_result_t airdap_target_uart_session_open(
+    airdap_target_uart_transport_t transport,
+    bool authenticated,
+    airdap_target_uart_session_id_t *session)
 {
-    if (!atomic_load(&initialized) || data == NULL || capacity == 0U) {
-        return -1;
+    if (!valid_transport(transport) || session == NULL) {
+        return AIRDAP_TARGET_UART_INVALID_ARGUMENT;
     }
-    const int received = uart_read_bytes(
-        TARGET_UART_PORT,
-        data,
-        capacity,
-        timeout_ticks);
-    if (received > 0) {
-        (void) atomic_fetch_add(
-            &diagnostic_state.rx_bytes,
-            (unsigned int) received);
-    } else if (received < 0) {
-        (void) atomic_fetch_add(&diagnostic_state.read_failures, 1U);
+    *session = 0U;
+    if (!atomic_load(&initialized)) {
+        return AIRDAP_TARGET_UART_INVALID_STATE;
     }
-    return received;
+    if (transport == AIRDAP_TARGET_UART_TRANSPORT_NETWORK &&
+        !authenticated) {
+        return AIRDAP_TARGET_UART_UNAUTHENTICATED;
+    }
+    if (!state_lock()) {
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+
+    target_uart_session_slot_t *slot = session_slot(transport);
+    if (slot->session != 0U) {
+        state_unlock();
+        return AIRDAP_TARGET_UART_BUSY;
+    }
+    airdap_target_uart_session_id_t new_session;
+    do {
+        new_session = atomic_fetch_add(&next_session, 1U);
+    } while (new_session == 0U);
+    reset_session_slot(slot);
+    slot->session = new_session;
+    state_unlock();
+    *session = new_session;
+    return AIRDAP_TARGET_UART_OK;
 }
 
-int airdap_target_uart_write(const uint8_t *data, size_t length)
+airdap_target_uart_result_t airdap_target_uart_session_close(
+    airdap_target_uart_transport_t transport,
+    airdap_target_uart_session_id_t session)
 {
-    if (!atomic_load(&initialized) || data == NULL || length == 0U) {
-        return -1;
+    if (!valid_transport(transport) || session == 0U) {
+        return AIRDAP_TARGET_UART_INVALID_ARGUMENT;
     }
-    const int written = uart_write_bytes(TARGET_UART_PORT, data, length);
-    if (written > 0) {
+    if (!atomic_load(&initialized)) {
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+    if (!tx_operation_lock()) {
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+    if (!state_lock()) {
+        tx_operation_unlock();
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+    if (!session_is_live_locked(transport, session)) {
+        state_unlock();
+        tx_operation_unlock();
+        return AIRDAP_TARGET_UART_STALE_SESSION;
+    }
+    if (tx_owner.transport == transport && tx_owner.session == session) {
+        tx_owner = (target_uart_tx_owner_t) {
+            .transport = AIRDAP_TARGET_UART_TRANSPORT_NONE,
+        };
+    }
+    reset_session_slot(session_slot(transport));
+    state_unlock();
+    tx_operation_unlock();
+    return AIRDAP_TARGET_UART_OK;
+}
+
+airdap_target_uart_result_t airdap_target_uart_session_get_status(
+    airdap_target_uart_transport_t transport,
+    airdap_target_uart_session_id_t session,
+    airdap_target_uart_session_status_t *status)
+{
+    if (!valid_transport(transport) || session == 0U || status == NULL) {
+        return AIRDAP_TARGET_UART_INVALID_ARGUMENT;
+    }
+    memset(status, 0, sizeof(*status));
+    if (!atomic_load(&initialized)) {
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+    if (!state_lock()) {
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+    if (!session_is_live_locked(transport, session)) {
+        state_unlock();
+        return AIRDAP_TARGET_UART_STALE_SESSION;
+    }
+    const target_uart_session_slot_t *slot = session_slot(transport);
+    status->rx_buffered_bytes = slot->rx_count;
+    status->rx_dropped_bytes = slot->rx_dropped_bytes;
+    status->tx_owner = tx_owner.transport == transport &&
+        tx_owner.session == session;
+    state_unlock();
+    return AIRDAP_TARGET_UART_OK;
+}
+
+airdap_target_uart_result_t airdap_target_uart_tx_acquire(
+    airdap_target_uart_transport_t transport,
+    airdap_target_uart_session_id_t session)
+{
+    if (!valid_transport(transport) || session == 0U) {
+        return AIRDAP_TARGET_UART_INVALID_ARGUMENT;
+    }
+    if (!atomic_load(&initialized)) {
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+    if (!tx_operation_lock()) {
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+    if (!state_lock()) {
+        tx_operation_unlock();
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+
+    const airdap_target_uart_result_t session_result =
+        validate_live_session_locked(transport, session);
+    airdap_target_uart_result_t result = session_result;
+    if (session_result == AIRDAP_TARGET_UART_OK) {
+        if (tx_owner.transport == AIRDAP_TARGET_UART_TRANSPORT_NONE) {
+            tx_owner.transport = transport;
+            tx_owner.session = session;
+            result = AIRDAP_TARGET_UART_OK;
+        } else if (tx_owner.transport == transport &&
+                   tx_owner.session == session) {
+            result = AIRDAP_TARGET_UART_ALREADY_OWNER;
+        } else {
+            result = AIRDAP_TARGET_UART_BUSY;
+        }
+    }
+    state_unlock();
+    tx_operation_unlock();
+    return result;
+}
+
+airdap_target_uart_result_t airdap_target_uart_session_configure(
+    airdap_target_uart_transport_t transport,
+    airdap_target_uart_session_id_t session,
+    uint32_t baud_rate,
+    uint8_t stop_bits,
+    uint8_t parity,
+    uint8_t data_bits)
+{
+    if (!valid_transport(transport) || session == 0U) {
+        return AIRDAP_TARGET_UART_INVALID_ARGUMENT;
+    }
+    if (!atomic_load(&initialized)) {
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+    if (!tx_operation_lock()) {
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+    if (!state_lock()) {
+        tx_operation_unlock();
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+    const airdap_target_uart_result_t owner_result =
+        validate_tx_owner_locked(transport, session);
+    state_unlock();
+    if (owner_result != AIRDAP_TARGET_UART_OK) {
+        tx_operation_unlock();
+        return owner_result;
+    }
+
+    const esp_err_t error = configure_driver(
+        baud_rate,
+        stop_bits,
+        parity,
+        data_bits);
+    tx_operation_unlock();
+    if (error == ESP_ERR_INVALID_ARG) {
+        return AIRDAP_TARGET_UART_INVALID_ARGUMENT;
+    }
+    return error == ESP_OK
+        ? AIRDAP_TARGET_UART_OK
+        : AIRDAP_TARGET_UART_IO_ERROR;
+}
+
+airdap_target_uart_result_t airdap_target_uart_session_read(
+    airdap_target_uart_transport_t transport,
+    airdap_target_uart_session_id_t session,
+    uint8_t *data,
+    size_t capacity,
+    size_t *received)
+{
+    if (received != NULL) {
+        *received = 0U;
+    }
+    if (!valid_transport(transport) || session == 0U || data == NULL ||
+        capacity == 0U || received == NULL) {
+        return AIRDAP_TARGET_UART_INVALID_ARGUMENT;
+    }
+    if (!atomic_load(&initialized)) {
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+    if (!state_lock()) {
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+    if (!session_is_live_locked(transport, session)) {
+        state_unlock();
+        return AIRDAP_TARGET_UART_STALE_SESSION;
+    }
+
+    target_uart_session_slot_t *slot = session_slot(transport);
+    const size_t count = capacity < slot->rx_count
+        ? capacity
+        : slot->rx_count;
+    const size_t first = count <
+        AIRDAP_TARGET_UART_SUBSCRIBER_BUFFER_SIZE - slot->rx_head
+        ? count
+        : AIRDAP_TARGET_UART_SUBSCRIBER_BUFFER_SIZE - slot->rx_head;
+    memcpy(data, slot->rx_buffer + slot->rx_head, first);
+    memcpy(data + first, slot->rx_buffer, count - first);
+    slot->rx_head = (slot->rx_head + count) %
+        AIRDAP_TARGET_UART_SUBSCRIBER_BUFFER_SIZE;
+    slot->rx_count -= count;
+    state_unlock();
+    *received = count;
+    return AIRDAP_TARGET_UART_OK;
+}
+
+airdap_target_uart_result_t airdap_target_uart_session_write(
+    airdap_target_uart_transport_t transport,
+    airdap_target_uart_session_id_t session,
+    const uint8_t *data,
+    size_t length,
+    size_t *written)
+{
+    if (written != NULL) {
+        *written = 0U;
+    }
+    if (!valid_transport(transport) || session == 0U || data == NULL ||
+        length == 0U || written == NULL) {
+        return AIRDAP_TARGET_UART_INVALID_ARGUMENT;
+    }
+    if (!atomic_load(&initialized)) {
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+    if (!tx_operation_lock()) {
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+    if (!state_lock()) {
+        tx_operation_unlock();
+        return AIRDAP_TARGET_UART_INVALID_STATE;
+    }
+    const airdap_target_uart_result_t owner_result =
+        validate_tx_owner_locked(transport, session);
+    state_unlock();
+    if (owner_result != AIRDAP_TARGET_UART_OK) {
+        tx_operation_unlock();
+        return owner_result;
+    }
+
+    const int result = uart_write_bytes(TARGET_UART_PORT, data, length);
+    tx_operation_unlock();
+    if (result < 0) {
+        (void) atomic_fetch_add(&diagnostic_state.write_failures, 1U);
+        return AIRDAP_TARGET_UART_IO_ERROR;
+    }
+    *written = (size_t) result;
+    if (result > 0) {
         (void) atomic_fetch_add(
             &diagnostic_state.tx_bytes,
-            (unsigned int) written);
-    } else if (written < 0) {
-        (void) atomic_fetch_add(&diagnostic_state.write_failures, 1U);
+            (unsigned int) result);
     }
-    return written;
+    return AIRDAP_TARGET_UART_OK;
 }

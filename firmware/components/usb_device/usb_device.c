@@ -13,10 +13,10 @@
 #if CONFIG_AIRDAP_DEBUG_SHELL
 #include "airdap_debug_shell.h"
 #endif
-#include "airdap_target_uart.h"
 #include "airdap_usb.h"
 #include "airdap_usb_descriptors.h"
 #include "airdap_usb_status.h"
+#include "airdap_usb_uart_bridge.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -25,12 +25,6 @@
 #include "tinyusb_cdc_acm.h"
 #include "tinyusb_default_config.h"
 #include "tusb.h"
-
-enum {
-    UART_TASK_STACK_SIZE = 3072,
-    UART_TASK_PRIORITY = 5,
-    UART_IO_CHUNK = 256,
-};
 
 static const char *TAG = "airdap_usb";
 static airdap_dap_stream_t dap_stream;
@@ -139,6 +133,7 @@ static void usb_event_callback(tinyusb_event_t *event, void *argument)
     } else if (event->id == TINYUSB_EVENT_DETACHED) {
         airdap_dap_stream_init(&dap_stream);
         close_usb_session();
+        airdap_usb_uart_bridge_disconnected();
         const airdap_mode_state_result_t result =
             airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_DETACHED);
         if (result != AIRDAP_MODE_STATE_OK) {
@@ -242,71 +237,6 @@ void tud_vendor_tx_cb(uint8_t interface_number, uint32_t sent_bytes)
 #endif
 }
 
-static void cdc_receive_callback(int interface_number, cdcacm_event_t *event)
-{
-    (void) event;
-    uint8_t data[UART_IO_CHUNK];
-    size_t received = 0U;
-
-    do {
-        if (tinyusb_cdcacm_read(
-            interface_number,
-            data,
-            sizeof(data),
-            &received) != ESP_OK) {
-            return;
-        }
-        if (received > 0U && airdap_target_uart_write(data, received) < 0) {
-            ESP_LOGW(TAG, "CDC to target UART write failed");
-            return;
-        }
-    } while (received == sizeof(data));
-}
-
-static void cdc_line_coding_callback(int interface_number, cdcacm_event_t *event)
-{
-    (void) interface_number;
-    const cdc_line_coding_t *coding = event->line_coding_changed_data.p_line_coding;
-    const esp_err_t error = airdap_target_uart_configure(
-        coding->bit_rate,
-        coding->stop_bits,
-        coding->parity,
-        coding->data_bits);
-    if (error != ESP_OK) {
-        ESP_LOGW(
-            TAG,
-            "Unsupported CDC line coding: %" PRIu32 " baud, %u%c%u",
-            coding->bit_rate,
-            coding->data_bits,
-            coding->parity == 0U ? 'N' : coding->parity == 1U ? 'O' : 'E',
-            coding->stop_bits == 2U ? 2U : 1U);
-    }
-}
-
-static void target_uart_task(void *argument)
-{
-    (void) argument;
-    uint8_t data[UART_IO_CHUNK];
-
-    for (;;) {
-        const int received = airdap_target_uart_read(
-            data,
-            sizeof(data),
-            pdMS_TO_TICKS(20));
-        if (received <= 0 || !tud_cdc_n_connected(0)) {
-            continue;
-        }
-        const size_t queued = tinyusb_cdcacm_write_queue(
-            TINYUSB_CDC_ACM_0,
-            data,
-            (size_t) received);
-        if (queued != (size_t) received) {
-            ESP_LOGW(TAG, "Target UART to CDC overflow: %u/%d", (unsigned) queued, received);
-        }
-        (void) tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, 0);
-    }
-}
-
 esp_err_t airdap_usb_init(void)
 {
     const airdap_device_identity_t *identity = airdap_device_identity_get();
@@ -314,11 +244,7 @@ esp_err_t airdap_usb_init(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t error = airdap_target_uart_init();
-    if (error != ESP_OK) {
-        return error;
-    }
-    error = airdap_dap_service_init(
+    esp_err_t error = airdap_dap_service_init(
         identity->usb_serial,
         identity->firmware_version);
     if (error != ESP_OK) {
@@ -343,27 +269,9 @@ esp_err_t airdap_usb_init(void)
         return error;
     }
 
-    const tinyusb_config_cdcacm_t cdc_config = {
-        .cdc_port = TINYUSB_CDC_ACM_0,
-        .callback_rx = cdc_receive_callback,
-        .callback_rx_wanted_char = NULL,
-        .callback_line_state_changed = NULL,
-        .callback_line_coding_changed = cdc_line_coding_callback,
-    };
-    error = tinyusb_cdcacm_init(&cdc_config);
+    error = airdap_usb_uart_bridge_start();
     if (error != ESP_OK) {
         return error;
-    }
-
-    if (xTaskCreatePinnedToCore(
-        target_uart_task,
-        "target_uart",
-        UART_TASK_STACK_SIZE,
-        NULL,
-        UART_TASK_PRIORITY,
-        NULL,
-        1) != pdPASS) {
-        return ESP_ERR_NO_MEM;
     }
 
 #if CONFIG_AIRDAP_DEBUG_SHELL

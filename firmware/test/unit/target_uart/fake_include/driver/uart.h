@@ -59,6 +59,7 @@ esp_err_t uart_driver_install(
     int queue_size,
     QueueHandle_t *uart_queue,
     int intr_alloc_flags);
+esp_err_t uart_driver_delete(uart_port_t uart_num);
 int uart_read_bytes(
     uart_port_t uart_num,
     void *buf,

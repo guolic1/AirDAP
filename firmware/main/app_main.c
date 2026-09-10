@@ -12,6 +12,7 @@
 #include "airdap_network_dap.h"
 #include "airdap_ota.h"
 #include "airdap_swd.h"
+#include "airdap_target_uart.h"
 #include "airdap_usb.h"
 #include "airdap_voltage_monitor.h"
 #include "airdap_wifi_manager.h"
@@ -38,6 +39,7 @@ void app_main(void)
     ESP_ERROR_CHECK(airdap_voltage_monitor_init());
     ESP_ERROR_CHECK(airdap_swd_init(AIRDAP_SWD_DEFAULT_CLOCK_HZ));
     ESP_ERROR_CHECK(airdap_voltage_monitor_read(&voltage));
+    ESP_ERROR_CHECK(airdap_target_uart_init());
     ESP_ERROR_CHECK(airdap_usb_init());
     ESP_ERROR_CHECK(airdap_ota_confirm_running_image());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
