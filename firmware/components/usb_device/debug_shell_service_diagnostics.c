@@ -6,6 +6,8 @@
 #include "airdap_debug_shell_service_diagnostics.h"
 #include "airdap_discovery.h"
 #include "airdap_mode_state.h"
+#include "airdap_network_auth.h"
+#include "airdap_network_dap.h"
 #include "airdap_target_uart.h"
 #include "airdap_usb_status.h"
 #include "airdap_wifi_manager.h"
@@ -74,6 +76,22 @@ static const char *wifi_failure_name(airdap_wifi_manager_failure_t failure)
         return "authentication";
     case AIRDAP_WIFI_MANAGER_FAILURE_TRANSIENT:
         return "transient";
+    default:
+        return "unknown";
+    }
+}
+
+static const char *dap_owner_name(airdap_dap_owner_t owner)
+{
+    switch (owner) {
+    case AIRDAP_DAP_OWNER_NONE:
+        return "none";
+    case AIRDAP_DAP_OWNER_USB:
+        return "usb";
+    case AIRDAP_DAP_OWNER_NETWORK:
+        return "network";
+    case AIRDAP_DAP_OWNER_DIAGNOSTIC:
+        return "diagnostic";
     default:
         return "unknown";
     }
@@ -164,6 +182,161 @@ static int network_info_command(
             AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
             "ap=unavailable\n");
     }
+    return 0;
+}
+
+static int network_status_command(
+    const char *arguments,
+    const airdap_debug_shell_invocation_t *invocation,
+    void *context)
+{
+    (void) context;
+    if (arguments == NULL || arguments[0] != '\0') {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_WARNING,
+            "usage: network-status\n");
+        return 1;
+    }
+
+    airdap_wifi_manager_info_t wifi_info;
+    const esp_err_t wifi_error = airdap_wifi_manager_get_info(&wifi_info);
+    if (wifi_error != ESP_OK) {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_ERROR,
+            "network-status: Wi-Fi status read failed: %s\n",
+            esp_err_to_name(wifi_error));
+        return 1;
+    }
+    airdap_mode_snapshot_t mode;
+    const airdap_mode_state_result_t mode_result =
+        airdap_mode_state_get(&mode);
+    if (mode_result != AIRDAP_MODE_STATE_OK) {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_ERROR,
+            "network-status: mode status read failed: %u\n",
+            (unsigned int) mode_result);
+        return 1;
+    }
+    airdap_discovery_status_t discovery;
+    const esp_err_t discovery_error = airdap_discovery_get_status(&discovery);
+    if (discovery_error != ESP_OK) {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_ERROR,
+            "network-status: discovery status read failed: %s\n",
+            esp_err_to_name(discovery_error));
+        return 1;
+    }
+    airdap_network_dap_status_t dap;
+    const esp_err_t dap_error = airdap_network_dap_get_status(&dap);
+    if (dap_error != ESP_OK) {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_ERROR,
+            "network-status: DAP listener status read failed: %s\n",
+            esp_err_to_name(dap_error));
+        return 1;
+    }
+
+    airdap_debug_shell_printf(
+        invocation,
+        AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+        "wifi_online=%s ipv4=",
+        mode.wifi == AIRDAP_WIFI_ONLINE ? "yes" : "no");
+    if (wifi_info.ipv4_available) {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+            "%u.%u.%u.%u",
+            wifi_info.ipv4_address[0],
+            wifi_info.ipv4_address[1],
+            wifi_info.ipv4_address[2],
+            wifi_info.ipv4_address[3]);
+    } else {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+            "unavailable");
+    }
+    if (wifi_info.ap_available) {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+            " rssi_dbm=%d\n",
+            (int) wifi_info.rssi_dbm);
+    } else {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+            " rssi_dbm=unavailable\n");
+    }
+    airdap_debug_shell_printf(
+        invocation,
+        AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+        "mdns_published=%s dap_listener_ready=%s dap_owner=%s\n",
+        discovery.service_published ? "yes" : "no",
+        dap.listener_ready ? "yes" : "no",
+        dap_owner_name(mode.dap_owner));
+    return 0;
+}
+
+static int sessions_command(
+    const char *arguments,
+    const airdap_debug_shell_invocation_t *invocation,
+    void *context)
+{
+    (void) context;
+    if (arguments == NULL || arguments[0] != '\0') {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_WARNING,
+            "usage: sessions\n");
+        return 1;
+    }
+
+    airdap_network_auth_status_t auth;
+    const esp_err_t auth_error = airdap_network_auth_get_status(&auth);
+    if (auth_error != ESP_OK) {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_ERROR,
+            "sessions: authentication status read failed: %s\n",
+            esp_err_to_name(auth_error));
+        return 1;
+    }
+    airdap_network_dap_status_t dap;
+    const esp_err_t dap_error = airdap_network_dap_get_status(&dap);
+    if (dap_error != ESP_OK) {
+        airdap_debug_shell_printf(
+            invocation,
+            AIRDAP_DEBUG_SHELL_STYLE_ERROR,
+            "sessions: DAP listener status read failed: %s\n",
+            esp_err_to_name(dap_error));
+        return 1;
+    }
+
+    airdap_debug_shell_printf(
+        invocation,
+        AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+        "auth credential_present=%s pending_handshakes=%u "
+        "logical_owner_active=%s bound_connections=%u\n",
+        auth.credential_present ? "yes" : "no",
+        auth.pending_handshakes,
+        auth.logical_owner_active ? "yes" : "no",
+        auth.bound_connections);
+    airdap_debug_shell_printf(
+        invocation,
+        AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+        "dap listener_ready=%s allocated_connections=%u tls_connections=%u "
+        "authenticated_connections=%u dap_sessions=%u\n",
+        dap.listener_ready ? "yes" : "no",
+        dap.allocated_connections,
+        dap.tls_connections,
+        dap.authenticated_connections,
+        dap.dap_sessions);
     return 0;
 }
 
@@ -340,6 +513,27 @@ static const airdap_debug_shell_command_t service_diagnostic_commands[] = {
             "failure class, retry state, IPv4 addressing, RSSI, and channel. "
             "SSID, BSSID, passwords, and authentication material are omitted.",
         .handler = network_info_command,
+    },
+    {
+        .name = "network-status",
+        .usage = "network-status",
+        .summary = "Show aggregate network service readiness",
+        .details =
+            "Reports Wi-Fi online state, IPv4 address, RSSI, mDNS "
+            "publication, authenticated DAP listener readiness, and the "
+            "current DAP owner without changing network state.",
+        .handler = network_status_command,
+    },
+    {
+        .name = "sessions",
+        .usage = "sessions",
+        .summary = "Show non-secret authentication and session counts",
+        .details =
+            "Reports credential presence, pending TLS handshakes, logical "
+            "owner state, bound authentication connections, and allocated, "
+            "TLS, authenticated, and DAP connection counts. Credentials, "
+            "fingerprints, keys, and session tokens are omitted.",
+        .handler = sessions_command,
     },
     {
         .name = "usb-status",

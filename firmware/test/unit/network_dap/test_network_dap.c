@@ -1,9 +1,11 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,7 +47,7 @@ struct fake_queue {
 };
 
 struct fake_semaphore {
-    bool locked;
+    pthread_mutex_t mutex;
 };
 
 static struct airdap_network_auth_connection auth_connection;
@@ -97,6 +99,30 @@ static airdap_dap_response_fn saved_response_callback;
 static void *saved_response_context;
 static airdap_dap_response_token_t saved_response_token;
 static bool callback_delivered_during_close;
+static atomic_uint registry_lock_take_calls;
+static pthread_mutex_t connection_pause_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t connection_pause_condition = PTHREAD_COND_INITIALIZER;
+static bool pause_listener_start;
+static bool listener_start_paused;
+static bool allow_listener_start;
+static bool pause_tls_accept;
+static bool tls_accept_paused;
+static bool allow_tls_accept;
+static bool pause_first_tls_read;
+static bool first_tls_read_paused;
+static bool allow_first_tls_read;
+static bool pause_dap_open;
+static bool dap_open_paused;
+static bool allow_dap_open;
+static unsigned int registry_locks_until_pause;
+static bool registry_lock_paused;
+static bool allow_registry_mutation;
+static bool observe_registry_waiter;
+static bool registry_waiter_observed;
+static unsigned int pause_after_tls_write_call;
+static bool tls_write_paused;
+static bool allow_tls_write;
+static unsigned int tls_write_calls;
 
 static void reset_connection_fakes(void)
 {
@@ -133,6 +159,24 @@ static void reset_connection_fakes(void)
     saved_response_context = NULL;
     saved_response_token = 0U;
     callback_delivered_during_close = false;
+    pause_tls_accept = false;
+    tls_accept_paused = false;
+    allow_tls_accept = false;
+    pause_first_tls_read = false;
+    first_tls_read_paused = false;
+    allow_first_tls_read = false;
+    pause_dap_open = false;
+    dap_open_paused = false;
+    allow_dap_open = false;
+    registry_locks_until_pause = 0U;
+    registry_lock_paused = false;
+    allow_registry_mutation = false;
+    observe_registry_waiter = false;
+    registry_waiter_observed = false;
+    pause_after_tls_write_call = 0U;
+    tls_write_paused = false;
+    allow_tls_write = false;
+    tls_write_calls = 0U;
 }
 
 static void append_request(
@@ -247,6 +291,17 @@ airdap_network_auth_result_t airdap_network_auth_tls_accept(
         *connection = NULL;
         return tls_accept_result;
     }
+    if (pause_tls_accept) {
+        assert(pthread_mutex_lock(&connection_pause_mutex) == 0);
+        tls_accept_paused = true;
+        assert(pthread_cond_broadcast(&connection_pause_condition) == 0);
+        while (!allow_tls_accept) {
+            assert(pthread_cond_wait(
+                &connection_pause_condition,
+                &connection_pause_mutex) == 0);
+        }
+        assert(pthread_mutex_unlock(&connection_pause_mutex) == 0);
+    }
     auth_connection.socket_fd = socket_fd;
     *connection = &auth_connection;
     return AIRDAP_NETWORK_AUTH_OK;
@@ -258,6 +313,18 @@ ssize_t airdap_network_auth_tls_read(
     size_t length)
 {
     assert(connection == &auth_connection);
+    if (pause_first_tls_read) {
+        assert(pthread_mutex_lock(&connection_pause_mutex) == 0);
+        pause_first_tls_read = false;
+        first_tls_read_paused = true;
+        assert(pthread_cond_broadcast(&connection_pause_condition) == 0);
+        while (!allow_first_tls_read) {
+            assert(pthread_cond_wait(
+                &connection_pause_condition,
+                &connection_pause_mutex) == 0);
+        }
+        assert(pthread_mutex_unlock(&connection_pause_mutex) == 0);
+    }
     if (tls_input_offset == tls_input_size) {
         if (revoke_session_id_at_end != 0U) {
             const uint32_t revoked_session_id = revoke_session_id_at_end;
@@ -293,6 +360,18 @@ ssize_t airdap_network_auth_tls_write(
     assert(tls_output_size + length <= sizeof(tls_output));
     memcpy(tls_output + tls_output_size, buffer, length);
     tls_output_size += length;
+    ++tls_write_calls;
+    if (pause_after_tls_write_call == tls_write_calls) {
+        assert(pthread_mutex_lock(&connection_pause_mutex) == 0);
+        tls_write_paused = true;
+        assert(pthread_cond_broadcast(&connection_pause_condition) == 0);
+        while (!allow_tls_write) {
+            assert(pthread_cond_wait(
+                &connection_pause_condition,
+                &connection_pause_mutex) == 0);
+        }
+        assert(pthread_mutex_unlock(&connection_pause_mutex) == 0);
+    }
     return (ssize_t) length;
 }
 
@@ -342,6 +421,17 @@ airdap_dap_service_result_t airdap_dap_service_session_open(
     assert(transport == AIRDAP_DAP_TRANSPORT_NETWORK);
     assert(authenticated);
     ++dap_open_calls;
+    if (pause_dap_open) {
+        assert(pthread_mutex_lock(&connection_pause_mutex) == 0);
+        dap_open_paused = true;
+        assert(pthread_cond_broadcast(&connection_pause_condition) == 0);
+        while (!allow_dap_open) {
+            assert(pthread_cond_wait(
+                &connection_pause_condition,
+                &connection_pause_mutex) == 0);
+        }
+        assert(pthread_mutex_unlock(&connection_pause_mutex) == 0);
+    }
     if (dap_open_result == AIRDAP_DAP_SERVICE_OK) {
         *session = 55U;
     }
@@ -480,22 +570,44 @@ SemaphoreHandle_t xSemaphoreCreateMutex(void)
 {
     struct fake_semaphore *semaphore = calloc(1U, sizeof(*semaphore));
     assert(semaphore != NULL);
+    assert(pthread_mutex_init(&semaphore->mutex, NULL) == 0);
     return semaphore;
 }
 
 BaseType_t xSemaphoreTake(SemaphoreHandle_t semaphore, TickType_t timeout)
 {
     assert(semaphore != NULL && timeout == portMAX_DELAY);
-    assert(!semaphore->locked);
-    semaphore->locked = true;
+    atomic_fetch_add(&registry_lock_take_calls, 1U);
+    assert(pthread_mutex_lock(&connection_pause_mutex) == 0);
+    if (observe_registry_waiter) {
+        observe_registry_waiter = false;
+        registry_waiter_observed = true;
+        assert(pthread_cond_broadcast(&connection_pause_condition) == 0);
+    }
+    assert(pthread_mutex_unlock(&connection_pause_mutex) == 0);
+
+    if (pthread_mutex_lock(&semaphore->mutex) != 0) {
+        return pdFALSE;
+    }
+    assert(pthread_mutex_lock(&connection_pause_mutex) == 0);
+    if (registry_locks_until_pause > 0U &&
+        --registry_locks_until_pause == 0U) {
+        registry_lock_paused = true;
+        assert(pthread_cond_broadcast(&connection_pause_condition) == 0);
+        while (!allow_registry_mutation) {
+            assert(pthread_cond_wait(
+                &connection_pause_condition,
+                &connection_pause_mutex) == 0);
+        }
+    }
+    assert(pthread_mutex_unlock(&connection_pause_mutex) == 0);
     return pdTRUE;
 }
 
 BaseType_t xSemaphoreGive(SemaphoreHandle_t semaphore)
 {
-    assert(semaphore != NULL && semaphore->locked);
-    semaphore->locked = false;
-    return pdTRUE;
+    assert(semaphore != NULL);
+    return pthread_mutex_unlock(&semaphore->mutex) == 0 ? pdTRUE : pdFALSE;
 }
 
 BaseType_t xTaskCreate(
@@ -510,6 +622,17 @@ BaseType_t xTaskCreate(
     (void) argument;
     (void) handle;
     ++task_create_calls;
+    if (pause_listener_start && strcmp(name, "dap_tcp_listener") == 0) {
+        assert(pthread_mutex_lock(&connection_pause_mutex) == 0);
+        listener_start_paused = true;
+        assert(pthread_cond_broadcast(&connection_pause_condition) == 0);
+        while (!allow_listener_start) {
+            assert(pthread_cond_wait(
+                &connection_pause_condition,
+                &connection_pause_mutex) == 0);
+        }
+        assert(pthread_mutex_unlock(&connection_pause_mutex) == 0);
+    }
     return pdPASS;
 }
 
@@ -604,11 +727,176 @@ int poll(struct pollfd *descriptors, nfds_t count, int timeout_ms)
     return 1;
 }
 
-static void start_component_once(void)
+static void assert_network_dap_status(
+    bool listener_ready,
+    unsigned int allocated_connections,
+    unsigned int tls_connections,
+    unsigned int authenticated_connections,
+    unsigned int dap_sessions)
 {
-    assert(airdap_network_dap_start() == ESP_OK);
+    airdap_network_dap_status_t status = {0};
+    const unsigned int locks_before = atomic_load(&registry_lock_take_calls);
+    assert(airdap_network_dap_get_status(&status) == ESP_OK);
+    assert(atomic_load(&registry_lock_take_calls) == locks_before + 1U);
+    assert(status.listener_ready == listener_ready);
+    assert(status.allocated_connections == allocated_connections);
+    assert(status.tls_connections == tls_connections);
+    assert(status.authenticated_connections == authenticated_connections);
+    assert(status.dap_sessions == dap_sessions);
+}
+
+static void wait_for_pause(bool *paused)
+{
+    assert(pthread_mutex_lock(&connection_pause_mutex) == 0);
+    while (!*paused) {
+        assert(pthread_cond_wait(
+            &connection_pause_condition,
+            &connection_pause_mutex) == 0);
+    }
+    assert(pthread_mutex_unlock(&connection_pause_mutex) == 0);
+}
+
+static void release_pause(bool *allow)
+{
+    assert(pthread_mutex_lock(&connection_pause_mutex) == 0);
+    *allow = true;
+    assert(pthread_cond_broadcast(&connection_pause_condition) == 0);
+    assert(pthread_mutex_unlock(&connection_pause_mutex) == 0);
+}
+
+typedef struct {
+    esp_err_t result;
+} start_thread_arguments_t;
+
+typedef struct {
+    esp_err_t result;
+    airdap_network_dap_status_t status;
+    atomic_bool completed;
+} status_thread_arguments_t;
+
+static void *start_component_worker(void *argument)
+{
+    start_thread_arguments_t *start = argument;
+    start->result = airdap_network_dap_start();
+    return NULL;
+}
+
+static void *status_worker(void *argument)
+{
+    status_thread_arguments_t *observed = argument;
+    observed->result = airdap_network_dap_get_status(&observed->status);
+    atomic_store(&observed->completed, true);
+    return NULL;
+}
+
+static void *handle_socket_worker(void *argument)
+{
+    const int socket_fd = *(const int *) argument;
+    airdap_network_dap_handle_socket(socket_fd);
+    return NULL;
+}
+
+static void test_status_is_empty_during_listener_startup(void)
+{
+    pause_listener_start = true;
+    start_thread_arguments_t start = {.result = ESP_FAIL};
+    pthread_t start_thread;
+    assert(pthread_create(
+        &start_thread,
+        NULL,
+        start_component_worker,
+        &start) == 0);
+    wait_for_pause(&listener_start_paused);
+
+    airdap_network_dap_status_t status;
+    memset(&status, 0xA5, sizeof(status));
+    const unsigned int locks_before = atomic_load(&registry_lock_take_calls);
+    assert(airdap_network_dap_get_status(&status) == ESP_OK);
+    assert(atomic_load(&registry_lock_take_calls) == locks_before);
+    const airdap_network_dap_status_t empty = {0};
+    assert(memcmp(&status, &empty, sizeof(status)) == 0);
+
+    release_pause(&allow_listener_start);
+    assert(pthread_join(start_thread, NULL) == 0);
+    assert(start.result == ESP_OK);
     assert(task_create_calls == 1U);
     assert(revoke_handler != NULL);
+    assert_network_dap_status(true, 0U, 0U, 0U, 0U);
+}
+
+static void test_concurrent_status_tracks_connection_lifecycle(void)
+{
+    reset_connection_fakes();
+    append_request(AIRDAP_FRAME_TYPE_HELLO, 8U, 1U, NULL, 0U);
+    append_request(AIRDAP_FRAME_TYPE_AUTH, 8U, 2U, NULL, 0U);
+    pause_tls_accept = true;
+    pause_first_tls_read = true;
+    pause_dap_open = true;
+    pause_after_tls_write_call = 2U;
+
+    int socket_fd = TEST_CLIENT_FD;
+    pthread_t connection_thread;
+    assert(pthread_create(
+        &connection_thread,
+        NULL,
+        handle_socket_worker,
+        &socket_fd) == 0);
+
+    wait_for_pause(&tls_accept_paused);
+    assert_network_dap_status(true, 1U, 0U, 0U, 0U);
+    release_pause(&allow_tls_accept);
+
+    wait_for_pause(&first_tls_read_paused);
+    assert_network_dap_status(true, 1U, 1U, 0U, 0U);
+
+    assert(pthread_mutex_lock(&connection_pause_mutex) == 0);
+    registry_locks_until_pause = 2U;
+    allow_first_tls_read = true;
+    assert(pthread_cond_broadcast(&connection_pause_condition) == 0);
+    assert(pthread_mutex_unlock(&connection_pause_mutex) == 0);
+    wait_for_pause(&registry_lock_paused);
+
+    status_thread_arguments_t observed = {0};
+    atomic_init(&observed.completed, false);
+    assert(pthread_mutex_lock(&connection_pause_mutex) == 0);
+    observe_registry_waiter = true;
+    assert(pthread_mutex_unlock(&connection_pause_mutex) == 0);
+    pthread_t status_thread;
+    assert(pthread_create(
+        &status_thread,
+        NULL,
+        status_worker,
+        &observed) == 0);
+    wait_for_pause(&registry_waiter_observed);
+    assert(!atomic_load(&observed.completed));
+    release_pause(&allow_registry_mutation);
+
+    wait_for_pause(&dap_open_paused);
+    assert(pthread_join(status_thread, NULL) == 0);
+    assert(observed.result == ESP_OK);
+    assert(observed.status.listener_ready);
+    assert(observed.status.allocated_connections == 1U);
+    assert(observed.status.tls_connections == 1U);
+    assert(observed.status.authenticated_connections == 1U);
+    assert(observed.status.dap_sessions == 0U);
+    release_pause(&allow_dap_open);
+
+    wait_for_pause(&tls_write_paused);
+    assert_network_dap_status(true, 1U, 1U, 1U, 1U);
+    release_pause(&allow_tls_write);
+    assert(pthread_join(connection_thread, NULL) == 0);
+
+    assert_network_dap_status(true, 0U, 0U, 0U, 0U);
+}
+
+static void test_uninitialized_status_is_empty(void)
+{
+    airdap_network_dap_status_t status;
+    memset(&status, 0xA5, sizeof(status));
+    assert(airdap_network_dap_get_status(NULL) == ESP_ERR_INVALID_ARG);
+    assert(airdap_network_dap_get_status(&status) == ESP_OK);
+    const airdap_network_dap_status_t empty = {0};
+    assert(memcmp(&status, &empty, sizeof(status)) == 0);
 }
 
 static void test_authenticated_hello_dap_info_and_keepalive(void)
@@ -743,7 +1031,18 @@ static void test_usb_owner_returns_busy_without_dap_dispatch(void)
     append_request(AIRDAP_FRAME_TYPE_AUTH, 11U, 2U, NULL, 0U);
     append_request(AIRDAP_FRAME_TYPE_DAP_REQUEST, 11U, 3U,
         dap_connect, sizeof(dap_connect));
-    airdap_network_dap_handle_socket(TEST_CLIENT_FD);
+    pause_after_tls_write_call = 3U;
+    int socket_fd = TEST_CLIENT_FD;
+    pthread_t connection_thread;
+    assert(pthread_create(
+        &connection_thread,
+        NULL,
+        handle_socket_worker,
+        &socket_fd) == 0);
+    wait_for_pause(&tls_write_paused);
+    assert_network_dap_status(true, 1U, 1U, 1U, 1U);
+    release_pause(&allow_tls_write);
+    assert(pthread_join(connection_thread, NULL) == 0);
 
     assert(dap_submit_calls == 0U);
     size_t offset = 0U;
@@ -753,6 +1052,7 @@ static void test_usb_owner_returns_busy_without_dap_dispatch(void)
     const airdap_frame_header_t error = next_response(&offset, &payload);
     assert_error_payload(payload, error.payload_length,
         AIRDAP_FRAME_ERROR_BUSY);
+    assert_network_dap_status(true, 0U, 0U, 0U, 0U);
 }
 
 static void test_invalid_auth_payload_never_marks_connection_authenticated(void)
@@ -859,6 +1159,7 @@ static void test_revoke_shuts_down_registered_connection(void)
 
     assert(shutdown_calls == 1U);
     assert(dap_close_calls == 2U && auth_close_calls == 1U);
+    assert_network_dap_status(true, 0U, 0U, 0U, 0U);
 }
 
 static void test_unrelated_revoke_does_not_shutdown_registered_connection(void)
@@ -895,6 +1196,7 @@ static void test_revoke_closes_service_before_queued_dap_can_respond(void)
     (void) next_response(&offset, &payload);
     (void) next_response(&offset, &payload);
     assert(offset == tls_output_size);
+    assert_network_dap_status(true, 0U, 0U, 0U, 0U);
 }
 
 static void test_pre_auth_partial_frame_times_out(void)
@@ -910,10 +1212,18 @@ static void test_pre_auth_partial_frame_times_out(void)
     assert(auth_close_calls == 1U && socket_close_calls == 1U);
 }
 
-int main(void)
+int main(int argument_count, char **arguments)
 {
+    if (argument_count == 2 &&
+        strcmp(arguments[1], "--uninitialized-status") == 0) {
+        test_uninitialized_status_is_empty();
+        puts("Uninitialized network DAP status test passed");
+        return 0;
+    }
+    assert(argument_count == 1);
     reset_connection_fakes();
-    start_component_once();
+    test_status_is_empty_during_listener_startup();
+    test_concurrent_status_tracks_connection_lifecycle();
     test_authenticated_hello_dap_info_and_keepalive();
     test_dap_before_auth_is_rejected_without_dispatch();
     test_non_hello_first_frame_is_rejected_and_closed();
@@ -928,6 +1238,7 @@ int main(void)
     test_unrelated_revoke_does_not_shutdown_registered_connection();
     test_revoke_closes_service_before_queued_dap_can_respond();
     test_pre_auth_partial_frame_times_out();
+    assert_network_dap_status(true, 0U, 0U, 0U, 0U);
     puts("Network DAP transport tests passed");
     return 0;
 }

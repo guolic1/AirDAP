@@ -101,6 +101,7 @@ static active_credential_t active_credential;
 static owner_session_t owner_session;
 static bool pairing_window_active;
 static unsigned int pending_handshakes;
+static unsigned int bound_connections;
 static uint32_t next_session_id = 1U;
 static airdap_network_auth_revoke_fn revoke_handler;
 static void *revoke_context;
@@ -384,6 +385,27 @@ esp_err_t airdap_network_auth_init(void)
         return error;
     }
     initialized = true;
+    return ESP_OK;
+}
+
+esp_err_t airdap_network_auth_get_status(
+    airdap_network_auth_status_t *status)
+{
+    if (status == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(status, 0, sizeof(*status));
+    if (!initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!lock_auth()) {
+        return ESP_FAIL;
+    }
+    status->credential_present = active_credential.valid;
+    status->pending_handshakes = pending_handshakes;
+    status->logical_owner_active = owner_session.active;
+    status->bound_connections = bound_connections;
+    unlock_auth();
     return ESP_OK;
 }
 
@@ -776,6 +798,7 @@ airdap_network_auth_result_t airdap_network_auth_session_bind(
         owner_session.last_activity_us = now_us;
         connection->bound = true;
         connection->session_id = owner_session.session_id;
+        ++bound_connections;
         copy_session_info(session_info);
     }
     unlock_auth();
@@ -826,6 +849,9 @@ void airdap_network_auth_connection_close(
     }
     pending_revoke_t pending = {0};
     if (initialized && connection->bound && lock_auth()) {
+        if (bound_connections > 0U) {
+            --bound_connections;
+        }
         if (owner_session.active &&
             owner_session.session_id == connection->session_id) {
             pending = invalidate_owner_locked();

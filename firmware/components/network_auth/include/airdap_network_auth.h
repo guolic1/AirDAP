@@ -49,6 +49,13 @@ typedef struct {
     uint8_t credential_fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE];
 } airdap_network_auth_session_info_t;
 
+typedef struct {
+    bool credential_present;
+    unsigned int pending_handshakes;
+    bool logical_owner_active;
+    unsigned int bound_connections;
+} airdap_network_auth_status_t;
+
 /* The callback must return promptly. It identifies the logical owner session
  * whose transport connections must be closed after timeout, credential
  * rotation, configuration clear, or a bound connection disconnect. */
@@ -60,6 +67,12 @@ typedef void (*airdap_network_auth_revoke_fn)(
  * missing credential is a valid unpaired state; a malformed record fails
  * closed. config_store and device_identity must already be initialized. */
 esp_err_t airdap_network_auth_init(void);
+
+/* Copies non-secret authentication lifecycle state while holding the
+ * component mutex once. Bound connections can remain non-zero briefly after
+ * owner revocation until their transport teardown completes. */
+esp_err_t airdap_network_auth_get_status(
+    airdap_network_auth_status_t *status);
 
 esp_err_t airdap_network_auth_set_revoke_handler(
     airdap_network_auth_revoke_fn handler,

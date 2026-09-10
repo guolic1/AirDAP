@@ -24,3 +24,7 @@ target_link_libraries(network_auth_test PRIVATE OpenSSL::Crypto Threads::Threads
 add_test(NAME network_auth_contract COMMAND network_auth_test)
 add_test(NAME network_auth_persisted_record COMMAND network_auth_test --loaded-init)
 add_test(NAME network_auth_malformed_record COMMAND network_auth_test --malformed-init)
+add_test(
+    NAME network_auth_uninitialized_status
+    COMMAND network_auth_test --uninitialized-status
+)

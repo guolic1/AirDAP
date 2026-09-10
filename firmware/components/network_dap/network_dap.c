@@ -100,6 +100,7 @@ static network_connection_t connections[AIRDAP_NETWORK_DAP_MAX_CONNECTIONS];
 static const airdap_device_identity_t *device_identity;
 static atomic_bool initialization_started;
 static atomic_bool revoke_all;
+static atomic_bool listener_ready;
 static bool dap_claimed;
 static int listener_socket = -1;
 
@@ -120,6 +121,41 @@ static bool registry_lock(void)
 static void registry_unlock(void)
 {
     (void) xSemaphoreGive(registry_mutex);
+}
+
+esp_err_t airdap_network_dap_get_status(airdap_network_dap_status_t *status)
+{
+    if (status == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(status, 0, sizeof(*status));
+    if (!atomic_load(&listener_ready)) {
+        return ESP_OK;
+    }
+    if (!registry_lock()) {
+        return ESP_FAIL;
+    }
+    status->listener_ready = true;
+    for (size_t index = 0U;
+         index < AIRDAP_NETWORK_DAP_MAX_CONNECTIONS;
+         ++index) {
+        const network_connection_t *connection = &connections[index];
+        if (!connection->allocated) {
+            continue;
+        }
+        ++status->allocated_connections;
+        if (connection->auth_connection != NULL) {
+            ++status->tls_connections;
+        }
+        if (atomic_load(&connection->auth_session_id) != 0U) {
+            ++status->authenticated_connections;
+        }
+        if (atomic_load(&connection->dap_session) != 0U) {
+            ++status->dap_sessions;
+        }
+    }
+    registry_unlock();
+    return ESP_OK;
 }
 
 static void write_u32_be(uint8_t *output, uint32_t value)
@@ -462,9 +498,11 @@ static void release_connection(network_connection_t *connection)
     unregister_connection(connection);
     atomic_store(&connection->pending_response_token, 0U);
 
-    const airdap_dap_session_id_t dap_session = atomic_exchange(
-        &connection->dap_session,
-        0U);
+    airdap_dap_session_id_t dap_session = 0U;
+    if (registry_lock()) {
+        dap_session = atomic_exchange(&connection->dap_session, 0U);
+        registry_unlock();
+    }
     if (dap_session != 0U) {
         const airdap_dap_service_result_t result =
             airdap_dap_service_session_close(
@@ -482,9 +520,14 @@ static void release_connection(network_connection_t *connection)
         connection->dap_claimed = false;
         registry_unlock();
     }
-    if (connection->auth_connection != NULL) {
-        airdap_network_auth_connection_close(connection->auth_connection);
+    airdap_network_auth_connection_t *auth_connection = NULL;
+    if (registry_lock()) {
+        auth_connection = connection->auth_connection;
         connection->auth_connection = NULL;
+        registry_unlock();
+    }
+    if (auth_connection != NULL) {
+        airdap_network_auth_connection_close(auth_connection);
     }
     clear_bytes(connection->frame_buffer, sizeof(connection->frame_buffer));
     clear_bytes(
@@ -684,7 +727,16 @@ static bool bind_session(
             auth_error_code(bind_result));
         return false;
     }
+    if (!registry_lock()) {
+        (void) send_error(
+            connection,
+            request,
+            AIRDAP_FRAME_ERROR_INTERNAL);
+        clear_bytes(&session_info, sizeof(session_info));
+        return false;
+    }
     atomic_store(&connection->auth_session_id, session_info.session_id);
+    registry_unlock();
     const airdap_network_auth_result_t validation_result =
         airdap_network_auth_session_validate(
             connection->auth_connection,
@@ -712,7 +764,19 @@ static bool bind_session(
         clear_bytes(&session_info, sizeof(session_info));
         return false;
     }
+    if (!registry_lock()) {
+        (void) airdap_dap_service_session_close(
+            AIRDAP_DAP_TRANSPORT_NETWORK,
+            dap_session);
+        (void) send_error(
+            connection,
+            request,
+            AIRDAP_FRAME_ERROR_INTERNAL);
+        clear_bytes(&session_info, sizeof(session_info));
+        return false;
+    }
     atomic_store(&connection->dap_session, dap_session);
+    registry_unlock();
 
     uint8_t response[AIRDAP_NETWORK_DAP_AUTH_RESPONSE_SIZE];
     write_u32_be(response, session_info.session_id);
@@ -840,13 +904,20 @@ static void run_connection(network_connection_t *connection)
     if (!make_nonblocking(connection->socket_fd)) {
         return;
     }
+    airdap_network_auth_connection_t *auth_connection = NULL;
     const airdap_network_auth_result_t tls_result =
         airdap_network_auth_tls_accept(
             connection->socket_fd,
-            &connection->auth_connection);
+            &auth_connection);
     if (tls_result != AIRDAP_NETWORK_AUTH_OK) {
         return;
     }
+    if (!registry_lock()) {
+        airdap_network_auth_connection_close(auth_connection);
+        return;
+    }
+    connection->auth_connection = auth_connection;
+    registry_unlock();
 
     const int64_t pre_auth_deadline = esp_timer_get_time() +
         APPLICATION_IO_TIMEOUT_US;
@@ -1110,6 +1181,7 @@ esp_err_t airdap_network_dap_start(void)
         listener_socket = -1;
         return ESP_ERR_NO_MEM;
     }
+    atomic_store(&listener_ready, true);
     ESP_LOGI(TAG, "Authenticated DAP TCP listener started on port %u",
         AIRDAP_NETWORK_DAP_PORT);
     return ESP_OK;

@@ -26,6 +26,8 @@ target_include_directories(
         ../../../components/device_identity/include
         ../../../components/discovery/include
         ../../../components/mode_state/include
+        ../../../components/network_auth/include
+        ../../../components/network_dap/include
         ../../../components/ota_manager/include
         ../../../components/target_uart/include
         ../../../components/usb_device/private_include

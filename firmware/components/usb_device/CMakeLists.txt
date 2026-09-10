@@ -19,6 +19,8 @@ set(usb_device_private_requires
     heap
     log
     mode_state
+    network_auth
+    network_dap
     ota_manager
     swd_engine
     target_uart

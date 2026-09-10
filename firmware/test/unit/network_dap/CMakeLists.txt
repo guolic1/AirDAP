@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 
 project(network_dap_test C)
 
+find_package(Threads REQUIRED)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -25,6 +27,11 @@ target_compile_options(network_dap_test PRIVATE
     -Wextra
     -Werror
 )
+target_link_libraries(network_dap_test PRIVATE Threads::Threads)
 
 enable_testing()
 add_test(NAME network_dap_contract COMMAND network_dap_test)
+add_test(
+    NAME network_dap_uninitialized_status
+    COMMAND network_dap_test --uninitialized-status
+)
