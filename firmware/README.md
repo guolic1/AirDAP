@@ -125,7 +125,7 @@ not part of this repository. The application currently provides:
 
 - CMSIS-DAP v2 on a vendor-specific USB Bulk interface;
 - Microsoft OS 2.0 descriptors for WinUSB binding on Vendor interfaces;
-- CDC ACM bridging to target UART1 on GPIO17/GPIO18;
+- CDC ACM bridging through the shared target UART1 service on GPIO17/GPIO18;
 - an optional, independent Vendor Bulk debug shell;
 - an SPI2 half-duplex SWD backend on GPIO12/GPIO13/GPIO14;
 - a versioned NVS configuration store for provisioning metadata and bounded
@@ -504,6 +504,27 @@ reports `busy` when USB or NETWORK already owns SWD. NETWORK is used by the
 authenticated DAP listener on TCP 3260; its connection and DAP-session lifecycle
 is observable through the read-only Debug Shell diagnostics below.
 
+## Target UART service
+
+UART1 on GPIO17/GPIO18 has one physical RX worker and one active session slot
+per USB or NETWORK transport. Each live session receives an ordered copy in
+its own fixed 512-byte ring. A full ring drops only that session's newest
+bytes, increments its saturating drop counter, and never waits for the slow
+consumer while serving the other session.
+
+UART configuration and writes use a first-come, non-preemptive owner tied to
+the exact transport session ID. A competing ownership request receives `busy`;
+closing the current owner releases it, while a stale close cannot release a
+replacement session. Reads are independent of TX ownership. The USB CDC bridge
+opens and closes its service session with the CDC lifecycle, caches the current
+line coding, and does not consume service RX bytes while the TinyUSB IN queue
+has no space.
+
+USB CDC remains an unauthenticated physical development interface. The shared
+service rejects unauthenticated NETWORK session creation, but TCP 3261,
+network parameter negotiation, and per-operation authentication revalidation
+belong to P5-T2 and are not implemented here.
+
 ## Persistent configuration
 
 Configuration schema 1 stores the friendly name, provisioning state, and
@@ -792,7 +813,7 @@ for suite in \
     bootloader_artifact ota_layout setup_env board config_store device_identity voltage_monitor swd_protocol \
     dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame discovery \
     dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning network_auth network_dap \
-    target_uart usb_descriptors project_version \
+    target_uart usb_uart_bridge usb_descriptors project_version \
     debug_shell_commands debug_shell_diagnostics debug_shell_config_status \
     debug_shell_identity debug_shell_input debug_shell_wifi debug_shell_button \
     debug_shell_swd_probe \
@@ -828,14 +849,16 @@ withdraw behavior, OTA state transitions, stale USB-frame recovery, interleaved
 USB/NETWORK DAP routing, AirDAP frame golden vectors and sequence rules,
 stale-session response suppression, bounded queue failures, host update
 ordering, automatic AirDAP BLE discovery and public-credential command
-construction, UART line-coding
-mapping, both compile-time USB descriptor variants, bounded shell input, the
+construction, UART line-coding mapping, independent bounded UART RX fan-out
+and overflow accounting, exact-session TX ownership and USB CDC session
+cleanup, both compile-time USB descriptor variants, bounded shell input, the
 simulated BOOT_KEY command/input merge, bounded SWD IDCODE command flow, debug
 TX completion state, host tools, and
 wired HIL helper's protocol checks. They do not prove USB enumeration, real NVS
 power-loss persistence or purge behavior, BLE enumeration or radio lifetime,
 real Wi-Fi provisioning, physical OTA persistence, bootloader rollback on a
 board, a live ESP32-S3 TLS handshake/resource profile, authenticated TCP/DAP
-dispatch over a real network link, or electrical SWD timing.
+dispatch over a real network link, target UART electrical timing or sustained
+CDC throughput, or electrical SWD timing.
 Follow `test/hil/wired.md` on a populated AirDAP board before marking roadmap
 Stage 1 complete.
