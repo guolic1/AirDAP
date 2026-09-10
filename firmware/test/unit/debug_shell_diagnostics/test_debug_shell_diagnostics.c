@@ -18,6 +18,8 @@
 #include "airdap_device_identity.h"
 #include "airdap_discovery.h"
 #include "airdap_mode_state.h"
+#include "airdap_network_auth.h"
+#include "airdap_network_dap.h"
 #include "airdap_ota.h"
 #include "airdap_target_uart.h"
 #include "airdap_usb_status.h"
@@ -54,6 +56,11 @@ static airdap_target_uart_status_t uart_status;
 static esp_err_t uart_status_result;
 static airdap_discovery_status_t discovery_status;
 static esp_err_t discovery_status_result;
+static airdap_network_auth_status_t network_auth_status;
+static esp_err_t network_auth_status_result;
+static airdap_network_dap_status_t network_dap_status;
+static esp_err_t network_dap_status_result;
+static airdap_mode_state_result_t mode_status_result;
 static TaskStatus_t task_statuses[3];
 static configRUN_TIME_COUNTER_TYPE task_total_runtime;
 static UBaseType_t reported_task_count;
@@ -220,8 +227,10 @@ size_t heap_caps_get_largest_free_block(uint32_t caps)
 airdap_mode_state_result_t airdap_mode_state_get(
     airdap_mode_snapshot_t *snapshot)
 {
-    *snapshot = mode_snapshot;
-    return AIRDAP_MODE_STATE_OK;
+    if (mode_status_result == AIRDAP_MODE_STATE_OK) {
+        *snapshot = mode_snapshot;
+    }
+    return mode_status_result;
 }
 
 airdap_ota_status_t airdap_ota_get_info(airdap_ota_info_t *info)
@@ -293,6 +302,24 @@ esp_err_t airdap_discovery_get_status(airdap_discovery_status_t *status)
         *status = discovery_status;
     }
     return discovery_status_result;
+}
+
+esp_err_t airdap_network_auth_get_status(
+    airdap_network_auth_status_t *status)
+{
+    if (network_auth_status_result == ESP_OK) {
+        *status = network_auth_status;
+    }
+    return network_auth_status_result;
+}
+
+esp_err_t airdap_network_dap_get_status(
+    airdap_network_dap_status_t *status)
+{
+    if (network_dap_status_result == ESP_OK) {
+        *status = network_dap_status;
+    }
+    return network_dap_status_result;
 }
 
 UBaseType_t uxTaskGetNumberOfTasks(void)
@@ -434,6 +461,7 @@ static void set_up(void)
         .ota = AIRDAP_OTA_RECEIVING,
         .dap_owner = AIRDAP_DAP_OWNER_USB,
     };
+    mode_status_result = AIRDAP_MODE_STATE_OK;
     ota_info = (airdap_ota_info_t) {
         .max_image_size = 0x3F0000U,
         .protocol_version = 1U,
@@ -516,6 +544,21 @@ static void set_up(void)
         .last_error = ESP_OK,
     };
     discovery_status_result = ESP_OK;
+    network_auth_status = (airdap_network_auth_status_t) {
+        .credential_present = true,
+        .pending_handshakes = 2U,
+        .logical_owner_active = true,
+        .bound_connections = 1U,
+    };
+    network_auth_status_result = ESP_OK;
+    network_dap_status = (airdap_network_dap_status_t) {
+        .listener_ready = true,
+        .allocated_connections = 3U,
+        .tls_connections = 2U,
+        .authenticated_connections = 1U,
+        .dap_sessions = 1U,
+    };
+    network_dap_status_result = ESP_OK;
     task_statuses[0] = (TaskStatus_t) {
         .pcTaskName = "wifi",
         .xTaskNumber = 8U,
@@ -604,6 +647,8 @@ static void test_registers_complete_shell_without_legacy_duplicates(void)
         "tasks",
         "dap-stats",
         "network-info",
+        "network-status",
+        "sessions",
         "usb-status",
         "uart-status",
         "discovery-status",
@@ -750,6 +795,97 @@ static void test_network_info_reports_non_secret_runtime_state(void)
     output = (captured_output_t) {0};
     assert(run_command(&registry, "network-info", "extra", &output) == 1);
     assert(strcmp(output.text, "usage: network-info\n") == 0);
+}
+
+static void test_network_status_aggregates_existing_sources(void)
+{
+    airdap_debug_shell_command_registry_t registry;
+    airdap_debug_shell_command_registry_init(&registry);
+    assert(airdap_debug_shell_register_service_diagnostic_commands(&registry));
+
+    captured_output_t output = {0};
+    assert(run_command(&registry, "network-status", "", &output) == 0);
+    assert(strcmp(
+        output.text,
+        "wifi_online=yes ipv4=192.168.4.20 rssi_dbm=-47\n"
+        "mdns_published=yes dap_listener_ready=yes dap_owner=usb\n") == 0);
+
+    output = (captured_output_t) {0};
+    mode_snapshot.wifi = AIRDAP_WIFI_DISCONNECTED;
+    mode_snapshot.dap_owner = AIRDAP_DAP_OWNER_NONE;
+    wifi_info.ipv4_available = false;
+    wifi_info.ap_available = false;
+    discovery_status.service_published = false;
+    network_dap_status.listener_ready = false;
+    assert(run_command(&registry, "network-status", "", &output) == 0);
+    assert(strcmp(
+        output.text,
+        "wifi_online=no ipv4=unavailable rssi_dbm=unavailable\n"
+        "mdns_published=no dap_listener_ready=no dap_owner=none\n") == 0);
+
+    output = (captured_output_t) {0};
+    network_dap_status_result = ESP_FAIL;
+    assert(run_command(&registry, "network-status", "", &output) == 1);
+    assert(strcmp(
+        output.text,
+        "network-status: DAP listener status read failed: ESP_FAIL\n") == 0);
+
+    output = (captured_output_t) {0};
+    assert(run_command(&registry, "network-status", "extra", &output) == 1);
+    assert(strcmp(output.text, "usage: network-status\n") == 0);
+}
+
+static void test_sessions_reports_only_distinct_counts_and_booleans(void)
+{
+    airdap_debug_shell_command_registry_t registry;
+    airdap_debug_shell_command_registry_init(&registry);
+    assert(airdap_debug_shell_register_service_diagnostic_commands(&registry));
+
+    captured_output_t output = {0};
+    assert(run_command(&registry, "sessions", "", &output) == 0);
+    assert(strcmp(
+        output.text,
+        "auth credential_present=yes pending_handshakes=2 "
+        "logical_owner_active=yes bound_connections=1\n"
+        "dap listener_ready=yes allocated_connections=3 tls_connections=2 "
+        "authenticated_connections=1 dap_sessions=1\n") == 0);
+    static const char *const forbidden[] = {
+        "psk",
+        "session_token",
+        "fingerprint",
+        "tls_key",
+        "ssid",
+        "bssid",
+        "password",
+    };
+    for (size_t index = 0U;
+         index < sizeof(forbidden) / sizeof(forbidden[0]);
+         ++index) {
+        assert(strstr(output.text, forbidden[index]) == NULL);
+    }
+
+    output = (captured_output_t) {0};
+    network_auth_status.logical_owner_active = false;
+    network_auth_status.bound_connections = 0U;
+    network_dap_status.authenticated_connections = 0U;
+    network_dap_status.dap_sessions = 0U;
+    assert(run_command(&registry, "sessions", "", &output) == 0);
+    assert(strstr(output.text, "allocated_connections=3") != NULL);
+    assert(strstr(output.text, "tls_connections=2") != NULL);
+    assert(strstr(output.text, "authenticated_connections=0") != NULL);
+    assert(strstr(output.text, "logical_owner_active=no") != NULL);
+
+    output = (captured_output_t) {0};
+    network_auth_status_result = ESP_FAIL;
+    assert(run_command(&registry, "sessions", "", &output) == 1);
+    assert(strcmp(
+        output.text,
+        "sessions: authentication status read failed: ESP_FAIL\n") ==
+        0);
+
+    output = (captured_output_t) {0};
+    assert(run_command(&registry, "sessions", "extra", &output) == 1);
+    assert(strcmp(output.text, "usage: sessions\n") == 0);
 }
 
 static void test_dap_stats_reports_all_service_counters(void)
@@ -983,6 +1119,10 @@ int main(void)
     test_dap_stats_reports_all_service_counters();
     set_up();
     test_network_info_reports_non_secret_runtime_state();
+    set_up();
+    test_network_status_aggregates_existing_sources();
+    set_up();
+    test_sessions_reports_only_distinct_counts_and_booleans();
     set_up();
     test_usb_status_reports_bus_interfaces_and_session();
     set_up();

@@ -143,7 +143,7 @@ not part of this repository. The application currently provides:
 - a bounded authenticated DAP listener on TCP 3260 with AirDAP v1 framing,
   strict session/sequence checks, and disconnect-safe response routing;
 - a bounded transport-independent DAP service with session-safe response
-  routing for USB and future network sessions;
+  routing for USB and authenticated network sessions;
 - target reset, power/status GPIO, VTref, and USB VBUS monitoring.
 
 The shared device identity is derived from the eFuse base MAC. Its USB serial
@@ -209,16 +209,15 @@ and a replacement USB session cannot receive that response. Queue-full,
 timeout, stale-session, and response delivery failures remain observable
 through service results and counters. Opening a NETWORK DAP service session
 requires the caller to assert that its outer session was authenticated. This is
-an admission contract, not an authentication implementation: the NETWORK
-transport identifier remains internal at this stage and no network listener is
-exposed.
+an admission contract; the TLS 1.3 PSK listener on TCP 3260 performs the outer
+authentication before opening the NETWORK service session.
 
 The mode state publishes orthogonal USB, Wi-Fi, provisioning, OTA, and live DAP
 owner fields. USB attach/detach, Wi-Fi station, BLE provisioning, and OTA
 lifecycle events are wired today. USB DAP admission ignores Wi-Fi state.
 Authenticated NETWORK DAP admission requires USB to be absent and Wi-Fi to be
-online, while USB
-presence does not disable future network status, configuration, or OTA paths.
+online, while USB presence does not disable independent network status,
+configuration, or OTA paths.
 USB attach conditionally revokes an idle NETWORK DAP owner. Ownership acquire
 and physical-operation begin revalidate versioned mode policy, so an attach
 racing either transaction rolls it back without a blocking cross-task lock;
@@ -257,8 +256,9 @@ controls Wi-Fi association; AirDAP's reconnect state machine resumes only after
 the provisioning manager ends and then reapplies the canonical configuration.
 A failed, cancelled, or timed-out attempt restores the previously committed
 configuration. The custom network-credential pairing endpoint is available
-during the same Security 2 window; authenticated TCP listeners remain later
-transport work.
+during the same Security 2 window. The authenticated DAP listener uses the
+committed network credential on TCP 3260; UART and control TCP transports remain
+later work.
 
 For development-board Wi-Fi validation, use a dedicated test AP and never a
 production credential. The HIL console accepts credentials at runtime so they
@@ -492,8 +492,9 @@ Disconnect, USB detach, stale USB sessions, and OTA write entry release
 ownership; release also leaves SWDIO high impedance and nRESET deasserted.
 Every new owner starts with an SWD Line Reset. The Debug Shell `swd-idcode`
 command acquires the internal DIAGNOSTIC owner for its complete transaction and
-reports `busy` when USB or NETWORK already owns SWD. NETWORK remains reserved
-for a later network transport and is not exposed by this stage.
+reports `busy` when USB or NETWORK already owns SWD. NETWORK is used by the
+authenticated DAP listener on TCP 3260; its connection and DAP-session lifecycle
+is observable through the read-only Debug Shell diagnostics below.
 
 ## Persistent configuration
 
@@ -622,8 +623,9 @@ run non-interactively:
 ```sh
 python tools/airdap-shell.py \
     -c system-info -c memory-info -c mode-status -c ota-status \
-    -c target-status -c tasks -c dap-stats -c network-info -c usb-status \
-    -c uart-status -c discovery-status
+    -c target-status -c tasks -c dap-stats -c network-info \
+    -c network-status -c sessions -c usb-status -c uart-status \
+    -c discovery-status
 ```
 
 Use `--sleep SECONDS` to wait between each adjacent pair of repeated `-c`
@@ -682,6 +684,13 @@ extending a single global command table. Available commands are:
 - `network-info` — print Wi-Fi manager/link/configuration state, failure and
   retry diagnostics, IPv4 address information, RSSI, and channel without
   displaying SSID, BSSID, credentials, or authentication material;
+- `network-status` — aggregate Wi-Fi online state, IPv4 address, RSSI, mDNS
+  publication, authenticated DAP-listener readiness, and the current DAP owner
+  without changing any network or ownership state;
+- `sessions` — print credential presence, pending TLS handshakes, logical owner
+  activity, bound authentication connections, and the separately counted
+  allocated, TLS, authenticated, and open DAP connections without displaying
+  credentials, fingerprints, keys, or session tokens;
 - `usb-status` — print TinyUSB mount/suspend state, DAP Vendor, target CDC and
   debug Vendor interface state, and whether the USB DAP session is active;
 - `uart-status` — print the target UART's last accepted line coding, RX queued
@@ -799,6 +808,8 @@ provisioning-button thresholds, BLE window cleanup, atomic provisioning commit,
 network-credential commit/rotation, exact TLS 1.3 PSK-DHE configuration,
 bounded handshake admission and cleanup, fingerprint vectors, authenticated
 session binding, single-owner/token admission, expiry/replay/revocation, the
+non-secret authentication and DAP-listener status snapshots, their concurrent
+getter behavior, aggregate network/session Debug Shell output, the
 Python pairing/TLS-PSK/DAP probe tools, authenticated AirDAP HELLO/AUTH framing,
 DAP dispatch/timeout response routing, revoke/disconnect cleanup, and
 reset-after-release behavior, DAP owner
