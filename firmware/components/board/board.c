@@ -10,12 +10,15 @@
 
 static atomic_bool boot_key_simulated_pressed;
 
-static esp_err_t configure_pins(uint64_t pin_mask, gpio_mode_t mode)
+static esp_err_t configure_pins(
+    uint64_t pin_mask,
+    gpio_mode_t mode,
+    gpio_pullup_t pull_up)
 {
     const gpio_config_t config = {
         .pin_bit_mask = pin_mask,
         .mode = mode,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_up_en = pull_up,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
@@ -51,7 +54,6 @@ static esp_err_t preload_safe_levels(void)
 esp_err_t airdap_board_init_safe(void)
 {
     const uint64_t input_mask =
-        AIRDAP_PIN_MASK(AIRDAP_PIN_BOOT_KEY) |
         AIRDAP_PIN_MASK(AIRDAP_PIN_TARGET_VTREF_ADC) |
         AIRDAP_PIN_MASK(AIRDAP_PIN_USB_VBUS_SENSE) |
         AIRDAP_PIN_MASK(AIRDAP_PIN_TARGET_SWDIO_TMS) |
@@ -69,19 +71,34 @@ esp_err_t airdap_board_init_safe(void)
         return error;
     }
 
-    error = configure_pins(input_mask, GPIO_MODE_INPUT);
+    error = configure_pins(
+        AIRDAP_PIN_MASK(AIRDAP_PIN_BOOT_KEY),
+        GPIO_MODE_INPUT,
+        GPIO_PULLUP_ENABLE);
     if (error != ESP_OK) {
         return error;
     }
 
-    error = configure_pins(output_mask, GPIO_MODE_OUTPUT);
+    error = configure_pins(
+        input_mask,
+        GPIO_MODE_INPUT,
+        GPIO_PULLUP_DISABLE);
+    if (error != ESP_OK) {
+        return error;
+    }
+
+    error = configure_pins(
+        output_mask,
+        GPIO_MODE_OUTPUT,
+        GPIO_PULLUP_DISABLE);
     if (error != ESP_OK) {
         return error;
     }
 
     return configure_pins(
         AIRDAP_PIN_MASK(AIRDAP_PIN_V_SOURCE_STATUS),
-        GPIO_MODE_INPUT_OUTPUT_OD);
+        GPIO_MODE_INPUT_OUTPUT_OD,
+        GPIO_PULLUP_DISABLE);
 }
 
 esp_err_t airdap_target_power_set_allowed(bool allowed)

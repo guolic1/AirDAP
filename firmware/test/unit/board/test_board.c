@@ -146,10 +146,12 @@ static size_t find_level_event_index(gpio_num_t pin)
     return (size_t) (find_level_event(pin) - events);
 }
 
-static const event_t *find_config_event(gpio_mode_t mode)
+static const event_t *find_config_event(gpio_mode_t mode, uint64_t pin_mask)
 {
     for (size_t index = 0; index < event_count; ++index) {
-        if (events[index].type == EVENT_CONFIG && events[index].config.mode == mode) {
+        if (events[index].type == EVENT_CONFIG &&
+            events[index].config.mode == mode &&
+            events[index].config.pin_bit_mask == pin_mask) {
             return &events[index];
         }
     }
@@ -158,9 +160,9 @@ static const event_t *find_config_event(gpio_mode_t mode)
     return NULL;
 }
 
-static size_t find_config_event_index(gpio_mode_t mode)
+static size_t find_config_event_index(gpio_mode_t mode, uint64_t pin_mask)
 {
-    return (size_t) (find_config_event(mode) - events);
+    return (size_t) (find_config_event(mode, pin_mask) - events);
 }
 
 static void assert_config(
@@ -169,7 +171,7 @@ static void assert_config(
     gpio_pullup_t expected_pullup,
     gpio_pulldown_t expected_pulldown)
 {
-    const gpio_config_t *config = &find_config_event(mode)->config;
+    const gpio_config_t *config = &find_config_event(mode, expected_mask)->config;
 
     assert(config->pin_bit_mask == expected_mask);
     assert(config->pull_up_en == expected_pullup);
@@ -177,16 +179,19 @@ static void assert_config(
     assert(config->intr_type == GPIO_INTR_DISABLE);
 }
 
-static void assert_level_preloaded(gpio_num_t pin, uint32_t level, gpio_mode_t mode)
+static void assert_level_preloaded(
+    gpio_num_t pin,
+    uint32_t level,
+    gpio_mode_t mode,
+    uint64_t pin_mask)
 {
     assert(find_level_event(pin)->level == level);
-    assert(find_level_event_index(pin) < find_config_event_index(mode));
+    assert(find_level_event_index(pin) < find_config_event_index(mode, pin_mask));
 }
 
 static void test_safe_gpio_state(void)
 {
     const uint64_t input_mask =
-        pin_mask(AIRDAP_PIN_BOOT_KEY) |
         pin_mask(AIRDAP_PIN_TARGET_VTREF_ADC) |
         pin_mask(AIRDAP_PIN_USB_VBUS_SENSE) |
         pin_mask(AIRDAP_PIN_TARGET_SWDIO_TMS) |
@@ -202,8 +207,13 @@ static void test_safe_gpio_state(void)
     reset_fake_gpio();
 
     assert(airdap_board_init_safe() == ESP_OK);
-    assert(event_count == 10U);
+    assert(event_count == 11U);
 
+    assert_config(
+        GPIO_MODE_INPUT,
+        pin_mask(AIRDAP_PIN_BOOT_KEY),
+        GPIO_PULLUP_ENABLE,
+        GPIO_PULLDOWN_DISABLE);
     assert_config(GPIO_MODE_INPUT, input_mask, GPIO_PULLUP_DISABLE, GPIO_PULLDOWN_DISABLE);
     assert_config(GPIO_MODE_OUTPUT, output_mask, GPIO_PULLUP_DISABLE, GPIO_PULLDOWN_DISABLE);
     assert_config(
@@ -212,13 +222,23 @@ static void test_safe_gpio_state(void)
         GPIO_PULLUP_DISABLE,
         GPIO_PULLDOWN_DISABLE);
 
-    assert_level_preloaded(AIRDAP_PIN_TARGET_SWCLK_TCK, 0U, GPIO_MODE_OUTPUT);
-    assert_level_preloaded(AIRDAP_PIN_SWDIO_DIR, 0U, GPIO_MODE_OUTPUT);
-    assert_level_preloaded(AIRDAP_PIN_TARGET_NRESET, 0U, GPIO_MODE_OUTPUT);
-    assert_level_preloaded(AIRDAP_PIN_TARGET_TX_TDI, 1U, GPIO_MODE_OUTPUT);
-    assert_level_preloaded(AIRDAP_PIN_LED_STATUS, 1U, GPIO_MODE_OUTPUT);
-    assert_level_preloaded(AIRDAP_PIN_LED_NET, 1U, GPIO_MODE_OUTPUT);
-    assert_level_preloaded(AIRDAP_PIN_V_SOURCE_STATUS, 1U, GPIO_MODE_INPUT_OUTPUT_OD);
+    assert_level_preloaded(
+        AIRDAP_PIN_TARGET_SWCLK_TCK, 0U, GPIO_MODE_OUTPUT, output_mask);
+    assert_level_preloaded(
+        AIRDAP_PIN_SWDIO_DIR, 0U, GPIO_MODE_OUTPUT, output_mask);
+    assert_level_preloaded(
+        AIRDAP_PIN_TARGET_NRESET, 0U, GPIO_MODE_OUTPUT, output_mask);
+    assert_level_preloaded(
+        AIRDAP_PIN_TARGET_TX_TDI, 1U, GPIO_MODE_OUTPUT, output_mask);
+    assert_level_preloaded(
+        AIRDAP_PIN_LED_STATUS, 1U, GPIO_MODE_OUTPUT, output_mask);
+    assert_level_preloaded(
+        AIRDAP_PIN_LED_NET, 1U, GPIO_MODE_OUTPUT, output_mask);
+    assert_level_preloaded(
+        AIRDAP_PIN_V_SOURCE_STATUS,
+        1U,
+        GPIO_MODE_INPUT_OUTPUT_OD,
+        pin_mask(AIRDAP_PIN_V_SOURCE_STATUS));
 }
 
 static void test_first_gpio_failure_is_returned(void)

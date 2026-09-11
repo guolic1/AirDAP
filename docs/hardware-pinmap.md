@@ -2,7 +2,7 @@
 
 | GPIO | 信号/功能 | 方向/模式 | 有效电平与说明 |
 |---:|---|---|---|
-| 0 | `BOOT_KEY` | 输入 | 低有效；R1 10 kΩ 上拉，SW1 按下接地；兼作 ROM 下载启动键 |
+| 0 | `BOOT_KEY` | 输入（固件内部上拉） | 低有效；R1 10 kΩ 外部上拉，SW1 按下接地；兼作 ROM 下载启动键 |
 | 3 | `TARGET_VTREF_ADC` | ADC 输入 | R7/R8 100 kΩ 等值分压，`VADC = Vtarget / 2` |
 | 8 | `USB_VBUS_SENSE` | ADC/数字输入 | R18 150 kΩ、R19 220 kΩ 分压，`VADC = VBUS × 220 / 370` |
 | 9 | `V_SOURCE_STATUS` | 输入/开漏输出 | 连接 TPS2116 `ST` 和 TPS22919 `ON`；写 1 释放，写 0 禁止目标供电；禁止推挽输出高 |
