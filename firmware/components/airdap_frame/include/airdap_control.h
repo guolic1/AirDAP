@@ -1,0 +1,14 @@
+#pragma once
+
+/* V1 CONTROL opcodes. Success echoes the opcode; ERROR remains a bare u16
+ * network-order frame error code. UART is served on 3261, board control 3260. */
+enum {
+    AIRDAP_CONTROL_UART_STATUS = 0x10,
+    AIRDAP_CONTROL_UART_ACQUIRE_TX = 0x11,
+    AIRDAP_CONTROL_UART_CONFIGURE = 0x12,
+    AIRDAP_CONTROL_UART_WRITE = 0x13,
+    AIRDAP_CONTROL_UART_READ = 0x14,
+    AIRDAP_CONTROL_RESET_SET = 0x20,
+    AIRDAP_CONTROL_POWER_SET = 0x21,
+    AIRDAP_CONTROL_POWER_GET = 0x22,
+};

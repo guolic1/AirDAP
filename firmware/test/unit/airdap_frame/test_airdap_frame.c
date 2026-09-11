@@ -311,6 +311,14 @@ static void test_error_codes_have_network_order_payloads(void)
     assert(decoded == AIRDAP_FRAME_ERROR_BUSY);
     assert(parse_error == AIRDAP_FRAME_ERROR_NONE);
 
+    const uint8_t invalid_argument[] = {0x00U, 0x23U};
+    assert(airdap_frame_error_code_encode(AIRDAP_FRAME_ERROR_INVALID_ARGUMENT,
+        encoded, sizeof(encoded)));
+    assert(memcmp(encoded, invalid_argument, sizeof(encoded)) == 0);
+    assert(airdap_frame_error_code_decode(invalid_argument, sizeof(invalid_argument),
+        &decoded, &parse_error) == AIRDAP_FRAME_DECODE_OK);
+    assert(decoded == AIRDAP_FRAME_ERROR_INVALID_ARGUMENT);
+
     assert(airdap_frame_error_code_decode(
         AIRDAP_FRAME_GOLDEN_TRUNCATED_ERROR,
         sizeof(AIRDAP_FRAME_GOLDEN_TRUNCATED_ERROR),
