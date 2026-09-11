@@ -3,8 +3,8 @@
 | GPIO | 信号/功能 | 方向/模式 | 有效电平与说明 |
 |---:|---|---|---|
 | 0 | `BOOT_KEY` | 输入（固件内部上拉） | 低有效；R1 10 kΩ 外部上拉，SW1 按下接地；兼作 ROM 下载启动键 |
-| 3 | `TARGET_VTREF_ADC` | ADC 输入 | R7/R8 100 kΩ 等值分压，`VADC = Vtarget / 2` |
-| 8 | `USB_VBUS_SENSE` | ADC/数字输入 | 实物板 R18/R19 100 kΩ 等值分压，`VADC = VBUS / 2`；旧原理图为 150 kΩ / 220 kΩ |
+| 2 | `TARGET_VTREF_ADC` | ADC 输入 | U1 焊盘 6；R7/R8 100 kΩ 等值分压，`VADC = Vtarget / 2`；GPIO3 未连接 |
+| 8 | `USB_VBUS_SENSE` | ADC/数字输入 | R18/R19 100 kΩ 等值分压，`VADC = VBUS / 2` |
 | 9 | `V_SOURCE_STATUS` | 输入/开漏输出 | 连接 TPS2116 `ST` 和 TPS22919 `ON`；写 1 释放，写 0 禁止目标供电；禁止推挽输出高 |
 | 10 | `LED_STATUS` | 输出 | 红色状态 LED，低亮、高灭 |
 | 11 | `LED_NET` | 输出 | 绿色网络 LED，低亮、高灭 |

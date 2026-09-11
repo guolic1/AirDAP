@@ -33,7 +33,7 @@ esp_err_t adc_oneshot_io_to_channel(
     *unit_id = ADC_UNIT_1;
 
     if (io_num == AIRDAP_PIN_TARGET_VTREF_ADC) {
-        *channel = ADC_CHANNEL_2;
+        *channel = ADC_CHANNEL_1;
         return ESP_OK;
     }
     if (io_num == AIRDAP_PIN_USB_VBUS_SENSE) {
@@ -68,7 +68,7 @@ esp_err_t adc_oneshot_config_channel(
     const adc_oneshot_chan_cfg_t *config)
 {
     assert(handle == &unit_token);
-    assert(channel == ADC_CHANNEL_2 || channel == ADC_CHANNEL_7);
+    assert(channel == ADC_CHANNEL_1 || channel == ADC_CHANNEL_7);
     assert(config != NULL);
     assert(config->atten == ADC_ATTEN_DB_12);
     assert(config->bitwidth == ADC_BITWIDTH_DEFAULT);
@@ -86,7 +86,7 @@ esp_err_t adc_cali_create_scheme_curve_fitting(
     assert(config->atten == ADC_ATTEN_DB_12);
     assert(config->bitwidth == ADC_BITWIDTH_DEFAULT);
 
-    if (config->chan == ADC_CHANNEL_2) {
+    if (config->chan == ADC_CHANNEL_1) {
         *ret_handle = &target_calibration_token;
     } else {
         assert(config->chan == ADC_CHANNEL_7);
@@ -110,7 +110,7 @@ esp_err_t adc_oneshot_read(
     assert(handle == &unit_token);
     assert(out_raw != NULL);
 
-    if (channel == ADC_CHANNEL_2) {
+    if (channel == ADC_CHANNEL_1) {
         ++target_read_calls;
         *out_raw = TARGET_RAW;
     } else {
