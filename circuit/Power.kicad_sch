@@ -3203,6 +3203,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C25741"
+			(at 39.37 49.53 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "ff18bb70-6440-482b-8d7b-66d16a4290c7")
 		)
@@ -3910,6 +3921,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C59461 "
+			(at 132.08 38.1 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "49709025-2f55-4cbd-b6ec-a46a34e68e40")
 		)
@@ -4072,6 +4094,17 @@
 				)
 			)
 		)
+		(property "元件编号" ""
+			(at 41.91 168.91 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(instances
 			(project "AirDAP"
 				(path "/679b3507-1177-49d7-9312-6c6e2bf23548/62945a0a-2785-426c-a0f7-5563abcbf14f"
@@ -4137,6 +4170,17 @@
 			)
 		)
 		(property "Description" ""
+			(at 157.48 43.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C5219190 "
 			(at 157.48 43.18 0)
 			(hide yes)
 			(show_name no)
@@ -4359,7 +4403,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "91kR"
+		(property "Value" "100kR"
 			(at 172.72 54.6099 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4393,6 +4437,17 @@
 			)
 		)
 		(property "Description" "Resistor"
+			(at 170.18 53.34 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C25741"
 			(at 170.18 53.34 0)
 			(hide yes)
 			(show_name no)
@@ -4475,6 +4530,17 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
+			(at 137.16 38.1 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C1525 "
 			(at 137.16 38.1 0)
 			(hide yes)
 			(show_name no)
@@ -4634,6 +4700,17 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
+			(at 21.59 43.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C23733 "
 			(at 21.59 43.18 0)
 			(hide yes)
 			(show_name no)
@@ -5036,6 +5113,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C23733 "
+			(at 106.68 43.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "c9dfb868-a997-4143-b091-955481dc9192")
 		)
@@ -5150,7 +5238,7 @@
 				)
 			)
 		)
-		(property "Value" "511kR"
+		(property "Value" "560kR"
 			(at 176.53 43.434 90)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5184,6 +5272,17 @@
 		)
 		(property "Description" "Resistor"
 			(at 176.53 45.72 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" ""
+			(at 176.53 45.72 90)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5264,6 +5363,17 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
+			(at 196.85 50.8 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C59461 "
 			(at 196.85 50.8 0)
 			(hide yes)
 			(show_name no)
@@ -5424,6 +5534,17 @@
 			)
 		)
 		(property "Description" "Resistor"
+			(at 39.37 87.63 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C25741"
 			(at 39.37 87.63 0)
 			(hide yes)
 			(show_name no)
@@ -5661,6 +5782,17 @@
 			)
 		)
 		(property "Description" "Resistor"
+			(at 82.55 41.91 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C25744 "
 			(at 82.55 41.91 0)
 			(hide yes)
 			(show_name no)
@@ -5985,6 +6117,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C2149796 "
+			(at 143.51 97.79 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "5"
 			(uuid "1ffc5336-7ca6-4ee4-914a-6464f1c90a83")
 		)
@@ -6235,6 +6378,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C52923 "
+			(at 160.02 105.41 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "990d6415-9808-4c69-bf49-855a19cce020")
 		)
@@ -6306,6 +6460,17 @@
 		)
 		(property "Description" "2 Channnels Power Mux with Manual and Priority Switchover, 1.6-5.5V Input Voltage, 2.5A Output Current, Ron 40 mOhm, SOT-583-8"
 			(at 59.69 45.466 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C3235557 "
+			(at 59.69 44.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6413,6 +6578,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C2869734 "
+			(at 185.42 97.79 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "3"
 			(uuid "f0211902-6160-4def-a897-be9fca839c75")
 		)
@@ -6505,6 +6681,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C98348 "
+			(at 157.48 25.4 90)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "77672113-7192-4e2b-89b9-b20987ab0de7")
 		)
@@ -6578,6 +6765,17 @@
 			)
 		)
 		(property "Description" "Mounting Hole without connection"
+			(at 41.91 163.83 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" ""
 			(at 41.91 163.83 0)
 			(hide yes)
 			(show_name no)
@@ -6731,6 +6929,17 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
+			(at 113.03 43.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C1525 "
 			(at 113.03 43.18 0)
 			(hide yes)
 			(show_name no)
@@ -6979,6 +7188,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C25774 "
+			(at 39.37 35.56 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "ed64a3df-a83d-450e-86af-ddbcabf8c28c")
 		)
@@ -7050,6 +7270,17 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
+			(at 27.94 43.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C1525 "
 			(at 27.94 43.18 0)
 			(hide yes)
 			(show_name no)
@@ -7133,6 +7364,17 @@
 			)
 		)
 		(property "Description" "Mounting Hole without connection"
+			(at 41.91 173.99 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" ""
 			(at 41.91 173.99 0)
 			(hide yes)
 			(show_name no)
@@ -7299,6 +7541,17 @@
 				)
 			)
 		)
+		(property "元件编号" ""
+			(at 41.91 179.07 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(instances
 			(project "AirDAP"
 				(path "/679b3507-1177-49d7-9312-6c6e2bf23548/62945a0a-2785-426c-a0f7-5563abcbf14f"
@@ -7364,6 +7617,17 @@
 		)
 		(property "Description" "Resistor"
 			(at 138.43 48.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C25741"
+			(at 138.43 48.26 90)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7532,6 +7796,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C1525 "
+			(at 190.5 50.8 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "2b3bdad6-1652-434e-9ce3-06ffbac3a362")
 		)
@@ -7603,6 +7878,17 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
+			(at 203.2 50.8 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C59461 "
 			(at 203.2 50.8 0)
 			(hide yes)
 			(show_name no)
@@ -7840,6 +8126,17 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
+			(at 208.28 102.87 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C1525 "
 			(at 208.28 102.87 0)
 			(hide yes)
 			(show_name no)
@@ -8088,6 +8385,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C52923 "
+			(at 109.22 99.06 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "6313630e-e5f6-4912-a480-6560ec8593d8")
 		)
@@ -8237,6 +8545,17 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
+			(at 200.66 102.87 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C23733 "
 			(at 200.66 102.87 0)
 			(hide yes)
 			(show_name no)
@@ -8397,6 +8716,17 @@
 			)
 		)
 		(property "Description" "Resistor"
+			(at 39.37 101.6 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C25741"
 			(at 39.37 101.6 0)
 			(hide yes)
 			(show_name no)
@@ -8645,6 +8975,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C11702 "
+			(at 217.17 38.1 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "b1ea9e20-8621-452d-a4c9-c4da81777697")
 		)
@@ -8805,6 +9146,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C1525 "
+			(at 46.99 101.6 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "8afa38be-eaee-4dff-9cae-63e761007960")
 		)
@@ -8889,6 +9241,17 @@
 		)
 		(property "Sim.Pins" "1=K 2=A"
 			(at 217.17 49.53 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C2286 "
+			(at 217.17 49.53 90)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)

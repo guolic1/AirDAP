@@ -3819,6 +3819,16 @@
 	)
 	(wire
 		(pts
+			(xy 100.33 22.86) (xy 100.33 25.4)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "5a21f32e-aa77-4fda-a185-8bd3dace1e97")
+	)
+	(wire
+		(pts
 			(xy 97.79 109.22) (xy 100.33 109.22)
 		)
 		(stroke
@@ -3846,6 +3856,16 @@
 			(type default)
 		)
 		(uuid "600b31f7-1a84-43ee-b086-a7ac3731a969")
+	)
+	(wire
+		(pts
+			(xy 100.33 33.02) (xy 100.33 35.56)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "6010f68d-1464-4f2f-ac27-0582ed599161")
 	)
 	(wire
 		(pts
@@ -5070,6 +5090,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C8545"
+			(at 196.85 54.61 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "132e118a-a6a7-4f50-abb5-3b26c285a27a")
 		)
@@ -5231,6 +5262,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C1525 "
+			(at 133.35 143.51 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "2"
 			(uuid "b4fffacc-9458-47a5-9f65-2909119eed4d")
 		)
@@ -5312,6 +5354,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C1525 "
+			(at 71.12 143.51 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "2"
 			(uuid "993e6cfc-e838-4055-94e9-9f9563cc1ea8")
 		)
@@ -5350,7 +5403,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "220kR"
+		(property "Value" "100kR"
 			(at 130.81 57.1499 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5384,6 +5437,17 @@
 			)
 		)
 		(property "Description" "Resistor"
+			(at 128.27 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C25741"
 			(at 128.27 55.88 0)
 			(hide yes)
 			(show_name no)
@@ -5488,6 +5552,99 @@
 		)
 	)
 	(symbol
+		(lib_id "Device:C")
+		(at 100.33 29.21 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "1746f849-8edc-48ab-9a17-0b03222469eb")
+		(property "Reference" "C28"
+			(at 104.14 27.9399 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "100nF"
+			(at 104.14 30.4799 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "Capacitor_SMD:C_0402_1005Metric"
+			(at 101.2952 33.02 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 100.33 29.21 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Unpolarized capacitor"
+			(at 100.33 29.21 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C1525 "
+			(at 100.33 29.21 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "2"
+			(uuid "080fa215-b64a-45b8-8aa3-944b7ef75fad")
+		)
+		(pin "1"
+			(uuid "d9a0a141-c339-4012-a6ea-1574b40d34d3")
+		)
+		(instances
+			(project "AirDAP"
+				(path "/679b3507-1177-49d7-9312-6c6e2bf23548/ef2d842a-3d5d-4428-98d6-5b11e5571356"
+					(reference "C28")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "Device:R")
 		(at 190.5 59.69 0)
 		(mirror y)
@@ -5544,6 +5701,17 @@
 			)
 		)
 		(property "Description" "Resistor"
+			(at 190.5 59.69 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C25741"
 			(at 190.5 59.69 0)
 			(hide yes)
 			(show_name no)
@@ -5703,6 +5871,17 @@
 		)
 		(property "Description" "Resistor"
 			(at 227.33 45.72 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C25092 "
+			(at 227.33 45.72 90)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6028,6 +6207,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C1525 "
+			(at 125.73 143.51 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "2"
 			(uuid "c3384c23-4b06-4d6f-a41b-65e6c022d3a0")
 		)
@@ -6287,6 +6477,17 @@
 			)
 		)
 		(property "Part" "H5VLD3B"
+			(at 121.92 46.99 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C20615805 "
 			(at 121.92 46.99 0)
 			(hide yes)
 			(show_name no)
@@ -6688,6 +6889,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C25092 "
+			(at 100.33 44.45 90)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "2"
 			(uuid "dacba033-0b74-4b83-9c17-921fc7b420aa")
 		)
@@ -6767,6 +6979,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C25905 "
+			(at 63.5 36.83 90)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "2"
 			(uuid "0ed3c293-08ea-4f48-92ac-85993e509832")
 		)
@@ -6837,6 +7060,17 @@
 		)
 		(property "Description" "Resistor"
 			(at 195.58 43.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C25092 "
+			(at 195.58 43.18 90)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6995,6 +7229,17 @@
 			)
 		)
 		(property "Description" "Generic connector, double row, 02x04, odd/even pin numbering scheme (row 1 odd numbers, row 2 even numbers), script generated (kicad-library-utils/schlib/autogen/connector/)"
+			(at 209.55 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" ""
 			(at 209.55 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -7180,6 +7425,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C25092 "
+			(at 195.58 40.64 90)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "2"
 			(uuid "882031e1-2dec-44e0-9fd9-6efa3cad2c3a")
 		)
@@ -7269,6 +7525,84 @@
 			(project "AirDAP"
 				(path "/679b3507-1177-49d7-9312-6c6e2bf23548/ef2d842a-3d5d-4428-98d6-5b11e5571356"
 					(reference "#PWR086")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 100.33 35.56 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "700e2106-e04c-4b49-aaa4-181ec92e28e4")
+		(property "Reference" "#PWR0100"
+			(at 100.33 41.91 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "GND"
+			(at 100.33 40.64 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 100.33 35.56 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 100.33 35.56 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
+			(at 100.33 35.56 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "ef19373c-c473-4d94-9399-d7c78e206ba4")
+		)
+		(instances
+			(project "AirDAP"
+				(path "/679b3507-1177-49d7-9312-6c6e2bf23548/ef2d842a-3d5d-4428-98d6-5b11e5571356"
+					(reference "#PWR0100")
 					(unit 1)
 				)
 			)
@@ -7497,6 +7831,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C1525 "
+			(at 139.7 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "2"
 			(uuid "0dff0a77-a568-4ccd-ac37-c4cf89278638")
 		)
@@ -7645,6 +7990,17 @@
 		)
 		(property "Description" "Resistor"
 			(at 100.33 46.99 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C25092 "
+			(at 100.33 46.99 90)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8047,6 +8403,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C1525 "
+			(at 69.85 96.52 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "2"
 			(uuid "2c2fb611-d98e-4810-bf49-a945ea7573c5")
 		)
@@ -8085,7 +8452,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "150kR"
+		(property "Value" "100kR"
 			(at 130.81 39.3699 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8119,6 +8486,17 @@
 			)
 		)
 		(property "Description" "Resistor"
+			(at 128.27 38.1 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C25741"
 			(at 128.27 38.1 0)
 			(hide yes)
 			(show_name no)
@@ -8440,6 +8818,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C25905 "
+			(at 63.5 34.29 90)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "2"
 			(uuid "93449e25-6150-450f-82a6-954a9cf96c18")
 		)
@@ -8600,6 +8989,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C25741"
+			(at 123.19 120.65 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "1"
 			(uuid "69050776-ae0d-4c71-a101-111860d12d74")
 		)
@@ -8748,6 +9148,17 @@
 			)
 		)
 		(property "Description" "Single-Bit Dual-Supply Bus Transceiver With Configurable Voltage Translation and 3-State Outputs, SOT-23-6"
+			(at 113.03 156.21 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C7843 "
 			(at 113.03 156.21 0)
 			(hide yes)
 			(show_name no)
@@ -8918,6 +9329,17 @@
 			)
 		)
 		(property "Description" "USB 2.0-only 16P Type-C Receptacle connector"
+			(at 40.64 44.45 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C53207138 "
 			(at 40.64 44.45 0)
 			(hide yes)
 			(show_name no)
@@ -9131,6 +9553,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C7843 "
+			(at 49.53 109.22 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "5"
 			(uuid "bb7e21cf-6b04-4e6f-8089-9040e4586dde")
 		)
@@ -9301,6 +9734,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C883112 "
+			(at 64.77 29.21 90)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "2"
 			(uuid "21bbb2c7-d605-4bf4-a7b1-da293a2a6d0d")
 		)
@@ -9372,6 +9816,17 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
+			(at 62.23 96.52 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C1525 "
 			(at 62.23 96.52 0)
 			(hide yes)
 			(show_name no)
@@ -9696,6 +10151,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C7843 "
+			(at 49.53 156.21 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "5"
 			(uuid "297b15ad-20b5-4856-8e23-e51b11efca6a")
 		)
@@ -9787,6 +10253,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C25092 "
+			(at 227.33 43.18 90)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "2"
 			(uuid "be4d1034-d74a-4de9-a843-2442e2b4be0c")
 		)
@@ -9858,6 +10335,17 @@
 		)
 		(property "Description" "Resettable fuse, polymeric positive temperature coefficient"
 			(at 195.58 36.83 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C883112 "
+			(at 195.58 36.83 90)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9942,6 +10430,17 @@
 			)
 		)
 		(property "Description" "Very low capacitance ESD protection diode, 2 data-line, SOT-23-6"
+			(at 82.55 44.45 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C2687116 "
 			(at 82.55 44.45 0)
 			(hide yes)
 			(show_name no)
@@ -10199,6 +10698,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C7843 "
+			(at 110.49 109.22 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "5"
 			(uuid "f34452fb-d0bc-480c-bae7-97d7fcfe512c")
 		)
@@ -10282,6 +10792,17 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
+			(at 63.5 143.51 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C1525 "
 			(at 63.5 143.51 0)
 			(hide yes)
 			(show_name no)
@@ -10839,6 +11360,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C1525 "
+			(at 132.08 96.52 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "2"
 			(uuid "4c225404-5330-4ab4-9cc4-c7d1cb2c43c0")
 		)
@@ -10996,6 +11528,17 @@
 				)
 			)
 		)
+		(property "元件编号" "C11702 "
+			(at 182.88 54.61 90)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(pin "2"
 			(uuid "eb0570cb-d1fd-4f80-9c35-d42781122176")
 		)
@@ -11006,6 +11549,84 @@
 			(project "AirDAP"
 				(path "/679b3507-1177-49d7-9312-6c6e2bf23548/ef2d842a-3d5d-4428-98d6-5b11e5571356"
 					(reference "R20")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:VBUS")
+		(at 100.33 22.86 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "fb25bf3a-ea89-459d-90e2-a1534d1de0ec")
+		(property "Reference" "#PWR098"
+			(at 100.33 26.67 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "VBUS"
+			(at 100.33 17.78 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 100.33 22.86 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 100.33 22.86 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"VBUS\""
+			(at 100.33 22.86 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "46fca287-2288-4bec-b10f-7ccfcedc43d1")
+		)
+		(instances
+			(project "AirDAP"
+				(path "/679b3507-1177-49d7-9312-6c6e2bf23548/ef2d842a-3d5d-4428-98d6-5b11e5571356"
+					(reference "#PWR098")
 					(unit 1)
 				)
 			)
@@ -11145,6 +11766,17 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
+			(at 124.46 96.52 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "元件编号" "C1525 "
 			(at 124.46 96.52 0)
 			(hide yes)
 			(show_name no)
