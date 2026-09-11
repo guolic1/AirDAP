@@ -8,7 +8,7 @@
 #include "airdap_board_pins.h"
 
 _Static_assert(AIRDAP_PIN_BOOT_KEY == 0, "BOOT_KEY pin must match the hardware pin map");
-_Static_assert(AIRDAP_PIN_TARGET_VTREF_ADC == 3, "VTref ADC pin must match the hardware pin map");
+_Static_assert(AIRDAP_PIN_TARGET_VTREF_ADC == 2, "VTref ADC must match U1 pad 6 in the schematic");
 _Static_assert(AIRDAP_PIN_USB_VBUS_SENSE == 8, "USB VBUS sense pin must match the hardware pin map");
 _Static_assert(AIRDAP_PIN_V_SOURCE_STATUS == 9, "V_SOURCE_STATUS pin must match the hardware pin map");
 _Static_assert(AIRDAP_PIN_LED_STATUS == 10, "status LED pin must match the hardware pin map");

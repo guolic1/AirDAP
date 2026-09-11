@@ -11,6 +11,8 @@ extern "C" {
 #endif
 
 enum {
+    AIRDAP_SWD_MIN_CLOCK_HZ = 100000,
+    AIRDAP_SWD_MAX_CLOCK_HZ = 10000000,
     AIRDAP_SWD_DEFAULT_CLOCK_HZ = 5000000,
 };
 

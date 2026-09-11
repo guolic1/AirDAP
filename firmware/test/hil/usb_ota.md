@@ -1,6 +1,6 @@
 # USB OTA hardware-in-the-loop acceptance
 
-Run this checklist on a recoverable AirDAP with the confirmed 16 MiB module.
+Run this checklist on a recoverable AirDAP with the confirmed 8 MiB flash.
 Record the board revision, module ordering code, host OS, ESP-IDF version, USB
 serial, build revisions, command output, and observed running versions. Keep a
 serial programmer available: the first layout migration and recovery from a
@@ -9,8 +9,8 @@ deliberately broken test image require it.
 ## 1. Install the A/B baseline
 
 Build a known-good revision A and retain its three binaries. Verify that the
-decoded partition table contains `otadata`, two 4 MiB slots at `0x20000` and
-`0x420000`, and no `factory` partition. Then perform the one-time full flash:
+decoded partition table contains `otadata`, two 4032 KiB (`0x3F0000`) slots at
+`0x20000` and `0x410000`, and no `factory` partition. Then perform the one-time full flash:
 
 ```sh
 cd firmware

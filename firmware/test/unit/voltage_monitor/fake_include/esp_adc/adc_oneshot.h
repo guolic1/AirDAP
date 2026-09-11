@@ -10,7 +10,7 @@ typedef void *adc_oneshot_unit_handle_t;
 
 enum {
     ADC_UNIT_1 = 0,
-    ADC_CHANNEL_2 = 2,
+    ADC_CHANNEL_1 = 1,
     ADC_CHANNEL_7 = 7,
     ADC_ATTEN_DB_12 = 3,
     ADC_BITWIDTH_DEFAULT = 0,
