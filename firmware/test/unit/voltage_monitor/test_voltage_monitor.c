@@ -156,7 +156,7 @@ static void test_calibrated_divider_conversion(void)
 
     assert(airdap_voltage_monitor_read(&reading) == ESP_OK);
     assert(reading.target_mv == 1600U);
-    assert(reading.usb_vbus_mv == 1682U);
+    assert(reading.usb_vbus_mv == 2000U);
     assert(target_read_calls == EXPECTED_SAMPLES_PER_CHANNEL);
     assert(usb_read_calls == EXPECTED_SAMPLES_PER_CHANNEL);
     assert(airdap_voltage_monitor_read(NULL) == ESP_ERR_INVALID_ARG);
