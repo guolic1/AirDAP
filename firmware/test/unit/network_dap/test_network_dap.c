@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "airdap_dap_service.h"
+#include "airdap_board.h"
 #include "airdap_device_identity.h"
 #include "airdap_frame.h"
 #include "airdap_mode_state.h"
@@ -123,6 +124,63 @@ static unsigned int pause_after_tls_write_call;
 static bool tls_write_paused;
 static bool allow_tls_write;
 static unsigned int tls_write_calls;
+static unsigned int board_calls;
+static bool board_value;
+static uint8_t board_opcode;
+static esp_err_t board_result;
+static bool control_operation_active;
+static bool revoke_before_control_io;
+static bool revoke_after_control_io;
+
+airdap_mode_dap_result_t airdap_mode_state_control_operation_begin(
+    bool authenticated, airdap_dap_ownership_operation_t *operation)
+{
+    assert(authenticated && operation != NULL);
+    if (admission_result != AIRDAP_MODE_DAP_ALLOWED) {
+        return admission_result;
+    }
+    operation->active = true;
+    control_operation_active = true;
+    if (revoke_before_control_io) {
+        validate_result = AIRDAP_NETWORK_AUTH_UNAUTHENTICATED;
+    }
+    return AIRDAP_MODE_DAP_ALLOWED;
+}
+
+void airdap_dap_ownership_operation_end(airdap_dap_ownership_operation_t *operation)
+{
+    assert(operation->active && control_operation_active);
+    operation->active = false;
+    control_operation_active = false;
+}
+
+static esp_err_t board_operation(uint8_t opcode, bool value)
+{
+    assert(control_operation_active && auth_validate_calls >= 3U);
+    ++board_calls;
+    board_opcode = opcode;
+    board_value = value;
+    if (revoke_after_control_io) {
+        validate_result = AIRDAP_NETWORK_AUTH_UNAUTHENTICATED;
+    }
+    return board_result;
+}
+
+esp_err_t airdap_target_reset_set_asserted(bool asserted)
+{
+    return board_operation(0x20U, asserted);
+}
+
+esp_err_t airdap_target_power_set_allowed(bool allowed)
+{
+    return board_operation(0x21U, allowed);
+}
+
+esp_err_t airdap_target_power_get_active(bool *active)
+{
+    *active = false;
+    return board_operation(0x22U, false);
+}
 
 static void reset_connection_fakes(void)
 {
@@ -177,6 +235,11 @@ static void reset_connection_fakes(void)
     tls_write_paused = false;
     allow_tls_write = false;
     tls_write_calls = 0U;
+    board_calls = 0U;
+    board_result = ESP_OK;
+    control_operation_active = false;
+    revoke_before_control_io = false;
+    revoke_after_control_io = false;
 }
 
 static void append_request(
@@ -1212,6 +1275,124 @@ static void test_pre_auth_partial_frame_times_out(void)
     assert(auth_close_calls == 1U && socket_close_calls == 1U);
 }
 
+static void test_control_before_auth_is_rejected(void)
+{
+    reset_connection_fakes();
+    const uint8_t request[] = {0x20U, 1U};
+    append_request(AIRDAP_FRAME_TYPE_HELLO, 21U, 1U, NULL, 0U);
+    append_request(AIRDAP_FRAME_TYPE_CONTROL_REQUEST, 21U, 2U,
+        request, sizeof(request));
+    airdap_network_dap_handle_socket(TEST_CLIENT_FD);
+    size_t offset = 0U;
+    const uint8_t *payload = NULL;
+    (void) next_response(&offset, &payload);
+    const airdap_frame_header_t error = next_response(&offset, &payload);
+    assert(error.type == AIRDAP_FRAME_TYPE_ERROR);
+    assert_error_payload(payload, error.payload_length,
+        AIRDAP_FRAME_ERROR_UNAUTHENTICATED);
+    assert(dap_submit_calls == 0U);
+    assert(board_calls == 0U);
+}
+
+static void test_control_wire_golden_and_replay(void)
+{
+    reset_connection_fakes();
+    tls_read_chunk = 1U;
+    const uint8_t request[] = {0x20U, 1U};
+    append_request(AIRDAP_FRAME_TYPE_HELLO, 21U, 1U, NULL, 0U);
+    append_request(AIRDAP_FRAME_TYPE_AUTH, 21U, 2U, NULL, 0U);
+    append_request(AIRDAP_FRAME_TYPE_CONTROL_REQUEST, 21U, 3U,
+        request, sizeof(request));
+    append_request(AIRDAP_FRAME_TYPE_CONTROL_REQUEST, 21U, 3U,
+        request, sizeof(request));
+    airdap_network_dap_handle_socket(TEST_CLIENT_FD);
+    assert(board_calls == 1U && board_opcode == 0x20U && board_value);
+    assert(!control_operation_active);
+    size_t offset = 0U;
+    const uint8_t *payload = NULL;
+    (void) next_response(&offset, &payload);
+    (void) next_response(&offset, &payload);
+    static const uint8_t golden[] = {
+        0x41, 0x44, 0x41, 0x50, 1, 6, 0, 0,
+        0, 0, 0, 21, 0, 0, 0, 3, 0, 2, 0, 0, 0x20, 1,
+    };
+    assert(memcmp(tls_output + offset, golden, sizeof(golden)) == 0);
+    (void) next_response(&offset, &payload);
+    const airdap_frame_header_t error = next_response(&offset, &payload);
+    assert_error_payload(payload, error.payload_length,
+        AIRDAP_FRAME_ERROR_SEQUENCE_DUPLICATE);
+    assert(offset == tls_output_size);
+}
+
+static void test_control_errors_and_power_responses(void)
+{
+    const uint8_t operations[][2] = {{0x21, 1}, {0x21, 0}, {0x22, 0}};
+    for (size_t index = 0U; index < 3U; ++index) {
+        reset_connection_fakes();
+        append_request(AIRDAP_FRAME_TYPE_HELLO, 22U, 1U, NULL, 0U);
+        append_request(AIRDAP_FRAME_TYPE_AUTH, 22U, 2U, NULL, 0U);
+        append_request(AIRDAP_FRAME_TYPE_CONTROL_REQUEST, 22U, 3U,
+            operations[index], index == 2U ? 1U : 2U);
+        airdap_network_dap_handle_socket(TEST_CLIENT_FD);
+        assert(board_calls == 1U && !control_operation_active);
+        size_t offset = 0U;
+        const uint8_t *payload = NULL;
+        (void) next_response(&offset, &payload);
+        (void) next_response(&offset, &payload);
+        const airdap_frame_header_t response = next_response(&offset, &payload);
+        assert(response.type == AIRDAP_FRAME_TYPE_CONTROL_RESPONSE);
+        assert(response.session_id == 22U && response.sequence == 3U);
+        assert(response.payload_length == 2U);
+        assert(memcmp(payload, operations[index], 2U) == 0);
+    }
+    const airdap_frame_error_code_t errors[] = {
+        AIRDAP_FRAME_ERROR_INVALID_ARGUMENT, AIRDAP_FRAME_ERROR_INTERNAL,
+        AIRDAP_FRAME_ERROR_BUSY, AIRDAP_FRAME_ERROR_UNAUTHENTICATED,
+    };
+    for (size_t index = 0U; index < 4U; ++index) {
+        reset_connection_fakes();
+        uint8_t request[] = {0x21U, index == 0U ? 2U : 1U};
+        if (index == 1U) { board_result = ESP_FAIL; }
+        if (index == 2U) { admission_result = AIRDAP_MODE_DAP_BUSY; }
+        if (index == 3U) { revoke_before_control_io = true; }
+        append_request(AIRDAP_FRAME_TYPE_HELLO, 23U, 1U, NULL, 0U);
+        append_request(AIRDAP_FRAME_TYPE_AUTH, 23U, 2U, NULL, 0U);
+        append_request(AIRDAP_FRAME_TYPE_CONTROL_REQUEST, 23U, 3U,
+            request, sizeof(request));
+        airdap_network_dap_handle_socket(TEST_CLIENT_FD);
+        assert(board_calls == (index == 1U ? 1U : 0U));
+        assert(!control_operation_active);
+        size_t offset = 0U;
+        const uint8_t *payload = NULL;
+        (void) next_response(&offset, &payload);
+        (void) next_response(&offset, &payload);
+        const airdap_frame_header_t error = next_response(&offset, &payload);
+        assert(error.type == AIRDAP_FRAME_TYPE_ERROR);
+        assert(error.session_id == 23U && error.sequence == 3U);
+        assert_error_payload(payload, error.payload_length, errors[index]);
+        assert(payload[0] == 0U && payload[1] == errors[index]);
+    }
+}
+
+static void test_control_revoked_before_output_suppresses_success(void)
+{
+    reset_connection_fakes();
+    revoke_after_control_io = true;
+    const uint8_t request[] = {0x20U, 0U};
+    append_request(AIRDAP_FRAME_TYPE_HELLO, 24U, 1U, NULL, 0U);
+    append_request(AIRDAP_FRAME_TYPE_AUTH, 24U, 2U, NULL, 0U);
+    append_request(AIRDAP_FRAME_TYPE_CONTROL_REQUEST, 24U, 3U,
+        request, sizeof(request));
+    airdap_network_dap_handle_socket(TEST_CLIENT_FD);
+    assert(board_calls == 1U && !control_operation_active);
+    size_t offset = 0U;
+    const uint8_t *payload = NULL;
+    (void) next_response(&offset, &payload);
+    (void) next_response(&offset, &payload);
+    assert(offset == tls_output_size);
+    assert(auth_close_calls == 1U && socket_close_calls == 1U);
+}
+
 int main(int argument_count, char **arguments)
 {
     if (argument_count == 2 &&
@@ -1238,6 +1419,10 @@ int main(int argument_count, char **arguments)
     test_unrelated_revoke_does_not_shutdown_registered_connection();
     test_revoke_closes_service_before_queued_dap_can_respond();
     test_pre_auth_partial_frame_times_out();
+    test_control_before_auth_is_rejected();
+    test_control_wire_golden_and_replay();
+    test_control_errors_and_power_responses();
+    test_control_revoked_before_output_suppresses_success();
     assert_network_dap_status(true, 0U, 0U, 0U, 0U);
     puts("Network DAP transport tests passed");
     return 0;

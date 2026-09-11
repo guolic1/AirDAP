@@ -19,6 +19,7 @@
 #include "airdap_frame.h"
 #include "airdap_mode_state.h"
 #include "airdap_network_auth.h"
+#include "airdap_network_control.h"
 #include "airdap_network_dap.h"
 #include "airdap_network_dap_internal.h"
 #include "esp_log.h"
@@ -1015,6 +1016,34 @@ static void run_connection(network_connection_t *connection)
                 return;
             }
             break;
+
+        case AIRDAP_FRAME_TYPE_CONTROL_REQUEST: {
+            if (!authenticated) {
+                if (!send_error(connection, &request,
+                        AIRDAP_FRAME_ERROR_UNAUTHENTICATED)) {
+                    return;
+                }
+                break;
+            }
+            uint8_t response[2];
+            size_t response_size = 0U;
+            const airdap_frame_error_code_t result =
+                airdap_network_control_dispatch(
+                    connection->auth_connection,
+                    atomic_load(&connection->auth_session_id),
+                    payload, request.payload_length, response, &response_size);
+            if (result != AIRDAP_FRAME_ERROR_NONE) {
+                if (!send_error(connection, &request, result) ||
+                    result == AIRDAP_FRAME_ERROR_UNAUTHENTICATED) {
+                    return;
+                }
+            } else if (!validate_bound_session(connection) ||
+                !send_frame(connection, &request,
+                    AIRDAP_FRAME_TYPE_CONTROL_RESPONSE, response, response_size)) {
+                return;
+            }
+            break;
+        }
 
         case AIRDAP_FRAME_TYPE_KEEPALIVE:
             if (!authenticated || request.payload_length != 0U ||

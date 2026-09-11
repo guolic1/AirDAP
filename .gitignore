@@ -14,3 +14,7 @@ __pycache__/
 !/docs/
 !/docs/*.md
 !/docs/**/*.md
+
+# Design documents and work plans stay local.
+/docs/design/
+/docs/plans/

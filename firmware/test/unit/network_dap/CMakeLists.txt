@@ -10,6 +10,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 add_executable(network_dap_test
     test_network_dap.c
     ../../../components/network_dap/network_dap.c
+    ../../../components/network_control/network_control.c
     ../../../components/airdap_frame/airdap_frame.c
 )
 
@@ -20,6 +21,9 @@ target_include_directories(network_dap_test PRIVATE
     ../../../components/airdap_frame/include
     ../../../components/device_identity/include
     ../../../components/network_auth/include
+    ../../../components/network_control/include
+    ../../../components/board/include
+    ../../../components/dap_ownership/include
 )
 
 target_compile_options(network_dap_test PRIVATE
