@@ -11,7 +11,7 @@ typedef enum {
 } event_t;
 
 typedef struct {
-    event_t events[32];
+    event_t events[64];
     size_t event_count;
     bool line_reset_succeeds;
     bool release_succeeds;
@@ -271,6 +271,56 @@ static void test_backend_failures_leave_the_bus_unowned(void)
         AIRDAP_DAP_OWNER_USB,
         &claim) ==
         AIRDAP_DAP_OWNERSHIP_OFFLINE);
+    airdap_dap_ownership_operation_t operation = {0};
+    assert(airdap_dap_ownership_control_begin(AIRDAP_DAP_OWNER_NETWORK,
+        &operation) == AIRDAP_DAP_OWNERSHIP_OFFLINE);
+}
+
+static void test_control_reserves_without_acquiring_or_driving_pins(void)
+{
+    airdap_dap_ownership_operation_t operation = {0};
+    airdap_dap_ownership_operation_t other = {0};
+    airdap_dap_ownership_claim_t claim = {0};
+    size_t events_before = fake.event_count;
+    assert(airdap_dap_ownership_control_begin(AIRDAP_DAP_OWNER_NONE,
+        &operation) == AIRDAP_DAP_OWNERSHIP_INVALID_ARGUMENT);
+    assert(airdap_dap_ownership_control_begin(AIRDAP_DAP_OWNER_NETWORK,
+        NULL) == AIRDAP_DAP_OWNERSHIP_INVALID_ARGUMENT);
+    assert(airdap_dap_ownership_control_begin(AIRDAP_DAP_OWNER_NETWORK,
+        &operation) == AIRDAP_DAP_OWNERSHIP_OK);
+    assert(operation.active && operation.owner == AIRDAP_DAP_OWNER_NONE);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
+    assert(fake.event_count == events_before);
+    assert(airdap_dap_ownership_control_begin(AIRDAP_DAP_OWNER_NETWORK,
+        &operation) == AIRDAP_DAP_OWNERSHIP_INVALID_STATE);
+    assert(airdap_dap_ownership_control_begin(AIRDAP_DAP_OWNER_NETWORK,
+        &other) == AIRDAP_DAP_OWNERSHIP_BUSY);
+    assert(airdap_dap_ownership_acquire(AIRDAP_DAP_OWNER_NETWORK, &claim) ==
+        AIRDAP_DAP_OWNERSHIP_BUSY);
+    assert(airdap_dap_ownership_acquire(AIRDAP_DAP_OWNER_USB, &claim) ==
+        AIRDAP_DAP_OWNERSHIP_BUSY);
+    assert(airdap_dap_ownership_revoke() == AIRDAP_DAP_OWNERSHIP_BUSY);
+    assert(airdap_dap_ownership_suspend() == AIRDAP_DAP_OWNERSHIP_BUSY);
+    airdap_dap_ownership_operation_end(&operation);
+    assert(!operation.active && fake.event_count == events_before);
+
+    assert(airdap_dap_ownership_acquire(AIRDAP_DAP_OWNER_NETWORK, &claim) ==
+        AIRDAP_DAP_OWNERSHIP_OK);
+    events_before = fake.event_count;
+    assert(airdap_dap_ownership_control_begin(AIRDAP_DAP_OWNER_NETWORK,
+        &operation) == AIRDAP_DAP_OWNERSHIP_OK);
+    assert(operation.owner == claim.owner && operation.generation == claim.generation);
+    assert(airdap_dap_ownership_operation_begin(&claim, &other) ==
+        AIRDAP_DAP_OWNERSHIP_BUSY);
+    assert(airdap_dap_ownership_release(&claim) == AIRDAP_DAP_OWNERSHIP_BUSY);
+    assert(airdap_dap_ownership_revoke_owner(AIRDAP_DAP_OWNER_NETWORK) ==
+        AIRDAP_DAP_OWNERSHIP_BUSY);
+    airdap_dap_ownership_operation_end(&operation);
+    assert(fake.event_count == events_before);
+    assert(airdap_dap_ownership_operation_begin(&claim, &other) ==
+        AIRDAP_DAP_OWNERSHIP_OK);
+    airdap_dap_ownership_operation_end(&other);
+    assert(airdap_dap_ownership_release(&claim) == AIRDAP_DAP_OWNERSHIP_OK);
 }
 
 int main(void)
@@ -283,6 +333,9 @@ int main(void)
 
     assert(airdap_dap_ownership_initialize(NULL) ==
         AIRDAP_DAP_OWNERSHIP_INVALID_ARGUMENT);
+    airdap_dap_ownership_operation_t uninitialized = {0};
+    assert(airdap_dap_ownership_control_begin(AIRDAP_DAP_OWNER_NETWORK,
+        &uninitialized) == AIRDAP_DAP_OWNERSHIP_INVALID_STATE);
     assert(airdap_dap_ownership_initialize(&backend) ==
         AIRDAP_DAP_OWNERSHIP_OK);
     assert(airdap_dap_ownership_initialize(&backend) ==
@@ -293,6 +346,7 @@ int main(void)
     test_stale_claim_cannot_cross_same_owner_reacquire();
     test_suspend_blocks_new_owners_until_resume();
     test_conditional_revoke_never_releases_a_different_owner();
+    test_control_reserves_without_acquiring_or_driving_pins();
     test_backend_failures_leave_the_bus_unowned();
     puts("DAP ownership tests passed");
     return 0;

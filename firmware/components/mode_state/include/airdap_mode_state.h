@@ -98,6 +98,12 @@ airdap_mode_dap_result_t airdap_mode_state_dap_operation_begin(
     const airdap_dap_ownership_claim_t *claim,
     airdap_dap_ownership_operation_t *operation);
 
+/* Apply NETWORK policy and reserve a short reset/power operation without
+ * acquiring a DAP claim or emitting SWD traffic. */
+airdap_mode_dap_result_t airdap_mode_state_control_operation_begin(
+    bool authenticated,
+    airdap_dap_ownership_operation_t *operation);
+
 #ifdef __cplusplus
 }
 #endif

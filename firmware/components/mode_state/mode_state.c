@@ -434,6 +434,35 @@ airdap_mode_dap_result_t airdap_mode_state_dap_acquire(
     return result;
 }
 
+airdap_mode_dap_result_t airdap_mode_state_control_operation_begin(
+    bool authenticated,
+    airdap_dap_ownership_operation_t *operation)
+{
+    if (operation == NULL) {
+        return AIRDAP_MODE_DAP_INVALID_ARGUMENT;
+    }
+    const unsigned int before = atomic_load(&mode_control);
+    airdap_mode_dap_result_t result = dap_admission_for_control(
+        before, AIRDAP_DAP_OWNER_NETWORK, authenticated);
+    if (result != AIRDAP_MODE_DAP_ALLOWED) {
+        return result;
+    }
+    result = ownership_result(airdap_dap_ownership_control_begin(
+        AIRDAP_DAP_OWNER_NETWORK, operation));
+    if (result != AIRDAP_MODE_DAP_ALLOWED) {
+        return result;
+    }
+    const unsigned int after = atomic_load(&mode_control);
+    if (dap_policy_stamp(before, AIRDAP_DAP_OWNER_NETWORK) !=
+        dap_policy_stamp(after, AIRDAP_DAP_OWNER_NETWORK)) {
+        airdap_dap_ownership_operation_end(operation);
+        const airdap_mode_dap_result_t latest = dap_admission_for_control(
+            after, AIRDAP_DAP_OWNER_NETWORK, authenticated);
+        return latest == AIRDAP_MODE_DAP_ALLOWED ? AIRDAP_MODE_DAP_BUSY : latest;
+    }
+    return AIRDAP_MODE_DAP_ALLOWED;
+}
+
 airdap_mode_dap_result_t airdap_mode_state_dap_operation_begin(
     airdap_dap_owner_t requested_owner,
     bool authenticated,

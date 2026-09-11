@@ -61,6 +61,12 @@ airdap_dap_ownership_result_t airdap_dap_ownership_operation_begin(
 void airdap_dap_ownership_operation_end(
     airdap_dap_ownership_operation_t *operation);
 
+/* Reserve physical control without acquiring DAP or driving an SWD line reset.
+ * Only NONE or the named owner may be present. End with operation_end(). */
+airdap_dap_ownership_result_t airdap_dap_ownership_control_begin(
+    airdap_dap_owner_t owner,
+    airdap_dap_ownership_operation_t *operation);
+
 /* Releases the current owner for device-wide transitions such as OTA writes. */
 airdap_dap_ownership_result_t airdap_dap_ownership_revoke(void);
 
