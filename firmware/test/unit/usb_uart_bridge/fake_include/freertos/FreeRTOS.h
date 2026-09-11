@@ -8,4 +8,4 @@ typedef unsigned int UBaseType_t;
 
 #define pdFAIL 0
 #define pdPASS 1
-#define pdMS_TO_TICKS(milliseconds) ((TickType_t) (milliseconds))
+#define pdMS_TO_TICKS(milliseconds) ((TickType_t) ((milliseconds) / 10U))

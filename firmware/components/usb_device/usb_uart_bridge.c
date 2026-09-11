@@ -272,9 +272,12 @@ bool airdap_usb_uart_bridge_process_once(void)
 static void usb_uart_worker(void *argument)
 {
     (void) argument;
+    const TickType_t poll_ticks = pdMS_TO_TICKS(USB_UART_IDLE_POLL_MS);
     for (;;) {
         if (!airdap_usb_uart_bridge_process_once()) {
-            vTaskDelay(pdMS_TO_TICKS(USB_UART_IDLE_POLL_MS));
+            /* Sub-tick delays round down to zero at the default 100 Hz.
+             * Block for at least one tick so the CPU idle task can run. */
+            vTaskDelay(poll_ticks > 0U ? poll_ticks : 1U);
         }
     }
 }

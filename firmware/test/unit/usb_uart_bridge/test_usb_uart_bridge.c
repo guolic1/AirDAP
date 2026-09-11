@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <setjmp.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -22,6 +23,7 @@ static TaskFunction_t bridge_task;
 static BaseType_t task_create_result = pdPASS;
 static unsigned int task_create_calls;
 static TickType_t last_delay;
+static jmp_buf worker_yield;
 static bool cdc_connected;
 static uint8_t cdc_input[32];
 static size_t cdc_input_length;
@@ -69,6 +71,7 @@ BaseType_t xTaskCreatePinnedToCore(
 void vTaskDelay(TickType_t ticks)
 {
     last_delay = ticks;
+    longjmp(worker_yield, 1);
 }
 
 esp_err_t tinyusb_cdcacm_init(const tinyusb_config_cdcacm_t *config)
@@ -346,6 +349,13 @@ int main(void)
     test_start_and_cdc_to_uart_lifecycle();
     test_uart_to_cdc_and_disconnect_cleanup();
     test_busy_writer_drops_cdc_input_without_driver_access();
+    /* Production uses 100 Hz ticks; a 1 ms poll must still block the worker
+     * so the CPU idle task can run and feed its watchdog. */
+    if (setjmp(worker_yield) == 0) {
+        bridge_task(NULL);
+        assert(false);
+    }
+    assert(last_delay > 0U);
     puts("USB UART bridge tests passed");
     return 0;
 }
