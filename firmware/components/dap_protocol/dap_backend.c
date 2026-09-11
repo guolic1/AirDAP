@@ -24,6 +24,7 @@ typedef struct {
     airdap_dap_owner_t owner;
     airdap_dap_processor_t processor;
     airdap_dap_ownership_claim_t claim;
+    uint32_t clock_hz;
 } dap_transport_context_t;
 
 static dap_transport_context_t transports[DAP_TRANSPORT_COUNT];
@@ -85,10 +86,20 @@ static bool backend_connect(void *context)
     }
     /* NETWORK packets reach this backend only through an authenticated
      * dap_service session. */
-    return airdap_mode_state_dap_acquire(
+    if (airdap_mode_state_dap_acquire(
         transport->owner,
         true,
-        &transport->claim) == AIRDAP_MODE_DAP_ALLOWED;
+        &transport->claim) != AIRDAP_MODE_DAP_ALLOWED) {
+        return false;
+    }
+    airdap_dap_ownership_operation_t operation = {0};
+    if (!begin_operation(transport, &operation)) {
+        return false;
+    }
+    const bool success = airdap_swd_set_clock(transport->clock_hz) == ESP_OK;
+    airdap_dap_ownership_operation_end(&operation);
+    /* The protocol releases the claim if connection setup fails. */
+    return success;
 }
 
 static void backend_disconnect(void *context)
@@ -103,11 +114,24 @@ static void backend_disconnect(void *context)
 static bool backend_set_clock(void *context, uint32_t clock_hz)
 {
     dap_transport_context_t *transport = context;
+    if (clock_hz < AIRDAP_SWD_MIN_CLOCK_HZ ||
+        clock_hz > AIRDAP_SWD_MAX_CLOCK_HZ) {
+        return false;
+    }
+    /* Hosts such as pyOCD set the clock before DAP_Connect. Cache it per
+     * transport so an unconnected client cannot change another owner's bus. */
+    if (transport->processor.selected_port == AIRDAP_DAP_PORT_DISABLED) {
+        transport->clock_hz = clock_hz;
+        return true;
+    }
     airdap_dap_ownership_operation_t operation = {0};
     if (!begin_operation(transport, &operation)) {
         return false;
     }
     const bool success = airdap_swd_set_clock(clock_hz) == ESP_OK;
+    if (success) {
+        transport->clock_hz = clock_hz;
+    }
     airdap_dap_ownership_operation_end(&operation);
     return success;
 }
@@ -335,6 +359,7 @@ esp_err_t airdap_dap_init(
     transports[0].owner = AIRDAP_DAP_OWNER_USB;
     transports[1].owner = AIRDAP_DAP_OWNER_NETWORK;
     for (size_t index = 0U; index < DAP_TRANSPORT_COUNT; ++index) {
+        transports[index].clock_hz = AIRDAP_SWD_DEFAULT_CLOCK_HZ;
         const airdap_dap_backend_t backend = {
             .context = &transports[index],
             .connect = backend_connect,

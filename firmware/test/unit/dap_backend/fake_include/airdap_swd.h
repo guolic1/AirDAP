@@ -6,6 +6,12 @@
 
 #include "esp_err.h"
 
+enum {
+    AIRDAP_SWD_MIN_CLOCK_HZ = 100000,
+    AIRDAP_SWD_MAX_CLOCK_HZ = 10000000,
+    AIRDAP_SWD_DEFAULT_CLOCK_HZ = 5000000,
+};
+
 typedef enum {
     AIRDAP_SWD_ACK_NONE = 0,
     AIRDAP_SWD_ACK_OK = 1,

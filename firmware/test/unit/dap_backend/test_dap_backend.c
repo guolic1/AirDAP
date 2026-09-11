@@ -19,6 +19,9 @@ static unsigned release_io_calls;
 static unsigned release_reset_calls;
 static unsigned target_reset_calls;
 static unsigned ota_disconnect_calls;
+static unsigned set_clock_calls;
+static uint32_t last_clock_hz;
+static esp_err_t set_clock_result = ESP_OK;
 static bool ota_receiving;
 static size_t last_line_reset_bits;
 static uint8_t last_line_reset[8];
@@ -47,7 +50,9 @@ esp_err_t airdap_target_reset_set_asserted(bool asserted)
 
 esp_err_t airdap_swd_set_clock(uint32_t clock_hz)
 {
-    return clock_hz == 0U ? ESP_ERR_INVALID_ARG : ESP_OK;
+    ++set_clock_calls;
+    last_clock_hz = clock_hz;
+    return clock_hz == 0U ? ESP_ERR_INVALID_ARG : set_clock_result;
 }
 
 esp_err_t airdap_swd_configure_transfer(
@@ -250,10 +255,27 @@ int main(void)
     assert(ota_disconnect_calls == 1U);
     assert(release_io_calls == 0U && release_reset_calls == 0U);
 
+    /* pyOCD configures the clock before DAP_Connect. This must not drive
+     * the shared SWD bus until the transport acquires ownership. */
+    const uint8_t clock_500k[] = {0x11U, 0x20U, 0xA1U, 0x07U, 0U};
+    const uint8_t clock_1m[] = {0x11U, 0x40U, 0x42U, 0x0FU, 0U};
+    const uint8_t invalid_clock[] = {0x11U, 1U, 0U, 0U, 0U};
+    assert(process(clock_500k, sizeof(clock_500k), response) == 2U);
+    assert(response[1] == 0U);
+    assert(process(invalid_clock, sizeof(invalid_clock), response) == 2U);
+    assert(response[1] == 0xFFU);
+    assert(set_clock_calls == 0U && line_reset_calls == 0U);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
+
     assert(process(connect, sizeof(connect), response) == 2U);
     assert(response[1] == AIRDAP_DAP_PORT_SWD);
     assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_USB);
     assert_line_reset(1U);
+    assert(set_clock_calls == 1U && last_clock_hz == 500000U);
+    assert(process_owner(AIRDAP_DAP_OWNER_NETWORK,
+        clock_1m, sizeof(clock_1m), response) == 2U);
+    assert(response[1] == 0U);
+    assert(set_clock_calls == 1U && last_clock_hz == 500000U);
 
     assert(process_owner(
         AIRDAP_DAP_OWNER_NETWORK,
@@ -329,6 +351,7 @@ int main(void)
         response) == 2U);
     assert(response[1] == AIRDAP_DAP_PORT_SWD);
     assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NETWORK);
+    assert(last_clock_hz == 1000000U);
     assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED) ==
         AIRDAP_MODE_STATE_OK);
     assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
@@ -336,6 +359,14 @@ int main(void)
     assert(response[1] == AIRDAP_DAP_PORT_SWD);
     assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_USB);
     assert_line_reset(5U);
+    assert(last_clock_hz == 500000U);
+    set_clock_result = ESP_FAIL;
+    assert(process(clock_1m, sizeof(clock_1m), response) == 2U);
+    assert(response[1] == 0xFFU);
+    set_clock_result = ESP_OK;
+    assert(process(connect, sizeof(connect), response) == 2U);
+    assert(response[1] == AIRDAP_DAP_PORT_SWD);
+    assert(last_clock_hz == 500000U);
     assert(process(disconnect, sizeof(disconnect), response) == 2U);
     assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
 
@@ -352,6 +383,13 @@ int main(void)
     assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
     assert_line_reset(6U);
     assert(release_io_calls == 6U && release_reset_calls == 6U);
+
+    line_reset_result = ESP_OK;
+    set_clock_result = ESP_FAIL;
+    assert(process(connect, sizeof(connect), response) == 2U);
+    assert(response[1] == AIRDAP_DAP_PORT_DISABLED);
+    assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
+    assert(release_io_calls == 7U && release_reset_calls == 7U);
 
     puts("DAP backend ownership tests passed");
     return 0;
