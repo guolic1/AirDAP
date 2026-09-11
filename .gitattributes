@@ -1,0 +1,2 @@
+# Bash must also work when a Windows checkout is used from WSL.
+*.sh text eol=lf

@@ -36,6 +36,11 @@ python3 tools/setup.py
 idf.py build
 ```
 
+Git attributes keep shell scripts in LF format, including Windows checkouts
+used from WSL with `core.autocrlf=true`. An existing checkout may still have a
+CRLF copy of `get_env.sh`; save it with LF line endings before sourcing it,
+preserving any local edits.
+
 On Windows x64, use PowerShell:
 
 ```powershell
