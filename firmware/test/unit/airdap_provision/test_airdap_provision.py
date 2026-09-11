@@ -23,6 +23,12 @@ assert SPEC is not None and SPEC.loader is not None
 airdap_provision = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = airdap_provision
 SPEC.loader.exec_module(airdap_provision)
+BLE_SPEC = importlib.util.spec_from_file_location(
+    "airdap_esp_prov", SCRIPT.with_name("airdap_esp_prov.py")
+)
+assert BLE_SPEC is not None and BLE_SPEC.loader is not None
+airdap_esp_prov = importlib.util.module_from_spec(BLE_SPEC)
+BLE_SPEC.loader.exec_module(airdap_esp_prov)
 
 
 class FakeScanner:
@@ -211,6 +217,7 @@ class AirDapProvisionTests(unittest.IsolatedAsyncioTestCase):
             command,
             [
                 "python-test",
+                str(airdap_provision.ESP_PROV_LAUNCHER),
                 "esp_prov.py",
                 "--transport",
                 "ble",
@@ -254,7 +261,8 @@ class AirDapProvisionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, 7)
         args, kwargs = runner.call_args
-        self.assertEqual(args[0][1], str(script))
+        self.assertEqual(args[0][1], str(airdap_provision.ESP_PROV_LAUNCHER))
+        self.assertEqual(args[0][2], str(script))
         self.assertEqual(kwargs["env"]["IDF_PATH"], str(idf_path))
         self.assertFalse(kwargs["check"])
         self.assertNotIn("shell", kwargs)
@@ -273,6 +281,76 @@ class AirDapProvisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, 1)
         self.assertEqual(stderr.getvalue(), "airdap-provision: Bluetooth unavailable\n")
         self.assertNotIn("Traceback", stderr.getvalue())
+
+
+class AirDapBleTransportTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.device, self.advertisement = discovered_device(
+            "ADP-001122334455", "00:11:22:33:44:55", ["provision-service"]
+        )
+        self.characteristic = types.SimpleNamespace(
+            uuid="session-characteristic",
+            descriptors=[types.SimpleNamespace(
+                uuid="00002901-0000-1000-8000-00805f9b34fb", handle=12
+            )],
+        )
+        self.bleak_client = mock.Mock(
+            connect=mock.AsyncMock(),
+            disconnect=mock.AsyncMock(),
+            pair=mock.AsyncMock(side_effect=AssertionError("OS pairing requested")),
+            unpair=mock.AsyncMock(side_effect=AssertionError("OS bond deleted")),
+            read_gatt_descriptor=mock.AsyncMock(return_value=b"prov-session"),
+            write_gatt_char=mock.AsyncMock(),
+            read_gatt_char=mock.AsyncMock(return_value=b"\x00\xff\x80"),
+            services=mock.Mock(get_service=mock.Mock(return_value=types.SimpleNamespace(
+                characteristics=[self.characteristic]
+            ))),
+        )
+        self.backend = types.SimpleNamespace(
+            BleakScanner=types.SimpleNamespace(discover=mock.AsyncMock(
+                return_value={"device": (self.device, self.advertisement)}
+            )),
+            BleakClient=mock.Mock(return_value=self.bleak_client),
+        )
+        self.client = airdap_esp_prov.AirDapBleClient(self.backend)
+
+    async def connect(self):
+        return await self.client.connect(
+            self.device.name, "hci0", ["prov-session"], "fallback-service"
+        )
+
+    async def test_unbonded_session_preserves_binary_protocol_and_disconnects(self):
+        self.assertTrue(await self.connect())
+        self.backend.BleakClient.assert_called_once_with(
+            self.device, adapter="hci0", pair=False
+        )
+        endpoint = self.client.get_nu_lookup()["prov-session"]
+        response = await self.client.send_data(endpoint, "\x00\x80\xff")
+        self.assertEqual(response, "\x00\xff\x80")
+        self.bleak_client.write_gatt_char.assert_awaited_once_with(
+            endpoint, bytearray(b"\x00\x80\xff"), response=True
+        )
+        await self.client.disconnect()
+        self.bleak_client.disconnect.assert_awaited_once()
+        self.bleak_client.pair.assert_not_awaited()
+        self.bleak_client.unpair.assert_not_awaited()
+        self.assertIsNone(self.client.device)
+        self.assertIsNone(self.client.get_nu_lookup())
+
+    async def test_descriptor_failure_releases_connection_without_unpairing(self):
+        self.bleak_client.read_gatt_descriptor.side_effect = OSError("read failed")
+        with self.assertRaisesRegex(OSError, "read failed"):
+            await self.connect()
+        self.bleak_client.disconnect.assert_awaited_once()
+        self.bleak_client.unpair.assert_not_awaited()
+        self.assertIsNone(self.client.device)
+
+    async def test_missing_service_releases_connection_without_unpairing(self):
+        self.bleak_client.services.get_service.return_value = None
+        with self.assertRaisesRegex(RuntimeError, "Provisioning service not found"):
+            await self.connect()
+        self.bleak_client.disconnect.assert_awaited_once()
+        self.bleak_client.unpair.assert_not_awaited()
 
 
 if __name__ == "__main__":

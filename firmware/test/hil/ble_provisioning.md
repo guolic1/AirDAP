@@ -47,13 +47,22 @@ After the client connects, confirm the device reports a negotiated ATT MTU of
 at least 409 bytes, so the 406-byte Security 2 session request fits in one
 characteristic write, and the request is not rejected with `Invalid PDU`.
 
+On Windows, also verify with a device that is not paired in OS settings:
+connection must proceed without a system pairing request or the approximately
+60-second device-association wait. Confirm Security 2 establishes a session and
+the Wi-Fi selection prompt appears. For this connection-only regression check,
+cancel at that prompt without submitting credentials, then close the BLE
+window and verify the previous Wi-Fi connection resumes. Repeat on Linux when
+a Linux Bluetooth host is available; host unit tests do not establish RF timing.
+
 ## 2. Authentication failure and cancellation
 
-Open a new window and use the raw Espressif client for this negative-only test,
+Open a new window and use the AirDAP launcher for this negative-only test,
 substituting the observed device ID and a deliberately incorrect PoP:
 
 ```sh
-python managed_components/espressif__network_provisioning/tool/esp_prov/esp_prov.py \
+python tools/airdap_esp_prov.py \
+    managed_components/espressif__network_provisioning/tool/esp_prov/esp_prov.py \
     --transport ble \
     --service_name <ADP-device-id> \
     --sec_ver 2 \

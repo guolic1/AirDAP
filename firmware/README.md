@@ -375,6 +375,14 @@ AirDAP devices produce an explicit selection prompt. The upstream client then
 prompts for the Wi-Fi access point and reads its passphrase without echo. The
 passphrase is not accepted on the command line or saved by this host tool.
 
+The tool uses `airdap_esp_prov.py` to connect directly to the BLE provisioning
+service without OS pairing or unpairing. AirDAP's GATT endpoints allow this;
+Security 2 still protects the provisioning messages. This avoids a Windows
+device-association wait of about 60 seconds and leaves existing OS bonds alone.
+The original Espressif client only requests pairing on Windows, so that
+particular delay does not affect its Linux path. The AirDAP transport also
+passes the discovered BLEDevice to Bleak to avoid an additional address scan.
+
 The pinned `espressif/network_provisioning` host client must already be present
 in `managed_components/`; if it has not yet been downloaded, activate the
 configured ESP-IDF environment and run `idf.py reconfigure` once.

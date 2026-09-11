@@ -19,6 +19,8 @@ fp-info-cache
 
 # Generated BOM and fabrication outputs
 *.csv
+*.pos
+*.pdf
 *.gbr
 *.drl
 *.gbrjob

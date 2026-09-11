@@ -31,6 +31,7 @@ AIRDAP_PROVISIONING_SERVICE_UUID = "1775244d-6b43-439b-877c-060f2d9bed07"
 PUBLIC_SEC2_USERNAME = "wifiprov"
 PUBLIC_SEC2_POP = "abcd1234"
 DEFAULT_SCAN_TIMEOUT_SECONDS = 10.0
+ESP_PROV_LAUNCHER = Path(__file__).with_name("airdap_esp_prov.py")
 
 
 class ProvisioningError(RuntimeError):
@@ -159,6 +160,7 @@ def build_esp_prov_command(
     # The private Wi-Fi passphrase is omitted so esp_prov prompts without echo.
     return [
         python_executable,
+        str(ESP_PROV_LAUNCHER),
         str(esp_prov_script),
         "--transport",
         "ble",
