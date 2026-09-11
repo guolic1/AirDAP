@@ -29,7 +29,6 @@ typedef struct {
 
 static dap_transport_context_t transports[DAP_TRANSPORT_COUNT];
 static bool initialized;
-static bool target_reset_released = true;
 static const uint8_t swd_line_reset[] = {
     0xFFU, 0xFFU, 0xFFU, 0xFFU,
     0xFFU, 0xFFU, 0xFFU, 0xFFU,
@@ -48,9 +47,6 @@ static bool ownership_release_pins(void *context)
     (void) context;
     const esp_err_t swdio_error = airdap_swd_set_io_state(false);
     const esp_err_t reset_error = airdap_target_reset_set_asserted(false);
-    if (reset_error == ESP_OK) {
-        target_reset_released = true;
-    }
     return swdio_error == ESP_OK && reset_error == ESP_OK;
 }
 
@@ -237,8 +233,8 @@ static bool swj_pins_owned(
     uint8_t *pins)
 {
     if ((select & DAP_SWJ_PIN_NRESET) != 0U) {
-        target_reset_released = (value & DAP_SWJ_PIN_NRESET) != 0U;
-        if (airdap_target_reset_set_asserted(!target_reset_released) != ESP_OK) {
+        if (airdap_target_reset_set_asserted(
+                (value & DAP_SWJ_PIN_NRESET) == 0U) != ESP_OK) {
             return false;
         }
     }
@@ -263,7 +259,7 @@ static bool swj_pins_owned(
     if (wait_us > 0U) {
         esp_rom_delay_us(wait_us > 3000000U ? 3000000U : wait_us);
     }
-    if (target_reset_released) {
+    if (!airdap_target_reset_is_asserted()) {
         *pins |= DAP_SWJ_PIN_NRESET;
     }
     return true;
@@ -291,12 +287,10 @@ static bool reset_target_owned(void)
     if (airdap_target_reset_set_asserted(true) != ESP_OK) {
         return false;
     }
-    target_reset_released = false;
     esp_rom_delay_us(1000U);
     if (airdap_target_reset_set_asserted(false) != ESP_OK) {
         return false;
     }
-    target_reset_released = true;
     return true;
 }
 

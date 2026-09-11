@@ -9,6 +9,7 @@
 #define AIRDAP_PIN_MASK(pin) (UINT64_C(1) << (pin))
 
 static atomic_bool boot_key_simulated_pressed;
+static atomic_bool target_reset_asserted;
 
 static esp_err_t configure_pins(
     uint64_t pin_mask,
@@ -45,6 +46,9 @@ static esp_err_t preload_safe_levels(void)
         esp_err_t error = gpio_set_level(levels[index].pin, levels[index].level);
         if (error != ESP_OK) {
             return error;
+        }
+        if (levels[index].pin == (gpio_num_t) AIRDAP_PIN_TARGET_NRESET) {
+            atomic_store(&target_reset_asserted, false);
         }
     }
 
@@ -120,9 +124,18 @@ esp_err_t airdap_target_power_get_active(bool *active)
 
 esp_err_t airdap_target_reset_set_asserted(bool asserted)
 {
-    return gpio_set_level(
+    const esp_err_t error = gpio_set_level(
         (gpio_num_t) AIRDAP_PIN_TARGET_NRESET,
         asserted ? 1U : 0U);
+    if (error == ESP_OK) {
+        atomic_store(&target_reset_asserted, asserted);
+    }
+    return error;
+}
+
+bool airdap_target_reset_is_asserted(void)
+{
+    return atomic_load(&target_reset_asserted);
 }
 
 esp_err_t airdap_boot_key_get_pressed(bool *pressed)

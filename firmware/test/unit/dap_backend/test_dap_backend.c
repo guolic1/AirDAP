@@ -18,6 +18,7 @@ static unsigned line_reset_calls;
 static unsigned release_io_calls;
 static unsigned release_reset_calls;
 static unsigned target_reset_calls;
+static bool reset_asserted;
 static unsigned ota_disconnect_calls;
 static unsigned set_clock_calls;
 static uint32_t last_clock_hz;
@@ -41,11 +42,17 @@ void airdap_ota_handle_disconnect(void)
 
 esp_err_t airdap_target_reset_set_asserted(bool asserted)
 {
+    reset_asserted = asserted;
     ++target_reset_calls;
     if (!asserted) {
         ++release_reset_calls;
     }
     return ESP_OK;
+}
+
+bool airdap_target_reset_is_asserted(void)
+{
+    return reset_asserted;
 }
 
 esp_err_t airdap_swd_set_clock(uint32_t clock_hz)
@@ -390,6 +397,19 @@ int main(void)
     assert(response[1] == AIRDAP_DAP_PORT_DISABLED);
     assert(airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NONE);
     assert(release_io_calls == 7U && release_reset_calls == 7U);
+
+    /* A control operation updates board state outside the DAP backend. The
+     * next SWJ_Pins read must observe that successful command. */
+    set_clock_result = ESP_OK;
+    assert(process(connect, sizeof(connect), response) == 2U);
+    const uint8_t read_pins[] = {0x10U, 0U, 0U, 0U, 0U, 0U, 0U};
+    assert(airdap_target_reset_set_asserted(true) == ESP_OK);
+    assert(process(read_pins, sizeof(read_pins), response) == 2U);
+    assert((response[1] & 0x80U) == 0U);
+    assert(airdap_target_reset_set_asserted(false) == ESP_OK);
+    assert(process(read_pins, sizeof(read_pins), response) == 2U);
+    assert((response[1] & 0x80U) != 0U);
+    assert(process(disconnect, sizeof(disconnect), response) == 2U);
 
     puts("DAP backend ownership tests passed");
     return 0;
