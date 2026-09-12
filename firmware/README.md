@@ -574,6 +574,11 @@ opens and closes its service session with the CDC lifecycle, caches the current
 line coding, and does not consume service RX bytes while the TinyUSB IN queue
 has no space.
 
+Line-coding requests while DTR is low only update the cached configuration;
+USB enumeration must not claim UART TX. Opening CDC asserts DTR and attempts
+to acquire TX and apply that configuration. If NETWORK already owns TX, CDC
+remains a read-only subscriber; closing CDC releases only its own session.
+
 USB CDC remains an unauthenticated physical development interface. TCP 3261
 uses the same TLS/HELLO/AUTH contract as 3260. AUTH opens a read-only subscriber;
 all UART operations revalidate the authenticated session. An additional UART

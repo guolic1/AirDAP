@@ -241,6 +241,8 @@ airdap_target_uart_result_t airdap_target_uart_session_write(
 
 static void send_line_state(bool dtr)
 {
+    /* TinyUSB publishes DTR before invoking the line-state callback. */
+    cdc_connected = dtr;
     cdcacm_event_t event = {
         .type = CDC_EVENT_LINE_STATE_CHANGED,
         .line_state_changed_data = {
@@ -271,17 +273,28 @@ static void test_start_and_cdc_to_uart_lifecycle(void)
     assert(cdc_config.callback_line_state_changed != NULL);
     assert(cdc_config.callback_line_coding_changed != NULL);
 
-    send_line_state(true);
-    assert(open_calls == 1U && live_session != 0U);
     const cdc_line_coding_t coding = {
         .bit_rate = 1000000U,
         .stop_bits = 2U,
         .parity = 2U,
         .data_bits = 7U,
     };
+    /* Windows can configure CDC during enumeration without opening it. */
     send_line_coding(&coding);
+    assert(open_calls == 0U && live_session == 0U && owner_session == 0U);
+    assert(acquire_calls == 0U && configure_calls == 0U);
+
+    send_line_state(true);
+    assert(open_calls == 1U && live_session != 0U);
     assert(acquire_calls == 1U && configure_calls == 1U);
     assert(memcmp(&configured_line_coding, &coding, sizeof(coding)) == 0);
+
+    const cdc_line_coding_t updated = {
+        .bit_rate = 115200U, .stop_bits = 0U, .parity = 0U, .data_bits = 8U,
+    };
+    send_line_coding(&updated);
+    assert(acquire_calls == 2U && configure_calls == 2U);
+    assert(memcmp(&configured_line_coding, &updated, sizeof(updated)) == 0);
 
     static const uint8_t input[] = {0x11U, 0x22U, 0x33U};
     memcpy(cdc_input, input, sizeof(input));
@@ -331,8 +344,8 @@ static void test_uart_to_cdc_and_disconnect_cleanup(void)
 
 static void test_busy_writer_drops_cdc_input_without_driver_access(void)
 {
-    send_line_state(true);
     owner_session = 999U;
+    send_line_state(true);
     static const uint8_t input[] = {0xC1U};
     memcpy(cdc_input, input, sizeof(input));
     cdc_input_length = sizeof(input);
@@ -344,11 +357,43 @@ static void test_busy_writer_drops_cdc_input_without_driver_access(void)
     airdap_usb_uart_bridge_disconnected();
 }
 
+static void test_closed_line_coding_preserves_network_owner_and_reopens(void)
+{
+    send_line_state(false);
+    const unsigned int opened_before = open_calls;
+    const unsigned int acquired_before = acquire_calls;
+    const unsigned int configured_before = configure_calls;
+    const cdc_line_coding_t coding = {
+        .bit_rate = 9600U, .stop_bits = 0U, .parity = 0U, .data_bits = 8U,
+    };
+    owner_session = 999U;
+    send_line_coding(&coding);
+    assert(live_session == 0U && owner_session == 999U);
+    assert(open_calls == opened_before && acquire_calls == acquired_before);
+    assert(configure_calls == configured_before);
+
+    /* Opening CDC remains a read-only subscription while NETWORK owns TX. */
+    send_line_state(true);
+    assert(live_session != 0U && owner_session == 999U);
+    assert(configure_calls == configured_before);
+    send_line_state(false);
+    assert(live_session == 0U && owner_session == 999U);
+
+    owner_session = 0U;
+    send_line_state(true);
+    assert(owner_session == live_session && owner_session != 0U);
+    assert(configure_calls == configured_before + 1U);
+    assert(memcmp(&configured_line_coding, &coding, sizeof(coding)) == 0);
+    send_line_state(false);
+    assert(live_session == 0U && owner_session == 0U);
+}
+
 int main(void)
 {
     test_start_and_cdc_to_uart_lifecycle();
     test_uart_to_cdc_and_disconnect_cleanup();
     test_busy_writer_drops_cdc_input_without_driver_access();
+    test_closed_line_coding_preserves_network_owner_and_reopens();
     /* Production uses 100 Hz ticks; a 1 ms poll must still block the worker
      * so the CPU idle task can run and feed its watchdog. */
     if (setjmp(worker_yield) == 0) {
