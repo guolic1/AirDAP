@@ -56,6 +56,11 @@ typedef struct {
 } airdap_target_uart_session_status_t;
 
 esp_err_t airdap_target_uart_init(void);
+/* OTA entry serializes with configure/write, releases TX ownership and waits
+ * at most 100 ms for queued TX. A failed suspend must be followed by resume.
+ * Sessions remain live, but must explicitly reacquire TX after resume. */
+esp_err_t airdap_target_uart_suspend(void);
+esp_err_t airdap_target_uart_resume(void);
 esp_err_t airdap_target_uart_get_status(
     airdap_target_uart_status_t *status);
 

@@ -9,3 +9,5 @@ enum {
     ESP_ERR_INVALID_ARG = 0x102,
     ESP_ERR_INVALID_STATE = 0x103,
 };
+
+#define ESP_ERR_TIMEOUT 0x107

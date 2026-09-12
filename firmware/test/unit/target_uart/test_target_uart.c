@@ -91,7 +91,7 @@ SemaphoreHandle_t xSemaphoreCreateMutex(void)
 
 BaseType_t xSemaphoreTake(SemaphoreHandle_t semaphore, TickType_t timeout)
 {
-    assert(semaphore != NULL && timeout == portMAX_DELAY);
+    assert(semaphore != NULL && (timeout == portMAX_DELAY || timeout == pdMS_TO_TICKS(100)));
     return pthread_mutex_lock(&semaphore->mutex) == 0 ? pdTRUE : pdFALSE;
 }
 
@@ -644,6 +644,41 @@ static void test_worker_and_driver_diagnostics(void)
     close_pair(usb_session, network_session);
 }
 
+static esp_err_t drain_result = ESP_OK;
+
+esp_err_t uart_wait_tx_done(uart_port_t port, TickType_t timeout)
+{
+    assert(port == UART_NUM_1);
+    assert(timeout == pdMS_TO_TICKS(100));
+    return drain_result;
+}
+
+static void test_ota_suspends_both_transports(void)
+{
+    airdap_target_uart_session_id_t usb, network;
+    open_pair(&usb, &network);
+    assert(airdap_target_uart_tx_acquire(0, usb) == AIRDAP_TARGET_UART_OK);
+    assert(airdap_target_uart_suspend() == ESP_OK);
+    airdap_target_uart_session_status_t status;
+    assert(airdap_target_uart_session_get_status(0, usb, &status) == AIRDAP_TARGET_UART_OK);
+    assert(!status.tx_owner);
+    assert(airdap_target_uart_tx_acquire(0, usb) == AIRDAP_TARGET_UART_BUSY);
+    assert(airdap_target_uart_tx_acquire(1, network) == AIRDAP_TARGET_UART_BUSY);
+    size_t written = 99;
+    const uint8_t byte = 1;
+    assert(airdap_target_uart_session_write(0, usb, &byte, 1, &written) == AIRDAP_TARGET_UART_BUSY);
+    assert(written == 0);
+    assert(airdap_target_uart_session_configure(1, network, 115200, 0, 0, 8) == AIRDAP_TARGET_UART_BUSY);
+    assert(airdap_target_uart_resume() == ESP_OK);
+    assert(airdap_target_uart_tx_acquire(1, network) == AIRDAP_TARGET_UART_OK);
+    drain_result = ESP_FAIL;
+    assert(airdap_target_uart_suspend() == ESP_FAIL);
+    assert(airdap_target_uart_tx_acquire(1, network) == AIRDAP_TARGET_UART_BUSY);
+    assert(airdap_target_uart_resume() == ESP_OK);
+    drain_result = ESP_OK;
+    close_pair(usb, network);
+}
+
 int main(void)
 {
     test_service_rejected_before_initialization();
@@ -653,6 +688,7 @@ int main(void)
     test_tx_owner_configuration_and_io();
     test_stale_session_cannot_affect_replacement_owner();
     test_worker_and_driver_diagnostics();
+    test_ota_suspends_both_transports();
 
     puts("target UART service tests passed");
     return 0;

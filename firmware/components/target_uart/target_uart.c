@@ -51,6 +51,7 @@ typedef struct {
 
 static atomic_bool initialization_started;
 static atomic_bool initialized;
+static bool suspended;
 static atomic_uint next_session = 1U;
 static SemaphoreHandle_t state_mutex;
 static SemaphoreHandle_t tx_operation_mutex;
@@ -115,6 +116,9 @@ static airdap_target_uart_result_t validate_tx_owner_locked(
     airdap_target_uart_transport_t transport,
     airdap_target_uart_session_id_t session)
 {
+    if (suspended) {
+        return AIRDAP_TARGET_UART_BUSY;
+    }
     const airdap_target_uart_result_t session_result =
         validate_live_session_locked(transport, session);
     if (session_result != AIRDAP_TARGET_UART_OK) {
@@ -583,7 +587,9 @@ airdap_target_uart_result_t airdap_target_uart_tx_acquire(
     const airdap_target_uart_result_t session_result =
         validate_live_session_locked(transport, session);
     airdap_target_uart_result_t result = session_result;
-    if (session_result == AIRDAP_TARGET_UART_OK) {
+    if (session_result == AIRDAP_TARGET_UART_OK && suspended) {
+        result = AIRDAP_TARGET_UART_BUSY;
+    } else if (session_result == AIRDAP_TARGET_UART_OK) {
         if (tx_owner.transport == AIRDAP_TARGET_UART_TRANSPORT_NONE) {
             tx_owner.transport = transport;
             tx_owner.session = session;
@@ -598,6 +604,36 @@ airdap_target_uart_result_t airdap_target_uart_tx_acquire(
     state_unlock();
     tx_operation_unlock();
     return result;
+}
+
+esp_err_t airdap_target_uart_suspend(void)
+{
+    if (!atomic_load(&initialized)) return ESP_ERR_INVALID_STATE;
+    if (xSemaphoreTake(tx_operation_mutex, pdMS_TO_TICKS(100)) != pdTRUE)
+        return ESP_ERR_TIMEOUT;
+    if (!state_lock()) {
+        tx_operation_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+    suspended = true;
+    tx_owner = (target_uart_tx_owner_t) {
+        .transport = AIRDAP_TARGET_UART_TRANSPORT_NONE,
+    };
+    state_unlock();
+    const esp_err_t error = uart_wait_tx_done(TARGET_UART_PORT, pdMS_TO_TICKS(100));
+    tx_operation_unlock();
+    return error;
+}
+
+esp_err_t airdap_target_uart_resume(void)
+{
+    /* OTA initialization precedes UART initialization during boot. Resume
+     * only changes admission; it need not wait for a pending driver write. */
+    if (!atomic_load(&initialized)) return ESP_OK;
+    if (!state_lock()) return ESP_ERR_INVALID_STATE;
+    suspended = false;
+    state_unlock();
+    return ESP_OK;
 }
 
 airdap_target_uart_result_t airdap_target_uart_session_configure(
