@@ -29,6 +29,7 @@ typedef enum {
 
 typedef struct {
     bool started;
+    bool radio_enabled;
     bool has_configuration;
     bool link_connected;
     bool provisioning_suspended;
@@ -46,6 +47,9 @@ typedef struct {
 } airdap_wifi_manager_info_t;
 
 esp_err_t airdap_wifi_manager_start(void);
+/* Default-event-loop only. Volatile radio toggle; preserves credentials.
+ * Rejects provisioning. Caller must reserve idle DAP/OTA before switching. */
+esp_err_t airdap_wifi_manager_toggle(void);
 esp_err_t airdap_wifi_manager_get_info(airdap_wifi_manager_info_t *info);
 esp_err_t airdap_wifi_manager_set_credentials(
     const airdap_wifi_credentials_t *credentials);

@@ -20,7 +20,7 @@
 enum {
     MAX_REGISTRATIONS = 3,
     MAX_POSTED_EVENTS = 8,
-    MAX_STORAGE_CHANGES = 24,
+    MAX_STORAGE_CHANGES = 40,
 };
 
 typedef struct {
@@ -66,6 +66,8 @@ static size_t storage_change_count;
 static size_t provisioning_commit_count;
 static uint32_t last_clear_flags;
 static esp_err_t wifi_storage_result = ESP_OK;
+static esp_err_t wifi_start_result = ESP_OK, wifi_stop_result = ESP_OK;
+static unsigned wifi_stop_count;
 static size_t nvs_open_count;
 static size_t nvs_purge_all_count;
 static size_t nvs_erase_all_count;
@@ -409,7 +411,13 @@ esp_err_t esp_wifi_set_config(int interface, const wifi_config_t *config)
 
 esp_err_t esp_wifi_start(void)
 {
-    return ESP_OK;
+    return wifi_start_result;
+}
+
+esp_err_t esp_wifi_stop(void)
+{
+    ++wifi_stop_count;
+    return wifi_stop_result;
 }
 
 esp_err_t esp_wifi_connect(void)
@@ -681,6 +689,48 @@ int main(void)
     dispatch_next_posted_event();
     assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_STOPPED);
 
+    credentials = make_credentials("toggle-ap", "password");
+    assert(airdap_wifi_manager_set_credentials(&credentials) == ESP_OK);
+    dispatch_next_posted_event();
+    emit_wifi_event(WIFI_EVENT_STA_DISCONNECTED, WIFI_REASON_BEACON_TIMEOUT);
+    assert(retry_timer.active);
+    wifi_stop_result = ESP_FAIL;
+    assert(airdap_wifi_manager_toggle() == ESP_FAIL);
+    assert(airdap_wifi_manager_get_info(&info) == ESP_OK && info.radio_enabled);
+    assert(retry_timer.active);
+    wifi_stop_result = ESP_OK;
+    assert(airdap_wifi_manager_toggle() == ESP_OK);
+    assert(wifi_stop_count == 2 && !retry_timer.active);
+    assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_STOPPED);
+    assert(airdap_wifi_manager_get_info(&info) == ESP_OK && !info.radio_enabled && info.has_configuration);
+    assert(airdap_wifi_manager_prepare_provisioning() == ESP_ERR_INVALID_STATE);
+    const size_t connects_before_off = wifi_connect_count;
+    emit_wifi_event(WIFI_EVENT_STA_START, 0);
+    emit_wifi_event(WIFI_EVENT_STA_CONNECTED, 0);
+    emit_wifi_event(WIFI_EVENT_STA_DISCONNECTED, WIFI_REASON_BEACON_TIMEOUT);
+    emit_ip_event(IP_EVENT_STA_GOT_IP);
+    retry_timer.callback(retry_timer.argument);
+    dispatch_next_posted_event();
+    credentials = make_credentials("off-updated-ap", "password");
+    assert(airdap_wifi_manager_set_credentials(&credentials) == ESP_OK);
+    dispatch_next_posted_event();
+    assert(wifi_connect_count == connects_before_off && !retry_timer.active);
+    assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_STOPPED);
+    wifi_start_result = ESP_FAIL;
+    assert(airdap_wifi_manager_toggle() == ESP_FAIL);
+    assert(airdap_wifi_manager_get_info(&info) == ESP_OK && !info.radio_enabled);
+    wifi_start_result = ESP_OK;
+    assert(airdap_wifi_manager_toggle() == ESP_OK);
+    emit_wifi_event(WIFI_EVENT_STA_START, 0);
+    assert(wifi_connect_count == connects_before_off + 1);
+    assert(memcmp(last_wifi_config.sta.ssid, "off-updated-ap", 14) == 0);
+    emit_wifi_event(WIFI_EVENT_STA_CONNECTED, 0);
+    emit_ip_event(IP_EVENT_STA_GOT_IP);
+    assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_ONLINE);
+    assert(airdap_wifi_manager_prepare_provisioning() == ESP_OK);
+    assert(airdap_wifi_manager_toggle() == ESP_ERR_INVALID_STATE);
+    assert(wifi_stop_count == 2);
+    assert(airdap_wifi_manager_finish_provisioning() == ESP_OK);
     puts("wifi manager adapter tests passed");
     return 0;
 }

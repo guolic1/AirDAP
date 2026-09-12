@@ -499,6 +499,7 @@ static void set_up(void)
         .has_configuration = true,
         .link_connected = true,
         .provisioning_suspended = false,
+        .radio_enabled = true,
         .last_failure = AIRDAP_WIFI_MANAGER_FAILURE_NONE,
         .last_disconnect_reason = 200U,
         .retry_delay_ms = 0U,
@@ -765,7 +766,7 @@ static void test_network_info_reports_non_secret_runtime_state(void)
     assert(run_command(&registry, "network-info", "", &output) == 0);
     assert(strcmp(
         output.text,
-        "wifi=online manager_started=yes configured=yes link_connected=yes "
+        "wifi=online manager_started=yes radio_enabled=yes configured=yes link_connected=yes "
         "provisioning_suspended=no\n"
         "last_failure=none last_disconnect_reason=200 retry_delay_ms=0 "
         "retry_scheduled=no\n"

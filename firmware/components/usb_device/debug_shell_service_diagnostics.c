@@ -136,10 +136,11 @@ static int network_info_command(
     airdap_debug_shell_printf(
         invocation,
         AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
-        "wifi=%s manager_started=%s configured=%s link_connected=%s "
+        "wifi=%s manager_started=%s radio_enabled=%s configured=%s link_connected=%s "
         "provisioning_suspended=%s\n",
         wifi_state_name(mode.wifi),
         info.started ? "yes" : "no",
+        info.radio_enabled ? "yes" : "no",
         info.has_configuration ? "yes" : "no",
         info.link_connected ? "yes" : "no",
         info.provisioning_suspended ? "yes" : "no");
