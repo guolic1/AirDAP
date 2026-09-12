@@ -11,6 +11,7 @@
 #include "airdap_ble_provisioning_internal.h"
 #include "airdap_button_config.h"
 #include "airdap_button_device_commands.h"
+#include "airdap_button_simulation.h"
 #include "airdap_device_identity.h"
 #include "airdap_mode_state.h"
 #include "airdap_network_auth.h"
@@ -375,7 +376,9 @@ void vTaskDelay(TickType_t ticks)
 {
     assert(ticks == pdMS_TO_TICKS(20));
     bool expected_status = false;
-    if (task_scenario == 0) {
+    if (task_scenario == 6) {
+        expected_status = task_tick >= 99 && task_tick < 114;
+    } else if (task_scenario == 0) {
         expected_status = task_tick >= 16 && task_tick < 21;
     } else if (task_scenario == 1 || task_scenario == 3) {
         expected_status = (task_tick >= 7 && task_tick < 12) ||
@@ -397,7 +400,7 @@ void vTaskDelay(TickType_t ticks)
     assert(status_led_on == expected_status);
     assert(!network_led_on);
     ++task_tick;
-    if (task_tick == (task_scenario == 2 ? 530U : task_scenario == 5 ? 320U : 40U)) {
+    if (task_tick == (task_scenario == 2 ? 530U : task_scenario == 5 ? 320U : task_scenario == 6 ? 130U : 40U)) {
         longjmp(task_done, 1);
     }
 }
@@ -405,6 +408,12 @@ void vTaskDelay(TickType_t ticks)
 esp_err_t airdap_boot_key_get_pressed(bool *pressed)
 {
     assert(pressed != NULL);
+    if (task_scenario == 6) {
+        *pressed = false;
+        if (task_tick == 0) assert(airdap_button_simulate(AIRDAP_BUTTON_GESTURE_HOLD2) == ESP_OK);
+        led_result = ESP_OK;
+        return ESP_OK;
+    }
     *pressed = task_scenario == 2 ? task_tick < 510 : task_scenario == 5 ? task_tick < 300 :
         task_tick < 2 || ((task_scenario == 1 || task_scenario == 3 || task_scenario == 4) && task_tick >= 4 && task_tick < 6) ||
         (task_scenario == 4 && task_tick >= 10 && task_tick < 12);
@@ -735,6 +744,16 @@ int main(void)
         if (setjmp(task_done) == 0) button_task_function(NULL);
         assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK] == (task_scenario == 3 ? 1U : 0U));
     }
+    task_scenario = 6;
+    task_tick = 0;
+    memset(button_action_counts, 0, sizeof(button_action_counts));
+    assert(airdap_button_config_defaults() == ESP_OK);
+    if (setjmp(task_done) == 0) button_task_function(NULL);
+    assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY] == 1);
+    assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_TOGGLE] == 1);
+    assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_HOLD_6_READY] == 0);
+    airdap_button_gesture_t simulated;
+    assert(airdap_button_simulation_get(&simulated) == ESP_OK && simulated == AIRDAP_BUTTON_GESTURE_COUNT);
     puts("BLE provisioning adapter tests passed");
     return 0;
 }

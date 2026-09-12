@@ -50,6 +50,7 @@ add_executable(
     ../debug_shell_button/fake_button_config.c
     ../../../components/ble_provisioning/button_indicator.c
     ../../../components/ble_provisioning/ble_provisioning.c
+    ../../../components/ble_provisioning/button_simulation.c
     ../../../components/ble_provisioning/provisioning_button.c
 )
 target_include_directories(

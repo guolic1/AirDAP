@@ -11,6 +11,7 @@
 #include "airdap_button_config.h"
 #include "airdap_button_device_commands.h"
 #include "airdap_button_indicator.h"
+#include "airdap_button_simulator.h"
 #include "airdap_device_identity.h"
 #include "airdap_mode_state.h"
 #include "airdap_network_auth.h"
@@ -576,6 +577,7 @@ static void button_task(void *argument)
 {
     (void) argument;
     airdap_provisioning_button_t button;
+    airdap_button_simulator_t simulator = {0};
     airdap_button_indicator_t indicator = {0};
     bool indicator_valid = false;
     bool last_status_on = false;
@@ -583,10 +585,20 @@ static void button_task(void *argument)
     uint32_t stable_release_ms = 0U;
     airdap_provisioning_button_action_t pending_clear = AIRDAP_PROVISIONING_BUTTON_NONE;
     airdap_provisioning_button_init(&button);
+    airdap_button_simulation_init();
     for (;;) {
         airdap_provisioning_button_action_t action = AIRDAP_PROVISIONING_BUTTON_NONE;
         bool pressed = false;
         const esp_err_t error = airdap_boot_key_get_pressed(&pressed);
+        bool simulated_pressed;
+        if (airdap_button_simulation_step(&simulator, pressed, error == ESP_OK,
+                button.state == AIRDAP_BUTTON_IDLE, BUTTON_POLL_MS, &simulated_pressed)) {
+            airdap_provisioning_button_init(&button);
+            indicator = (airdap_button_indicator_t) {0};
+            pending_clear = AIRDAP_PROVISIONING_BUTTON_NONE;
+            ESP_LOGW(TAG, "BOOT_KEY simulation cancelled by physical input or read failure");
+        }
+        pressed = pressed || simulated_pressed;
         if (error != ESP_OK || pressed) {
             stable_release_ms = 0U;
             if (pending_clear != AIRDAP_PROVISIONING_BUTTON_NONE) {
