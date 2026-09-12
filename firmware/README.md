@@ -459,6 +459,46 @@ trusted; it is not per-device authentication. Follow
 before relying on BLE lifecycle, RF behavior, Wi-Fi association, persistence,
 or the GPIO0 reset guard on hardware.
 
+## Wireless pyOCD programming test
+
+`test/hil/wireless_pyocd.py` connects pyOCD's CMSIS-DAP engine directly to
+AirDAP's authenticated TCP 3260 transport. It uses the existing TLS-PSK
+credential and performs target sector erase/program, byte-for-byte readback,
+target reset, and a second readback through a fresh TLS/pyOCD session. It does
+not enumerate USB probes or fall back to USB. This is a programming HIL helper,
+not an installed pyOCD discovery plugin or a Windows virtual USB device.
+
+Provide a target-specific **binary** and the exact pyOCD target name and flash
+address. The operation overwrites target flash; it does not update the AirDAP
+firmware. Use exclusive access to the AirDAP and target. AirDAP must have power
+and Wi-Fi but no USB data connection to the computer: the current USB-priority
+policy rejects network SWD ownership while USB is attached. Keep SWD, ground,
+target power, and target reset connected.
+
+From the repository root on Windows (validated with pyOCD 0.45.1):
+
+```powershell
+uv run --with pyocd==0.45.1 python firmware/test/hil/wireless_pyocd.py 192.0.2.10 `
+    --credential "$env:LOCALAPPDATA\AirDAP\ADP-001122334455.json" `
+    --target stm32f103c8 --base-address 0x08000000 `
+    --image <target-test.bin> --frequency 500000 `
+    --backup <new-backup.bin> --output <evidence.json>
+```
+
+The selected target must be installed in pyOCD; check `pyocd list --targets`
+in the same environment. The optional backup saves exactly the requested image
+range before programming and refuses to overwrite an existing backup. Sector
+erase preserves unwritten portions through pyOCD's `keep_unwritten` option.
+The helper leaves the requested image on the target; restoring a backup is a
+separate invocation using that file as `--image`, without `--backup`.
+
+Smart-flash skipping and memory caching are disabled. JSON records the device,
+AirDAP firmware, pyOCD version, clock, DAP exchange counts, image and readback
+hashes, elapsed programming time, and failures. Exit zero requires both full
+readbacks to match; an uncertain transport write is never retried automatically.
+The private pyOCD interface adapter is version-sensitive, so use the tested
+version for reproducible acceptance. No new production dependency is required.
+
 ## Network pairing and authenticated sessions
 
 AirDAP keeps exactly one active 256-bit network PSK. Its stable, non-secret TLS
@@ -1045,7 +1085,7 @@ for suite in \
     debug_shell_identity debug_shell_input debug_shell_wifi debug_shell_button \
     debug_shell_swd_probe \
     debug_shell_tx_state airdap_shell airdap_update airdap_network_update \
-    airdap_provision airdap_pair airdap_tls_probe airdap_dap_probe airdap_uart_probe wired_hil; do
+    airdap_provision airdap_pair airdap_tls_probe airdap_dap_probe airdap_uart_probe wired_hil wireless_pyocd; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
     cmake --build "build-host/$suite"
     ctest --test-dir "build-host/$suite" --output-on-failure
