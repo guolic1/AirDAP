@@ -7,6 +7,7 @@
 bool airdap_wifi_disconnect_is_authentication_failure(uint8_t reason)
 {
     switch (reason) {
+    case WIFI_REASON_AUTH_EXPIRE:
     case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
     case WIFI_REASON_802_1X_AUTH_FAILED:
     case WIFI_REASON_AUTH_FAIL:

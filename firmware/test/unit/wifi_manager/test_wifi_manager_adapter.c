@@ -539,13 +539,13 @@ int main(void)
     assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_CONNECTING);
     assert(wifi_connect_count == 3U);
 
-    emit_wifi_event(WIFI_EVENT_STA_DISCONNECTED, WIFI_REASON_AUTH_FAIL);
+    emit_wifi_event(WIFI_EVENT_STA_DISCONNECTED, WIFI_REASON_AUTH_EXPIRE);
     assert(last_mode_event == AIRDAP_MODE_EVENT_WIFI_DISCONNECTED);
     assert(retry_timer.active);
     assert(retry_timer.timeout_us == 2000000U);
     assert(airdap_wifi_manager_get_info(&info) == ESP_OK);
     assert(info.last_failure == AIRDAP_WIFI_MANAGER_FAILURE_AUTHENTICATION);
-    assert(info.last_disconnect_reason == WIFI_REASON_AUTH_FAIL);
+    assert(info.last_disconnect_reason == WIFI_REASON_AUTH_EXPIRE);
     assert(info.retry_delay_ms == 2000U);
 
     credentials = make_credentials("third-ap", "third-password");
