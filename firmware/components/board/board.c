@@ -10,6 +10,7 @@
 
 static atomic_bool boot_key_simulated_pressed;
 static atomic_bool target_reset_asserted;
+static atomic_bool target_power_allowed;
 
 static esp_err_t configure_pins(
     uint64_t pin_mask,
@@ -49,6 +50,9 @@ static esp_err_t preload_safe_levels(void)
         }
         if (levels[index].pin == (gpio_num_t) AIRDAP_PIN_TARGET_NRESET) {
             atomic_store(&target_reset_asserted, false);
+        }
+        if (levels[index].pin == (gpio_num_t) AIRDAP_PIN_V_SOURCE_STATUS) {
+            atomic_store(&target_power_allowed, true);
         }
     }
 
@@ -107,9 +111,16 @@ esp_err_t airdap_board_init_safe(void)
 
 esp_err_t airdap_target_power_set_allowed(bool allowed)
 {
-    return gpio_set_level(
+    const esp_err_t error = gpio_set_level(
         (gpio_num_t) AIRDAP_PIN_V_SOURCE_STATUS,
         allowed ? 1U : 0U);
+    if (error == ESP_OK) atomic_store(&target_power_allowed, allowed);
+    return error;
+}
+
+bool airdap_target_power_is_allowed(void)
+{
+    return atomic_load(&target_power_allowed);
 }
 
 esp_err_t airdap_target_power_get_active(bool *active)

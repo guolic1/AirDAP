@@ -18,6 +18,8 @@ esp_err_t airdap_board_init_safe(void);
  */
 esp_err_t airdap_target_power_set_allowed(bool allowed);
 esp_err_t airdap_target_power_get_active(bool *active);
+/* Last successful output command, independent of the shared ST input level. */
+bool airdap_target_power_is_allowed(void);
 
 /* GPIO41 drives an inverting transistor: high asserts target nRESET. */
 esp_err_t airdap_target_reset_set_asserted(bool asserted);
