@@ -222,10 +222,14 @@ authentication before opening the NETWORK service session.
 The mode state publishes orthogonal USB, Wi-Fi, provisioning, OTA, and live DAP
 owner fields. USB attach/detach, Wi-Fi station, BLE provisioning, and OTA
 lifecycle events are wired today. USB DAP admission ignores Wi-Fi state.
-Authenticated NETWORK DAP admission requires USB to be absent and Wi-Fi to be
-online, while USB presence does not disable independent network status,
+By default, authenticated NETWORK DAP admission requires USB to be absent and Wi-Fi to be
+online. A button command can explicitly select NETWORK even with USB attached;
+that selection rejects USB DAP until changed or rebooted. USB presence does not disable independent network status,
 configuration, or OTA paths.
-USB attach conditionally revokes an idle NETWORK DAP owner. Ownership acquire
+USB attach conditionally revokes an idle NETWORK DAP owner unless NETWORK was
+explicitly selected. Selection changes require no DAP owner and no OTA; they
+retain physical USB presence and use the same policy epoch and ownership
+reservation as DAP transactions. Ownership acquire
 and physical-operation begin revalidate versioned mode policy, so an attach
 racing either transaction rolls it back without a blocking cross-task lock;
 Wi-Fi-only changes are excluded from the USB policy version.
@@ -336,9 +340,9 @@ The BOOT_KEY recognizer polls every 20 ms. Its internal states are:
 | `WAIT_SECOND_PRESS` | First click released, waiting for a second press |
 | `SECOND_PRESS_DEBOUNCE` | Confirming a candidate second press for 40 ms |
 | `SECOND_PRESSED` | Second press confirmed, held for less than 2 seconds |
-| `LONG_2S` | Provisioning threshold reached; STATUS slow flash, waiting for release |
-| `LONG_6S` | Six-second threshold reached; STATUS fast flash, waiting for release |
-| `LONG_10S` | Clear threshold reached; STATUS very fast flash, waiting for release |
+| `LONG_2S` | 2-second threshold reached; STATUS slow flash, waiting for release |
+| `LONG_6S` | 6-second threshold reached; STATUS fast flash, waiting for release |
+| `LONG_10S` | 10-second threshold reached; STATUS very fast flash, waiting for release |
 
 A single click is reported 300 ms after the first release begins, including
 release confirmation. A second press beginning before that deadline forms a
@@ -349,10 +353,9 @@ or longer cancels pending clicks and selects the long-hold action instead.
 Double clicks never also emit single clicks. Triple clicks form a double click
 followed by a pending single click; there is no repeat or triple-click action.
 
-Single and double clicks emit `BOOT_KEY single click (unassigned)`
-or `BOOT_KEY double click (unassigned)` info logs and STATUS completion flashes.
-They do not reset either MCU,
-change power or DAP ownership, open BLE, or clear configuration. Long-hold
+Single and double clicks emit STATUS completion flashes. Completed gestures
+execute their configured command and log the gesture, command, and result.
+Long-hold
 threshold events are each emitted once; no long-hold action runs until release
 has remained stable for 200 ms. A brief release bounce preserves the current
 hold and does not repeat its indicator event. Press duration includes the
@@ -381,7 +384,58 @@ Only that task writes the button LED outputs, so delayed provisioning events
 cannot restore a stale indication. Flash durations are firmware constants in
 `components/ble_provisioning/button_indicator.c`, not persistent settings.
 
-BLE is disabled during normal operation. Hold `BOOT_KEY` (GPIO0) until the
+Only the highest reached hold threshold executes on release. For example,
+releasing after 6 seconds selects `hold6`; it does not first execute `hold2`.
+Indications identify gestures, even when the configured command is `none` or
+is rejected as busy. Ordinary presses remain dark.
+
+The default command bindings are:
+
+| Gesture | Command |
+| --- | --- |
+| `single` | `none` |
+| `double` | `dap-toggle` |
+| `hold2` | `provisioning` |
+| `hold6` | `none` |
+| `hold10` | `clear-network-restart` |
+
+USB debug shell supports `button commands`, `button bindings`,
+`button bind <gesture> <command>`, and `button defaults`. Each bind/defaults
+operation saves immediately, with no separate save command. All seven supported
+commands may be bound to any of the five gestures:
+
+| Command | Behavior |
+| --- | --- |
+| `none` | No device operation |
+| `dap-toggle` | Switch between USB and NETWORK DAP |
+| `dap-usb` | Select USB DAP |
+| `dap-network` | Select authenticated NETWORK DAP, including while USB is attached |
+| `dap-auto` | Restore USB-when-attached, NETWORK-otherwise policy |
+| `provisioning` | Open or cancel the BLE provisioning window |
+| `clear-network-restart` | Clear Wi-Fi, pairing and network-auth configuration, then restart AirDAP |
+
+For example, `button bind hold6 dap-auto` replaces the six-second no-op.
+`button bindings` prints all bindings and the current volatile DAP route.
+Commands are a fixed allowlist, not arbitrary shell text. Target reset, power
+cycling, and firmware flashing are not implemented button commands.
+
+Bindings use a separate versioned six-byte NVS record (`airdap_btn/bindings`),
+without changing the existing network configuration record. Missing bindings
+use the defaults above. Writes are serialized and RAM changes only after a
+successful commit. Invalid records or storage failures are reported, never
+treated as saved. If a corrupt record prevents the button monitor from starting,
+use `button defaults` over USB and restart to recover just the binding record.
+Clearing network configuration preserves the bindings.
+`button defaults` restores bindings; it does not change the current DAP route.
+Bindings survive reboot; DAP selection resets to `auto`. Selection preserves USB
+enumeration and CDC/debug-shell interfaces, and never bypasses network authentication.
+
+The binding snapshot is taken at the start of a gesture. Changes during a press
+apply to the next gesture. Clear/restart additionally waits for 200 ms of stable
+release even when mapped to a double click; a new press or read failure during
+that extra wait cancels the pending clear. Flash timing remains gesture-based.
+
+With the default bindings, BLE is disabled during normal operation. Hold `BOOT_KEY` (GPIO0) until the
 red STATUS LED starts flashing slowly at two seconds, then release it to open a
 120-second provisioning window. The button never starts BLE while it remains
 pressed. Repeating the same hold-and-release while the window is active cancels
@@ -394,7 +448,7 @@ Failure leaves the window open for another client attempt; cancel and timeout
 stop BLE and restore the previously committed Wi-Fi configuration.
 
 Continue holding `BOOT_KEY` past the slow flash until the red STATUS LED
-starts flashing quickly at ten seconds. No provisioning or clear action runs while the button
+starts flashing very quickly at ten seconds. No provisioning or clear action runs while the button
 remains pressed. Release it to turn both indicators off, clear Wi-Fi
 credentials plus the reserved pairing and network-authentication slots, and
 restart without intentionally entering ROM download mode. After restart the
@@ -452,7 +506,7 @@ configured ESP-IDF environment and run `idf.py reconfigure` once.
 
 Security 2 still encrypts and authenticates the BLE provisioning session, but
 the published PoP does not identify an owner. Physical access to hold
-`BOOT_KEY` through the two-second indication and release it is therefore the
+`BOOT_KEY` through the two-second indication and release it (with default bindings) is therefore the
 only provisioning authorization boundary. Any nearby party that knows the
 public credential can race or replace Wi-Fi configuration while that window is
 open. This design is appropriate only where physical access to the button is
@@ -961,7 +1015,7 @@ extending a single global command table. Available commands are:
 - `wifi set` — interactively replace the stored SSID and password, reset
   reconnect backoff, and reconnect immediately;
 - `wifi clear` — remove stored Wi-Fi credentials and stop reconnect attempts;
-- `button press|release|status` — set or inspect a RAM-only simulated
+- `button press|release|status|commands|bindings|defaults|bind <gesture> <command>` — configure persistent gesture commands, list bindings, or set/inspect a RAM-only simulated
   `BOOT_KEY`; physical and simulated presses pass through the same single-click,
   double-click, 2-second, 6-second, 10-second, and release-confirmation behavior. `status`
   reports the simulated input level, not an internal recognizer-state snapshot;
@@ -1041,7 +1095,7 @@ The other hardware-independent tests use the same pattern:
 for suite in \
     bootloader_artifact ota_layout setup_env board config_store device_identity voltage_monitor swd_protocol \
     dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame discovery \
-    dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning network_auth network_dap network_control \
+    dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning button_config network_auth network_dap network_control \
     target_uart network_uart usb_uart_bridge usb_descriptors project_version \
     debug_shell_commands debug_shell_diagnostics debug_shell_config_status \
     debug_shell_identity debug_shell_input debug_shell_wifi debug_shell_button \

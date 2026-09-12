@@ -8,6 +8,7 @@
 #include "airdap_ble_provisioning.h"
 #include "airdap_ble_provisioning_internal.h"
 #include "airdap_board.h"
+#include "airdap_button_config.h"
 #include "airdap_button_indicator.h"
 #include "airdap_device_identity.h"
 #include "airdap_mode_state.h"
@@ -442,16 +443,28 @@ static void handle_network_event(int32_t event_id, void *event_data)
     }
 }
 
-static esp_err_t handle_button_action(
-    airdap_provisioning_button_action_t action)
+static esp_err_t execute_button_command(airdap_button_command_t command)
 {
-    switch (action) {
-    case AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY:
-    case AIRDAP_PROVISIONING_BUTTON_CLEAR_READY:
-    case AIRDAP_PROVISIONING_BUTTON_HOLD_6_READY:
-    case AIRDAP_PROVISIONING_BUTTON_HOLD_6:
+    switch (command) {
+    case AIRDAP_BUTTON_COMMAND_NONE:
         return ESP_OK;
-    case AIRDAP_PROVISIONING_BUTTON_TOGGLE:
+    case AIRDAP_BUTTON_COMMAND_DAP_TOGGLE:
+    case AIRDAP_BUTTON_COMMAND_DAP_USB:
+    case AIRDAP_BUTTON_COMMAND_DAP_NETWORK:
+    case AIRDAP_BUTTON_COMMAND_DAP_AUTO: {
+        const airdap_dap_route_t route = command == AIRDAP_BUTTON_COMMAND_DAP_TOGGLE
+            ? AIRDAP_DAP_ROUTE_TOGGLE : command == AIRDAP_BUTTON_COMMAND_DAP_USB
+            ? AIRDAP_DAP_ROUTE_USB : command == AIRDAP_BUTTON_COMMAND_DAP_NETWORK
+            ? AIRDAP_DAP_ROUTE_NETWORK : AIRDAP_DAP_ROUTE_AUTO;
+        const airdap_mode_dap_result_t result = airdap_mode_state_set_dap_route(route);
+        if (result != AIRDAP_MODE_DAP_ALLOWED) {
+            ESP_LOGW(TAG, "BOOT_KEY DAP selection rejected: %d", result);
+            return ESP_ERR_INVALID_STATE;
+        }
+        ESP_LOGI(TAG, "DAP route=%d (auto=0 usb=1 network=2)", airdap_mode_state_get_dap_route());
+        return ESP_OK;
+    }
+    case AIRDAP_BUTTON_COMMAND_PROVISIONING:
         if (window_active) {
             request_window_stop(window_outcome == WINDOW_OUTCOME_SUCCESS
                 ? WINDOW_OUTCOME_SUCCESS
@@ -459,7 +472,7 @@ static esp_err_t handle_button_action(
             return ESP_OK;
         }
         return start_window();
-    case AIRDAP_PROVISIONING_BUTTON_CLEAR: {
+    case AIRDAP_BUTTON_COMMAND_CLEAR_NETWORK_RESTART: {
         const esp_err_t pairing_error = set_pairing_window_active(false);
         if (pairing_error != ESP_OK) {
             request_window_stop(WINDOW_OUTCOME_CLEAR_FAILED);
@@ -482,16 +495,22 @@ static esp_err_t handle_button_action(
         maybe_restart_after_clear();
         return ESP_OK;
     }
-    case AIRDAP_PROVISIONING_BUTTON_SINGLE_CLICK:
-        ESP_LOGI(TAG, "BOOT_KEY single click (unassigned)");
-        return ESP_OK;
-    case AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK:
-        ESP_LOGI(TAG, "BOOT_KEY double click (unassigned)");
-        return ESP_OK;
-    case AIRDAP_PROVISIONING_BUTTON_NONE:
-        return ESP_OK;
+    case AIRDAP_BUTTON_COMMAND_COUNT:
+        break;
     }
     return ESP_ERR_INVALID_ARG;
+}
+
+static int gesture_for_action(airdap_provisioning_button_action_t action)
+{
+    switch (action) {
+    case AIRDAP_PROVISIONING_BUTTON_SINGLE_CLICK: return AIRDAP_BUTTON_GESTURE_SINGLE;
+    case AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK: return AIRDAP_BUTTON_GESTURE_DOUBLE;
+    case AIRDAP_PROVISIONING_BUTTON_TOGGLE: return AIRDAP_BUTTON_GESTURE_HOLD2;
+    case AIRDAP_PROVISIONING_BUTTON_HOLD_6: return AIRDAP_BUTTON_GESTURE_HOLD6;
+    case AIRDAP_PROVISIONING_BUTTON_CLEAR: return AIRDAP_BUTTON_GESTURE_HOLD10;
+    default: return -1;
+    }
 }
 
 static void provisioning_event_handler(
@@ -507,8 +526,17 @@ static void provisioning_event_handler(
         if (event_id == INTERNAL_EVENT_TIMEOUT) {
             request_window_stop(WINDOW_OUTCOME_RESTORE);
         } else {
-            (void) handle_button_action(
-                (airdap_provisioning_button_action_t) event_id);
+            const int gesture = gesture_for_action((airdap_provisioning_button_action_t) event_id);
+            if (gesture >= 0 && event_data != NULL) {
+                const airdap_button_command_t command = *(const uint8_t *) event_data;
+                const esp_err_t error = execute_button_command(command);
+                if (error != ESP_OK) {
+                    ESP_LOGE(TAG, "BOOT_KEY command failed: %s", esp_err_to_name(error));
+                }
+                ESP_LOGI(TAG, "BOOT_KEY %s command=%s result=%s",
+                    airdap_button_gesture_name((airdap_button_gesture_t) gesture),
+                    airdap_button_command_name(command), esp_err_to_name(error));
+            }
         }
     }
 }
@@ -542,14 +570,35 @@ static void button_task(void *argument)
     airdap_button_indicator_t indicator = {0};
     bool indicator_valid = false;
     bool last_status_on = false;
+    uint8_t commands[AIRDAP_BUTTON_GESTURE_COUNT] = {0};
+    uint32_t stable_release_ms = 0U;
+    airdap_provisioning_button_action_t pending_clear = AIRDAP_PROVISIONING_BUTTON_NONE;
     airdap_provisioning_button_init(&button);
     for (;;) {
         airdap_provisioning_button_action_t action = AIRDAP_PROVISIONING_BUTTON_NONE;
         bool pressed = false;
         const esp_err_t error = airdap_boot_key_get_pressed(&pressed);
+        if (error != ESP_OK || pressed) {
+            stable_release_ms = 0U;
+            if (pending_clear != AIRDAP_PROVISIONING_BUTTON_NONE) {
+                ESP_LOGW(TAG, "BOOT_KEY clear cancelled before stable release");
+                pending_clear = AIRDAP_PROVISIONING_BUTTON_NONE;
+            }
+        } else if (stable_release_ms < 200U) {
+            stable_release_ms += BUTTON_POLL_MS;
+        }
         if (error != ESP_OK) {
             ESP_LOGE(TAG, "BOOT_KEY read failed: %s", esp_err_to_name(error));
         } else {
+            /* A binding edit cannot change the meaning of an already-held key. */
+            if (button.state == AIRDAP_BUTTON_IDLE && pressed) {
+                const esp_err_t config_error = airdap_button_config_get(commands);
+                if (config_error != ESP_OK) {
+                    ESP_LOGE(TAG, "BOOT_KEY config read failed: %s", esp_err_to_name(config_error));
+                    vTaskDelay(pdMS_TO_TICKS(BUTTON_POLL_MS));
+                    continue;
+                }
+            }
             action = airdap_provisioning_button_step(
                 &button,
                 pressed,
@@ -568,12 +617,25 @@ static void button_task(void *argument)
                     esp_err_to_name(led_error));
             }
         }
+        const int recognized_gesture = gesture_for_action(action);
+        if (recognized_gesture >= 0 &&
+            commands[recognized_gesture] == AIRDAP_BUTTON_COMMAND_CLEAR_NETWORK_RESTART &&
+            stable_release_ms < 200U) {
+            pending_clear = action;
+            action = AIRDAP_PROVISIONING_BUTTON_NONE;
+        }
+        if (pending_clear != AIRDAP_PROVISIONING_BUTTON_NONE && stable_release_ms >= 200U) {
+            action = pending_clear;
+            pending_clear = AIRDAP_PROVISIONING_BUTTON_NONE;
+        }
         if (action != AIRDAP_PROVISIONING_BUTTON_NONE) {
+            const int gesture = gesture_for_action(action);
+            const uint8_t command = gesture >= 0 ? commands[gesture] : AIRDAP_BUTTON_COMMAND_NONE;
             const esp_err_t post_error = esp_event_post(
                 AIRDAP_PROVISIONING_INTERNAL_EVENT,
                 action,
-                NULL,
-                0U,
+                &command,
+                sizeof(command),
                 portMAX_DELAY);
             if (post_error != ESP_OK) {
                 ESP_LOGE(TAG, "BOOT_KEY event lost: %s",
@@ -589,6 +651,8 @@ esp_err_t airdap_ble_provisioning_start(void)
     if (monitor_started) {
         return ESP_ERR_INVALID_STATE;
     }
+    const esp_err_t config_error = airdap_button_config_init();
+    if (config_error != ESP_OK) return config_error;
     const esp_timer_create_args_t timer_args = {
         .callback = window_timer_callback,
         .name = "airdap_prov_window",
@@ -650,7 +714,11 @@ esp_err_t airdap_ble_provisioning_start(void)
 esp_err_t airdap_ble_provisioning_test_button_action(
     airdap_provisioning_button_action_t action)
 {
-    return handle_button_action(action);
+    const int gesture = gesture_for_action(action);
+    if (gesture < 0) return ESP_OK;
+    uint8_t commands[AIRDAP_BUTTON_GESTURE_COUNT];
+    const esp_err_t error = airdap_button_config_get(commands);
+    return error == ESP_OK ? execute_button_command(commands[gesture]) : error;
 }
 
 void airdap_ble_provisioning_test_network_event(

@@ -23,7 +23,9 @@ idf.py build
 idf.py -p <airdap-programming-port> flash
 ```
 
-Restart and monitor AirDAP. Confirm BLE is not advertising before a button
+Restart and monitor AirDAP. Record `button bindings`, then use `button defaults`.
+The following steps assume the default mappings; restore custom bindings after
+acceptance. Confirm BLE is not advertising before a button
 press. Hold `BOOT_KEY` until the red STATUS LED starts its 500 ms on/off
 slow flash at two seconds. NET must remain off.
 Before releasing it, confirm BLE has not initialized or started advertising
@@ -113,7 +115,8 @@ public fingerprint.
 With the device provisioned, hold `BOOT_KEY` continuously. Confirm STATUS stays
 off before two seconds, then flashes with 500 ms on/off without initializing
 BLE or disconnecting the debug shell. Continue holding until STATUS changes to
-200 ms on/off at six seconds, then 60 ms on/off at ten seconds. NET must remain off throughout. Keep it pressed briefly and confirm AirDAP
+200 ms on/off at six seconds, then 60 ms on/off at ten seconds. NET must remain
+off throughout. Keep it pressed briefly and confirm AirDAP
 has not cleared configuration or restarted while GPIO0 remains low. Release the
 button and confirm both LEDs turn off before AirDAP clears configuration and
 restarts normally rather than entering the ROM download mode. The debug shell
@@ -142,5 +145,29 @@ off. Start another ordinary press during a completion flash and confirm its
 
 Observe long-hold release bounce if suitable test equipment is available: a
 release shorter than 200 ms must retain the current flash phase and not execute
-the action or repeat threshold events. Record measured timing separately from
+the action or repeat threshold events. Releasing between 6 and 10 seconds with
+default bindings must log `hold6 command=none` and never open BLE or clear data.
+Record measured timing separately from
 host-test results; polling and task scheduling can affect real flash durations.
+
+## 7. Persistent bindings and DAP selection
+
+Record `button commands` (seven entries) and `button bindings` (five gestures).
+Set `button bind hold6 dap-auto`, restart and confirm the binding survives while
+`dap-route=auto`. Restore the defaults and confirm that this change survives a
+second restart. Invalid gestures/commands or trailing tokens must fail without
+changing the stored bindings. Save and restore any pre-test custom mappings.
+
+With USB data attached, Wi-Fi online, and DAP disconnected, double-click and
+confirm `dap-route=network`. Verify authenticated pyOCD DAP access over TCP and
+verify that USB DAP cannot acquire the target. USB CDC and debug shell should
+remain enumerated. Unauthenticated network access must remain rejected.
+Disconnect DAP and double-click again; confirm `dap-route=usb`, wired DAP works,
+and network DAP is rejected. With a DAP owner or OTA active, verify the selection
+command reports busy and preserves the current route and transfer. Restart and
+confirm automatic selection is restored. Explicit NETWORK selection must survive
+USB detach/reattach until another command or reboot changes the selection.
+
+On a recoverable board only, map double-click to `clear-network-restart` and
+observe that restart cannot occur before 200 ms of stable release. A new press
+during that guard must cancel the pending clear. Restore defaults afterward.

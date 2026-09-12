@@ -47,6 +47,7 @@ add_test(
 add_executable(
     ble_provisioning_adapter_test
     test_ble_provisioning_adapter.c
+    ../debug_shell_button/fake_button_config.c
     ../../../components/ble_provisioning/button_indicator.c
     ../../../components/ble_provisioning/ble_provisioning.c
     ../../../components/ble_provisioning/provisioning_button.c
@@ -54,6 +55,9 @@ add_executable(
 target_include_directories(
     ble_provisioning_adapter_test
     PRIVATE
+        ../../../components/button_config/include
+        ../../../components/mode_state/include
+        ../../../components/dap_ownership/include
         fake_include
         ../../../components/ble_provisioning/include
         ../../../components/ble_provisioning/private_include

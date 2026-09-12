@@ -7,12 +7,16 @@ enable_testing()
 add_executable(
     debug_shell_button_test
     test_debug_shell_button.c
+    fake_button_config.c
     ../../../components/usb_device/debug_shell_button.c
     ../../../components/usb_device/debug_shell_commands.c
 )
 target_include_directories(
     debug_shell_button_test
     PRIVATE
+        ../../../components/button_config/include
+        ../../../components/mode_state/include
+        ../../../components/dap_ownership/include
         fake_include
         ../../../components/usb_device/private_include
 )
@@ -27,6 +31,7 @@ add_test(NAME debug_shell_button COMMAND debug_shell_button_test)
 add_executable(
     debug_shell_button_flow_test
     test_debug_shell_button_flow.c
+    fake_button_config.c
     ../../../components/board/board.c
     ../../../components/ble_provisioning/provisioning_button.c
     ../../../components/usb_device/debug_shell_button.c
@@ -35,6 +40,9 @@ add_executable(
 target_include_directories(
     debug_shell_button_flow_test
     PRIVATE
+        ../../../components/button_config/include
+        ../../../components/mode_state/include
+        ../../../components/dap_ownership/include
         ../../../components/board/include
         fake_include
         ../board/fake_include

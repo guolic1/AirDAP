@@ -126,7 +126,7 @@ static void test_invalid_arguments_do_not_change_state(void)
         assert(output.style == AIRDAP_DEBUG_SHELL_STYLE_WARNING);
         assert(strcmp(
             output.text,
-            "usage: button press|release|status\n") == 0);
+            "usage: button press|release|status|commands|bindings|defaults|bind <single|double|hold2|hold6|hold10> <command>\n") == 0);
     }
     assert(simulated_pressed);
     assert(set_calls == sets_before && get_calls == gets_before);
