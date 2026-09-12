@@ -4,7 +4,6 @@ from pathlib import Path
 import struct
 import sys
 import unittest
-from unittest.mock import patch
 
 tools = Path(__file__).resolve().parents[3] / "tools"
 sys.path.insert(0, str(tools))

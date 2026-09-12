@@ -656,6 +656,28 @@ static void test_failed_disconnect_can_be_cleaned_up_by_new_owner(void)
     assert(airdap_ota_debug_allowed() && !uart_suspended && activate_calls == 0);
 }
 
+static void test_network_chunk_and_response_boundaries(void)
+{
+    reset_fakes();
+    const uint8_t begin[] = {0x31, 0, 0, 0x20, 0};
+    uint8_t write[4097] = {0x32};
+    assert(dispatch(begin, sizeof(begin)) == AIRDAP_FRAME_ERROR_NONE && ota_response[1] == 0);
+    assert(dispatch(write, 5) == AIRDAP_FRAME_ERROR_TRUNCATED);
+    assert(dispatch(write, sizeof(write)) == AIRDAP_FRAME_ERROR_INVALID_ARGUMENT);
+    assert(write_calls == 0);
+    assert(dispatch(write, 4096) == AIRDAP_FRAME_ERROR_NONE && ota_response[1] == 0);
+    assert(last_write_size == 4091 && ota_response_size == 6);
+    const uint8_t expected[] = {0x32, 0, 0, 0, 0x0f, 0xfb};
+    assert(memcmp(ota_response, expected, sizeof(expected)) == 0);
+    const uint8_t extra[] = {0x33, 0};
+    assert(dispatch(extra, sizeof(extra)) == AIRDAP_FRAME_ERROR_INVALID_ARGUMENT);
+    assert(end_calls == 0 && activate_calls == 0);
+    assert(airdap_network_ota_dispatch((void *) &connection_marker, 7, begin, sizeof(begin),
+        ota_response, sizeof(ota_response) - 1, &ota_response_size) == AIRDAP_FRAME_ERROR_INTERNAL);
+    assert(ota_response_size == 0 && begin_calls == 1);
+    airdap_network_ota_disconnect((void *) &connection_marker, 7);
+}
+
 int main(void)
 {
     const airdap_dap_ownership_backend_t ownership_backend = {
@@ -683,6 +705,7 @@ int main(void)
     test_uart_drain_failure_prevents_flash_begin();
     test_concurrent_clients_cannot_share_flash_handle();
     test_failed_disconnect_can_be_cleaned_up_by_new_owner();
+    test_network_chunk_and_response_boundaries();
     test_begin_fails_if_physical_release_fails();
 
     puts("OTA manager tests passed");

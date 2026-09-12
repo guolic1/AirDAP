@@ -1604,6 +1604,20 @@ static void test_ota_routes_auth_port_disconnect_and_reboot_ack(void)
     }
 }
 
+static void test_failed_ota_reboot_ack_does_not_restart(void)
+{
+    reset_connection_fakes();
+    uart_handshake();
+    const uint8_t reboot[] = {0x35};
+    append_request(AIRDAP_FRAME_TYPE_CONTROL_REQUEST, 9, 3, reboot, sizeof(reboot));
+    block_write_after = 2 * AIRDAP_FRAME_HEADER_SIZE +
+        AIRDAP_NETWORK_DAP_HELLO_FIXED_SIZE + strlen(identity.firmware_version) +
+        AIRDAP_NETWORK_DAP_AUTH_RESPONSE_SIZE;
+    airdap_network_dap_handle_socket(TEST_CLIENT_FD);
+    assert(ota_dispatch_calls == 1 && ota_reboot_calls == 0);
+    assert(ota_disconnect_calls == 1 && auth_close_calls == 1 && now_us >= 5000000);
+}
+
 int main(int argument_count, char **arguments)
 {
     if (argument_count == 2 &&
@@ -1638,6 +1652,7 @@ int main(int argument_count, char **arguments)
     test_control_revoked_before_output_suppresses_success();
     test_control_opcodes_are_scoped_to_their_port();
     test_ota_routes_auth_port_disconnect_and_reboot_ack();
+    test_failed_ota_reboot_ack_does_not_restart();
     assert_network_dap_status(true, 0U, 0U, 0U, 0U);
     puts("Network DAP transport tests passed");
     return 0;
