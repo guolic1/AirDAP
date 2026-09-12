@@ -30,6 +30,14 @@ target_include_directories(button_state_machine_test PRIVATE
 target_compile_features(button_state_machine_test PRIVATE c_std_11)
 target_compile_options(button_state_machine_test PRIVATE -Wall -Wextra -Werror -pedantic)
 add_test(NAME button_state_machine COMMAND button_state_machine_test)
+add_executable(button_indicator_test
+    test_button_indicator.c
+    ../../../components/ble_provisioning/button_indicator.c)
+target_include_directories(button_indicator_test PRIVATE
+    ../../../components/ble_provisioning/private_include)
+target_compile_features(button_indicator_test PRIVATE c_std_11)
+target_compile_options(button_indicator_test PRIVATE -Wall -Wextra -Werror -pedantic)
+add_test(NAME button_indicator COMMAND button_indicator_test)
 add_test(
     NAME ble_provisioning_public_security2_credential
     COMMAND ${Python3_EXECUTABLE}
@@ -39,6 +47,7 @@ add_test(
 add_executable(
     ble_provisioning_adapter_test
     test_ble_provisioning_adapter.c
+    ../../../components/ble_provisioning/button_indicator.c
     ../../../components/ble_provisioning/ble_provisioning.c
     ../../../components/ble_provisioning/provisioning_button.c
 )

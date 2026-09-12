@@ -336,8 +336,8 @@ The BOOT_KEY recognizer polls every 20 ms. Its internal states are:
 | `WAIT_SECOND_PRESS` | First click released, waiting for a second press |
 | `SECOND_PRESS_DEBOUNCE` | Confirming a candidate second press for 40 ms |
 | `SECOND_PRESSED` | Second press confirmed, held for less than 3 seconds |
-| `LONG_3S` | Provisioning threshold reached; green indicator, waiting for release |
-| `LONG_10S` | Clear threshold reached; red indicator, waiting for release |
+| `LONG_3S` | Provisioning threshold reached; STATUS slow flash, waiting for release |
+| `LONG_10S` | Clear threshold reached; STATUS fast flash, waiting for release |
 
 A single click is reported 300 ms after the first release begins, including
 release confirmation. A second press beginning before that deadline forms a
@@ -348,8 +348,9 @@ or longer cancels pending clicks and selects the long-hold action instead.
 Double clicks never also emit single clicks. Triple clicks form a double click
 followed by a pending single click; there is no repeat or triple-click action.
 
-Single and double clicks currently only emit `BOOT_KEY single click (unassigned)`
-or `BOOT_KEY double click (unassigned)` info logs. They do not reset either MCU,
+Single and double clicks emit `BOOT_KEY single click (unassigned)`
+or `BOOT_KEY double click (unassigned)` info logs and STATUS completion flashes.
+They do not reset either MCU,
 change power or DAP ownership, open BLE, or clear configuration. Long-hold
 threshold events are each emitted once; no long-hold action runs until release
 has remained stable for 200 ms. A brief release bounce preserves the current
@@ -358,8 +359,28 @@ confirmed initial press debounce and excludes sampled release gaps. Recognition
 precision is limited by polling and task scheduling; thresholds are not hardware
 timing guarantees.
 
+The red STATUS LED (GPIO10, active low) uses these button indications. The
+previous green/red threshold indications are replaced; NET stays off.
+
+| Button condition | STATUS indication |
+| --- | --- |
+| Idle, ordinary press, or waiting for a second press | Off |
+| Single click recognized | One 100 ms flash |
+| Double click recognized | Two 100 ms flashes, separated by 100 ms off |
+| Held for 3 to less than 10 seconds | Slow flash: 500 ms on, 500 ms off |
+| Held for at least 10 seconds | Fast flash: 100 ms on, 100 ms off |
+| Debouncing an edge | Continue the previous pattern |
+| Long-hold release confirmed | Off before the action is posted |
+
+Ordinary presses do not light STATUS. A confirmed new press cancels a pending
+completion flash. Blink timing runs in the existing 20 ms polling task without
+blocking delays; a GPIO write failure is logged and retried on the next poll.
+Only that task writes the button LED outputs, so delayed provisioning events
+cannot restore a stale indication. Flash durations are firmware constants in
+`components/ble_provisioning/button_indicator.c`, not persistent settings.
+
 BLE is disabled during normal operation. Hold `BOOT_KEY` (GPIO0) until the
-green network LED turns on at three seconds, then release it to open a
+red STATUS LED starts flashing slowly at three seconds, then release it to open a
 120-second provisioning window. The button never starts BLE while it remains
 pressed. Repeating the same hold-and-release while the window is active cancels
 the attempt. The BLE service name is the shared
@@ -370,8 +391,8 @@ then the upstream 30-second auto-stop ends BLE and releases its resources.
 Failure leaves the window open for another client attempt; cancel and timeout
 stop BLE and restore the previously committed Wi-Fi configuration.
 
-Continue holding `BOOT_KEY` past the green indication until the red status LED
-turns on at ten seconds. No provisioning or clear action runs while the button
+Continue holding `BOOT_KEY` past the slow flash until the red STATUS LED
+starts flashing quickly at ten seconds. No provisioning or clear action runs while the button
 remains pressed. Release it to turn both indicators off, clear Wi-Fi
 credentials plus the reserved pairing and network-authentication slots, and
 restart without intentionally entering ROM download mode. After restart the

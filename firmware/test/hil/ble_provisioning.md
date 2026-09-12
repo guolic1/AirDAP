@@ -24,7 +24,8 @@ idf.py -p <airdap-programming-port> flash
 ```
 
 Restart and monitor AirDAP. Confirm BLE is not advertising before a button
-press. Hold `BOOT_KEY` until the green network LED turns on at three seconds.
+press. Hold `BOOT_KEY` until the red STATUS LED starts its 500 ms on/off
+slow flash at three seconds. NET must remain off.
 Before releasing it, confirm BLE has not initialized or started advertising
 and an attached debug-shell session remains connected. Release the button and
 confirm:
@@ -72,7 +73,7 @@ python tools/airdap_esp_prov.py \
 
 Confirm the secure session is rejected, the stored Wi-Fi configuration is
 unchanged, and the BLE window remains available. Hold `BOOT_KEY` until the
-green network LED turns on again, then release it. Confirm BLE advertising and
+red STATUS LED starts flashing slowly again, then release it. Confirm BLE advertising and
 the provisioning service stop, the mode no longer reports an active
 provisioning attempt, and the prior Wi-Fi configuration remains in effect.
 
@@ -109,10 +110,10 @@ public fingerprint.
 
 ## 5. Ten-second network reset and GPIO0 release guard
 
-With the device provisioned, hold `BOOT_KEY` continuously. Confirm the green
-network LED turns on at three seconds without initializing BLE or disconnecting
-the debug shell. Continue holding until the green LED turns off and the red
-status LED turns on at ten seconds. Keep it pressed briefly and confirm AirDAP
+With the device provisioned, hold `BOOT_KEY` continuously. Confirm STATUS stays
+off before three seconds, then flashes with 500 ms on/off without initializing
+BLE or disconnecting the debug shell. Continue holding until STATUS changes to
+100 ms on/off at ten seconds. NET must remain off throughout. Keep it pressed briefly and confirm AirDAP
 has not cleared configuration or restarted while GPIO0 remains low. Release the
 button and confirm both LEDs turn off before AirDAP clears configuration and
 restarts normally rather than entering the ROM download mode. The debug shell
@@ -127,3 +128,19 @@ disconnect caused by that restart is expected. After restart:
 Finish by clearing the test Wi-Fi configuration. Record that anyone within BLE
 range who knows the public credential can provision during a physically opened
 window; this test does not establish per-device owner authentication.
+
+## 6. Click feedback
+
+With no provisioning window open, press and release BOOT_KEY briefly. STATUS
+must stay off while pressed and while waiting for a second press; 300 ms after
+release begins, confirm one 100 ms flash and one single-click log. Repeat with
+two short presses separated by less than 300 ms: confirm two 100 ms flashes
+separated by 100 ms off, one double-click log, and no single-click log. Neither
+gesture should start BLE, reset either MCU, or change target power. NET stays
+off. Start another ordinary press during a completion flash and confirm its
+40 ms press confirmation cancels the remaining flash sequence.
+
+Observe long-hold release bounce if suitable test equipment is available: a
+release shorter than 200 ms must retain the current flash phase and not execute
+the action or repeat threshold events. Record measured timing separately from
+host-test results; polling and task scheduling can affect real flash durations.

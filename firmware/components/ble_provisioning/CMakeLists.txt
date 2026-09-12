@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "ble_provisioning.c"
         "provisioning_button.c"
+        "button_indicator.c"
         "sec2_credentials.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "private_include"

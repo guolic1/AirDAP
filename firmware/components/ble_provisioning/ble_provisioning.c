@@ -8,6 +8,7 @@
 #include "airdap_ble_provisioning.h"
 #include "airdap_ble_provisioning_internal.h"
 #include "airdap_board.h"
+#include "airdap_button_indicator.h"
 #include "airdap_device_identity.h"
 #include "airdap_mode_state.h"
 #include "airdap_network_auth.h"
@@ -180,15 +181,6 @@ static void maybe_restart_after_clear(void)
     if (restart_pending && !window_active) {
         restart_pending = false;
         esp_restart();
-    }
-}
-
-static void set_button_indicator(bool status_on, bool network_on)
-{
-    const esp_err_t error = airdap_board_leds_set(status_on, network_on);
-    if (error != ESP_OK) {
-        ESP_LOGE(TAG, "BOOT_KEY indicator update failed: %s",
-            esp_err_to_name(error));
     }
 }
 
@@ -455,13 +447,9 @@ static esp_err_t handle_button_action(
 {
     switch (action) {
     case AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY:
-        set_button_indicator(false, true);
-        return ESP_OK;
     case AIRDAP_PROVISIONING_BUTTON_CLEAR_READY:
-        set_button_indicator(true, false);
         return ESP_OK;
     case AIRDAP_PROVISIONING_BUTTON_TOGGLE:
-        set_button_indicator(false, false);
         if (window_active) {
             request_window_stop(window_outcome == WINDOW_OUTCOME_SUCCESS
                 ? WINDOW_OUTCOME_SUCCESS
@@ -470,7 +458,6 @@ static esp_err_t handle_button_action(
         }
         return start_window();
     case AIRDAP_PROVISIONING_BUTTON_CLEAR: {
-        set_button_indicator(false, false);
         const esp_err_t pairing_error = set_pairing_window_active(false);
         if (pairing_error != ESP_OK) {
             request_window_stop(WINDOW_OUTCOME_CLEAR_FAILED);
@@ -550,29 +537,45 @@ static void button_task(void *argument)
 {
     (void) argument;
     airdap_provisioning_button_t button;
+    airdap_button_indicator_t indicator = {0};
+    bool indicator_valid = false;
+    bool last_status_on = false;
     airdap_provisioning_button_init(&button);
     for (;;) {
+        airdap_provisioning_button_action_t action = AIRDAP_PROVISIONING_BUTTON_NONE;
         bool pressed = false;
         const esp_err_t error = airdap_boot_key_get_pressed(&pressed);
         if (error != ESP_OK) {
             ESP_LOGE(TAG, "BOOT_KEY read failed: %s", esp_err_to_name(error));
         } else {
-            const airdap_provisioning_button_action_t action =
-                airdap_provisioning_button_step(
-                    &button,
-                    pressed,
-                    BUTTON_POLL_MS);
-            if (action != AIRDAP_PROVISIONING_BUTTON_NONE) {
-                const esp_err_t post_error = esp_event_post(
-                    AIRDAP_PROVISIONING_INTERNAL_EVENT,
-                    action,
-                    NULL,
-                    0U,
-                    portMAX_DELAY);
-                if (post_error != ESP_OK) {
-                    ESP_LOGE(TAG, "BOOT_KEY event lost: %s",
-                        esp_err_to_name(post_error));
-                }
+            action = airdap_provisioning_button_step(
+                &button,
+                pressed,
+                BUTTON_POLL_MS);
+        }
+        airdap_button_indicator_step(&indicator, &button, action, BUTTON_POLL_MS);
+        /* One task owns both LED outputs; event-loop actions cannot race the
+         * pattern or leave the old provisioning indication latched. */
+        if (!indicator_valid || last_status_on != indicator.status_on) {
+            const esp_err_t led_error = airdap_board_leds_set(indicator.status_on, false);
+            indicator_valid = led_error == ESP_OK;
+            if (indicator_valid) {
+                last_status_on = indicator.status_on;
+            } else {
+                ESP_LOGE(TAG, "BOOT_KEY indicator update failed: %s",
+                    esp_err_to_name(led_error));
+            }
+        }
+        if (action != AIRDAP_PROVISIONING_BUTTON_NONE) {
+            const esp_err_t post_error = esp_event_post(
+                AIRDAP_PROVISIONING_INTERNAL_EVENT,
+                action,
+                NULL,
+                0U,
+                portMAX_DELAY);
+            if (post_error != ESP_OK) {
+                ESP_LOGE(TAG, "BOOT_KEY event lost: %s",
+                    esp_err_to_name(post_error));
             }
         }
         vTaskDelay(pdMS_TO_TICKS(BUTTON_POLL_MS));
