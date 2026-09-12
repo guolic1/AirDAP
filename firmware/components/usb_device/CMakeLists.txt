@@ -7,6 +7,7 @@ set(usb_device_sources
 set(usb_device_private_requires
     app_update
     board
+    ble_provisioning
     button_config
     config_store
     dap_ownership
@@ -31,7 +32,6 @@ set(usb_device_private_requires
 )
 
 if(CONFIG_AIRDAP_DEBUG_SHELL)
-    list(APPEND usb_device_private_requires ble_provisioning)
     if(CONFIG_TINYUSB_VENDOR_COUNT LESS 2)
         message(FATAL_ERROR
             "CONFIG_AIRDAP_DEBUG_SHELL requires CONFIG_TINYUSB_VENDOR_COUNT=2")
