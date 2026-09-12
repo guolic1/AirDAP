@@ -102,6 +102,8 @@ airdap_target_uart_result_t airdap_target_uart_session_read(
     size_t capacity,
     size_t *received);
 
+/* NETWORK writes accept only immediately enqueueable bytes; OK with written=0
+ * means retry later. USB retains its existing buffered driver behavior. */
 airdap_target_uart_result_t airdap_target_uart_session_write(
     airdap_target_uart_transport_t transport,
     airdap_target_uart_session_id_t session,
