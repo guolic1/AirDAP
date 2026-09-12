@@ -326,6 +326,25 @@ static void test_led_control_accounts_for_active_low_wiring(void)
     assert(event_count == 1U);
 }
 
+static void test_reset_state_tracks_only_successful_gpio_commands(void)
+{
+    reset_fake_gpio();
+    assert(airdap_target_reset_set_asserted(true) == ESP_OK);
+    assert(airdap_target_reset_is_asserted());
+    fail_at_call = event_count;
+    assert(airdap_target_reset_set_asserted(false) == ESP_FAIL);
+    assert(airdap_target_reset_is_asserted());
+    fail_at_call = SIZE_MAX;
+    assert(airdap_target_reset_set_asserted(false) == ESP_OK);
+    assert(!airdap_target_reset_is_asserted());
+
+    reset_fake_gpio();
+    assert(airdap_target_reset_set_asserted(true) == ESP_OK);
+    reset_fake_gpio();
+    assert(airdap_board_init_safe() == ESP_OK);
+    assert(!airdap_target_reset_is_asserted());
+}
+
 int main(void)
 {
     test_safe_gpio_state();
@@ -334,6 +353,7 @@ int main(void)
     test_target_power_control_uses_open_drain_release_levels();
     test_target_power_active_reads_shared_status_net();
     test_target_reset_accounts_for_inverting_transistor();
+    test_reset_state_tracks_only_successful_gpio_commands();
     test_led_control_accounts_for_active_low_wiring();
     test_boot_key_combines_active_low_and_simulated_levels();
 

@@ -141,7 +141,8 @@ airdap_dap_ownership_result_t airdap_dap_ownership_acquire(
     if (state == OWNERSHIP_STATE_SUSPENDED) {
         return AIRDAP_DAP_OWNERSHIP_BUSY;
     }
-    if (state != AIRDAP_DAP_OWNER_NONE) {
+    if (state != AIRDAP_DAP_OWNER_NONE ||
+        (expected & OWNERSHIP_CONTROL_ACTIVE) != 0U) {
         return AIRDAP_DAP_OWNERSHIP_BUSY;
     }
 
@@ -236,6 +237,38 @@ airdap_dap_ownership_result_t airdap_dap_ownership_operation_begin(
     return AIRDAP_DAP_OWNERSHIP_OK;
 }
 
+airdap_dap_ownership_result_t airdap_dap_ownership_control_begin(
+    airdap_dap_owner_t owner,
+    airdap_dap_ownership_operation_t *operation)
+{
+    if (!is_owner((unsigned int) owner) || operation == NULL) {
+        return AIRDAP_DAP_OWNERSHIP_INVALID_ARGUMENT;
+    }
+    if (operation->active) {
+        return AIRDAP_DAP_OWNERSHIP_INVALID_STATE;
+    }
+    unsigned int current = atomic_load(&ownership_control);
+    const unsigned int state = control_state(current);
+    if (state == OWNERSHIP_STATE_OFFLINE) {
+        return AIRDAP_DAP_OWNERSHIP_OFFLINE;
+    }
+    if (state == OWNERSHIP_STATE_UNINITIALIZED) {
+        return AIRDAP_DAP_OWNERSHIP_INVALID_STATE;
+    }
+    if ((state != AIRDAP_DAP_OWNER_NONE && state != (unsigned int) owner) ||
+        (current & OWNERSHIP_CONTROL_ACTIVE) != 0U) {
+        return AIRDAP_DAP_OWNERSHIP_BUSY;
+    }
+    if (!atomic_compare_exchange_strong(
+            &ownership_control, &current, current | OWNERSHIP_CONTROL_ACTIVE)) {
+        return AIRDAP_DAP_OWNERSHIP_BUSY;
+    }
+    operation->owner = (airdap_dap_owner_t) state;
+    operation->generation = control_generation(current);
+    operation->active = true;
+    return AIRDAP_DAP_OWNERSHIP_OK;
+}
+
 void airdap_dap_ownership_operation_end(
     airdap_dap_ownership_operation_t *operation)
 {
@@ -259,7 +292,8 @@ airdap_dap_ownership_result_t airdap_dap_ownership_revoke(void)
 {
     unsigned int current = atomic_load(&ownership_control);
     const unsigned int state = control_state(current);
-    if (state == AIRDAP_DAP_OWNER_NONE) {
+    if (state == AIRDAP_DAP_OWNER_NONE &&
+        (current & OWNERSHIP_CONTROL_ACTIVE) == 0U) {
         return AIRDAP_DAP_OWNERSHIP_OK;
     }
     if (state == OWNERSHIP_STATE_OFFLINE) {

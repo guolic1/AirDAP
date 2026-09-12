@@ -19,6 +19,7 @@
 #include "airdap_frame.h"
 #include "airdap_mode_state.h"
 #include "airdap_network_auth.h"
+#include "airdap_network_control.h"
 #include "airdap_network_dap.h"
 #include "airdap_network_dap_internal.h"
 #include "airdap_network_uart.h"
@@ -1071,23 +1072,34 @@ static void run_connection(network_connection_t *connection)
             break;
 
         case AIRDAP_FRAME_TYPE_CONTROL_REQUEST: {
-            if (!connection->uart) {
-                if (!send_error(connection, &request, AIRDAP_FRAME_ERROR_UNSUPPORTED_TYPE)) return;
+            if (!authenticated && !connection->uart) {
+                if (!send_error(connection, &request,
+                        AIRDAP_FRAME_ERROR_UNAUTHENTICATED)) {
+                    return;
+                }
                 break;
             }
             uint8_t response[AIRDAP_NETWORK_UART_MAX_RESPONSE];
             size_t response_size = 0U;
-            const airdap_frame_error_code_t error = airdap_network_uart_dispatch(
-                connection->auth_connection, atomic_load(&connection->auth_session_id),
-                atomic_load(&connection->uart_session), payload, request.payload_length,
-                response, sizeof(response), &response_size);
+            const airdap_frame_error_code_t error = connection->uart
+                ? airdap_network_uart_dispatch(
+                    connection->auth_connection,
+                    atomic_load(&connection->auth_session_id),
+                    atomic_load(&connection->uart_session), payload,
+                    request.payload_length, response, sizeof(response), &response_size)
+                : airdap_network_control_dispatch(
+                    connection->auth_connection,
+                    atomic_load(&connection->auth_session_id),
+                    payload, request.payload_length, response, &response_size);
             if (error != AIRDAP_FRAME_ERROR_NONE) {
                 if (!send_error(connection, &request, error) ||
-                    error == AIRDAP_FRAME_ERROR_UNAUTHENTICATED) return;
-            } else {
-                if (!validate_bound_session(connection)) return;
-                if (!send_frame(connection, &request, AIRDAP_FRAME_TYPE_CONTROL_RESPONSE,
-                        response, response_size)) return;
+                    error == AIRDAP_FRAME_ERROR_UNAUTHENTICATED) {
+                    return;
+                }
+            } else if (!validate_bound_session(connection) ||
+                !send_frame(connection, &request,
+                    AIRDAP_FRAME_TYPE_CONTROL_RESPONSE, response, response_size)) {
+                return;
             }
             break;
         }

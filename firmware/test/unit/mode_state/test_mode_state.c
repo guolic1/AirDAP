@@ -15,6 +15,40 @@ static bool attach_during_operation_begin;
 static bool wifi_disconnect_during_acquire;
 static bool wifi_disconnect_during_operation_begin;
 static bool operation_active;
+static unsigned shell_changes_during_control_begin;
+
+airdap_dap_ownership_result_t airdap_dap_ownership_control_begin(
+    airdap_dap_owner_t owner,
+    airdap_dap_ownership_operation_t *operation)
+{
+    assert(owner == AIRDAP_DAP_OWNER_NETWORK);
+    if (operation_active) {
+        return AIRDAP_DAP_OWNERSHIP_BUSY;
+    }
+    operation_active = true;
+    operation->active = true;
+    operation->owner = current_owner;
+    operation->generation = 1U;
+    if (shell_changes_during_control_begin != 0U) {
+        assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_DEBUG_SHELL_STARTED) ==
+            AIRDAP_MODE_STATE_OK);
+        if (shell_changes_during_control_begin == 2U) {
+            assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_DEBUG_SHELL_ENDED) ==
+                AIRDAP_MODE_STATE_OK);
+        }
+    }
+    if (attach_during_operation_begin) {
+        attach_during_operation_begin = false;
+        assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED) ==
+            AIRDAP_MODE_STATE_OK);
+    }
+    if (wifi_disconnect_during_operation_begin) {
+        wifi_disconnect_during_operation_begin = false;
+        assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_WIFI_DISCONNECTED) ==
+            AIRDAP_MODE_STATE_OK);
+    }
+    return AIRDAP_DAP_OWNERSHIP_OK;
+}
 
 airdap_dap_owner_t airdap_dap_ownership_current(void)
 {
@@ -136,6 +170,7 @@ static void reset_state(void)
     wifi_disconnect_during_operation_begin = false;
     operation_active = false;
     airdap_mode_state_init();
+    shell_changes_during_control_begin = 0U;
 }
 
 static void test_initial_state_and_authentication_boundary(void)
@@ -410,6 +445,63 @@ static void test_invalid_requests_are_rejected(void)
         &operation) == AIRDAP_MODE_DAP_INVALID_ARGUMENT);
 }
 
+static void test_control_reservation_rechecks_mode_stamp(void)
+{
+    for (unsigned transition = 0U; transition < 2U; ++transition) {
+        reset_state();
+        assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_WIFI_CONNECTING) ==
+            AIRDAP_MODE_STATE_OK);
+        assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_WIFI_ONLINE) ==
+            AIRDAP_MODE_STATE_OK);
+        airdap_dap_ownership_operation_t operation = {0};
+        assert(airdap_mode_state_control_operation_begin(false, &operation) ==
+            AIRDAP_MODE_DAP_UNAUTHENTICATED);
+        assert(!operation_active);
+        attach_during_operation_begin = transition == 0U;
+        wifi_disconnect_during_operation_begin = transition == 1U;
+        assert(airdap_mode_state_control_operation_begin(true, &operation) ==
+            (transition == 0U ? AIRDAP_MODE_DAP_BUSY : AIRDAP_MODE_DAP_OFFLINE));
+        assert(!operation.active && !operation_active);
+        assert(operation_end_calls == 1U);
+        assert(acquire_calls == 0U);
+    }
+}
+
+static void test_control_allows_idle_usb_and_tracks_shell_sessions(void)
+{
+    reset_state();
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED) ==
+        AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_WIFI_CONNECTING) ==
+        AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_WIFI_ONLINE) ==
+        AIRDAP_MODE_STATE_OK);
+    airdap_dap_ownership_operation_t operation = {0};
+    assert(airdap_mode_state_control_operation_begin(true, &operation) ==
+        AIRDAP_MODE_DAP_ALLOWED);
+    airdap_dap_ownership_operation_end(&operation);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_DEBUG_SHELL_STARTED) ==
+        AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_control_operation_begin(false, &operation) ==
+        AIRDAP_MODE_DAP_UNAUTHENTICATED);
+    assert(airdap_mode_state_control_operation_begin(true, &operation) ==
+        AIRDAP_MODE_DAP_BUSY);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_DEBUG_SHELL_ENDED) ==
+        AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_control_operation_begin(true, &operation) ==
+        AIRDAP_MODE_DAP_ALLOWED);
+    airdap_dap_ownership_operation_end(&operation);
+    for (unsigned changes = 1U; changes <= 2U; ++changes) {
+        shell_changes_during_control_begin = changes;
+        assert(airdap_mode_state_control_operation_begin(true, &operation) ==
+            AIRDAP_MODE_DAP_BUSY);
+        assert(!operation.active && !operation_active);
+        assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_DEBUG_SHELL_ENDED) ==
+            AIRDAP_MODE_STATE_OK);
+    }
+    assert(acquire_calls == 0U);
+}
+
 int main(void)
 {
     test_initial_state_and_authentication_boundary();
@@ -421,6 +513,8 @@ int main(void)
     test_wifi_changes_do_not_rollback_wired_transactions();
     test_ota_blocks_new_debug_owners_until_reset();
     test_invalid_requests_are_rejected();
+    test_control_reservation_rechecks_mode_stamp();
+    test_control_allows_idle_usb_and_tracks_shell_sessions();
     puts("Mode state tests passed");
     return 0;
 }

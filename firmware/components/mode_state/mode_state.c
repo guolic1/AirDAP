@@ -18,8 +18,12 @@ enum {
     MODE_USB_OTA_EPOCH_MASK = 0xFFU << MODE_USB_OTA_EPOCH_SHIFT,
     MODE_WIFI_EPOCH_SHIFT = 16,
     MODE_WIFI_EPOCH_MASK = 0xFFU << MODE_WIFI_EPOCH_SHIFT,
+    MODE_DEBUG_SHELL_ACTIVE = 1U << 24,
+    MODE_DEBUG_SHELL_EPOCH_SHIFT = 25,
 };
 
+static const unsigned int MODE_DEBUG_SHELL_EPOCH_MASK =
+    0x7FU << MODE_DEBUG_SHELL_EPOCH_SHIFT;
 static atomic_uint mode_control;
 
 static unsigned int replace_field(
@@ -48,7 +52,7 @@ static unsigned int increment_field(
         control,
         mask,
         shift,
-        (field_value(control, mask, shift) + 1U) & 0xFFU);
+        (field_value(control, mask, shift) + 1U) & (mask >> shift));
 }
 
 static airdap_mode_state_result_t next_control(
@@ -78,6 +82,12 @@ static airdap_mode_state_result_t next_control(
         break;
     case AIRDAP_MODE_EVENT_USB_DETACHED:
         *next &= ~MODE_USB_PRESENT;
+        break;
+    case AIRDAP_MODE_EVENT_DEBUG_SHELL_STARTED:
+        *next |= MODE_DEBUG_SHELL_ACTIVE;
+        break;
+    case AIRDAP_MODE_EVENT_DEBUG_SHELL_ENDED:
+        *next &= ~MODE_DEBUG_SHELL_ACTIVE;
         break;
     case AIRDAP_MODE_EVENT_WIFI_STOPPED:
         *next = replace_field(
@@ -194,7 +204,8 @@ static airdap_mode_state_result_t next_control(
 
     if (event == AIRDAP_MODE_EVENT_USB_ATTACHED ||
         event == AIRDAP_MODE_EVENT_USB_DETACHED ||
-        event >= AIRDAP_MODE_EVENT_OTA_STARTED) {
+        (event >= AIRDAP_MODE_EVENT_OTA_STARTED &&
+         event <= AIRDAP_MODE_EVENT_OTA_RESET)) {
         *next = increment_field(
             *next,
             MODE_USB_OTA_EPOCH_MASK,
@@ -205,6 +216,9 @@ static airdap_mode_state_result_t next_control(
             *next,
             MODE_WIFI_EPOCH_MASK,
             MODE_WIFI_EPOCH_SHIFT);
+    } else if (((current ^ *next) & MODE_DEBUG_SHELL_ACTIVE) != 0U) {
+        *next = increment_field(
+            *next, MODE_DEBUG_SHELL_EPOCH_MASK, MODE_DEBUG_SHELL_EPOCH_SHIFT);
     }
     return AIRDAP_MODE_STATE_OK;
 }
@@ -273,7 +287,8 @@ airdap_mode_state_result_t airdap_mode_state_get(
 static airdap_mode_dap_result_t dap_admission_for_control(
     unsigned int control,
     airdap_dap_owner_t requested_owner,
-    bool authenticated)
+    bool authenticated,
+    bool board_control)
 {
     if (requested_owner != AIRDAP_DAP_OWNER_USB &&
         requested_owner != AIRDAP_DAP_OWNER_NETWORK &&
@@ -301,7 +316,9 @@ static airdap_mode_dap_result_t dap_admission_for_control(
         }
         break;
     case AIRDAP_DAP_OWNER_NETWORK:
-        if ((control & MODE_USB_PRESENT) != 0U) {
+        if (board_control
+                ? (control & MODE_DEBUG_SHELL_ACTIVE) != 0U
+                : (control & MODE_USB_PRESENT) != 0U) {
             return AIRDAP_MODE_DAP_BUSY;
         }
         if ((airdap_wifi_state_t) field_value(
@@ -334,7 +351,7 @@ airdap_mode_dap_result_t airdap_mode_state_dap_admission(
     return dap_admission_for_control(
         atomic_load(&mode_control),
         requested_owner,
-        authenticated);
+        authenticated, false);
 }
 
 static airdap_mode_dap_result_t ownership_result(
@@ -383,7 +400,7 @@ airdap_mode_dap_result_t airdap_mode_state_dap_acquire(
     airdap_mode_dap_result_t result = dap_admission_for_control(
         before,
         requested_owner,
-        authenticated);
+        authenticated, false);
     if (result == AIRDAP_MODE_DAP_BUSY &&
         requested_owner == AIRDAP_DAP_OWNER_USB &&
         airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NETWORK) {
@@ -395,7 +412,7 @@ airdap_mode_dap_result_t airdap_mode_state_dap_acquire(
             result = dap_admission_for_control(
                 before,
                 requested_owner,
-                authenticated);
+                authenticated, false);
         } else {
             result = ownership_result(revoke_result);
         }
@@ -426,12 +443,43 @@ airdap_mode_dap_result_t airdap_mode_state_dap_acquire(
         const airdap_mode_dap_result_t latest = dap_admission_for_control(
             after,
             requested_owner,
-            authenticated);
+            authenticated, false);
         return latest == AIRDAP_MODE_DAP_ALLOWED
             ? AIRDAP_MODE_DAP_BUSY
             : latest;
     }
     return result;
+}
+
+airdap_mode_dap_result_t airdap_mode_state_control_operation_begin(
+    bool authenticated,
+    airdap_dap_ownership_operation_t *operation)
+{
+    if (operation == NULL) {
+        return AIRDAP_MODE_DAP_INVALID_ARGUMENT;
+    }
+    const unsigned int before = atomic_load(&mode_control);
+    airdap_mode_dap_result_t result = dap_admission_for_control(
+        before, AIRDAP_DAP_OWNER_NETWORK, authenticated, true);
+    if (result != AIRDAP_MODE_DAP_ALLOWED) {
+        return result;
+    }
+    result = ownership_result(airdap_dap_ownership_control_begin(
+        AIRDAP_DAP_OWNER_NETWORK, operation));
+    if (result != AIRDAP_MODE_DAP_ALLOWED) {
+        return result;
+    }
+    const unsigned int after = atomic_load(&mode_control);
+    if (dap_policy_stamp(before, AIRDAP_DAP_OWNER_NETWORK) !=
+        dap_policy_stamp(after, AIRDAP_DAP_OWNER_NETWORK) ||
+        ((before ^ after) & (MODE_DEBUG_SHELL_ACTIVE |
+                            MODE_DEBUG_SHELL_EPOCH_MASK)) != 0U) {
+        airdap_dap_ownership_operation_end(operation);
+        const airdap_mode_dap_result_t latest = dap_admission_for_control(
+            after, AIRDAP_DAP_OWNER_NETWORK, authenticated, true);
+        return latest == AIRDAP_MODE_DAP_ALLOWED ? AIRDAP_MODE_DAP_BUSY : latest;
+    }
+    return AIRDAP_MODE_DAP_ALLOWED;
 }
 
 airdap_mode_dap_result_t airdap_mode_state_dap_operation_begin(
@@ -448,7 +496,7 @@ airdap_mode_dap_result_t airdap_mode_state_dap_operation_begin(
     airdap_mode_dap_result_t result = dap_admission_for_control(
         before,
         requested_owner,
-        authenticated);
+        authenticated, false);
     if (result != AIRDAP_MODE_DAP_ALLOWED) {
         return result;
     }
@@ -466,7 +514,7 @@ airdap_mode_dap_result_t airdap_mode_state_dap_operation_begin(
         const airdap_mode_dap_result_t latest = dap_admission_for_control(
             after,
             requested_owner,
-            authenticated);
+            authenticated, false);
         return latest == AIRDAP_MODE_DAP_ALLOWED
             ? AIRDAP_MODE_DAP_BUSY
             : latest;

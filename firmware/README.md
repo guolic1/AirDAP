@@ -512,6 +512,52 @@ reports `busy` when USB or NETWORK already owns SWD. NETWORK is used by the
 authenticated DAP listener on TCP 3260; its connection and DAP-session lifecycle
 is observable through the read-only Debug Shell diagnostics below.
 
+## Authenticated target control
+
+TCP 3260 accepts reset/power `CONTROL_REQUEST` frames after TLS, HELLO and
+AUTH. It revalidates the exact logical owner before each board operation;
+expired, revoked, stale and unbound sessions cannot access board I/O. Frame
+session/sequence validation and replay rejection are shared with DAP.
+
+The shared opcode allocation is in `airdap_control.h`: UART uses `0x10`–`0x14`
+on TCP 3261 (P5-T2), while TCP 3260 accepts:
+
+| Operation | Request payload | CONTROL_RESPONSE payload |
+|---|---|---|
+| RESET_SET | `20 asserted` | `20 asserted` |
+| POWER_SET | `21 allowed` | `21 allowed` |
+| POWER_GET | `22` | `22 active` |
+
+Each field shown is one byte; booleans must be exactly `00` or `01`. Successful
+responses echo the request's frame session and sequence. An ERROR response
+contains exactly one big-endian uint16 error code, without an opcode prefix:
+short payload `0001`, unknown opcode `0004`, busy/disallowed target state
+`0020`, unauthenticated `0021`, invalid value/trailing bytes `0023`, and board
+or internal failure `00ff`. Errors consume the accepted request sequence.
+
+An attached but idle USB connection permits authenticated reset/power control.
+An active Debug Shell session, offline Wi-Fi, non-idle OTA, USB/DIAGNOSTIC DAP
+ownership and in-flight physical DAP work block control. The shell tool's
+START/END markers track session occupancy; firmware cannot observe a host merely
+opening a USB handle. Normal shell close releases this gate. NETWORK DAP's
+USB-presence policy is unchanged. POWER_SET also requires no DAP
+owner: issue DAP_Disconnect before changing power permission. Control uses a
+short ownership reservation without acquiring DAP or emitting SWD Line Reset.
+The reservation ends before any TLS output, including on board failure.
+
+RESET_SET latches the commanded state; send `20 00` to release reset explicitly.
+Power permission also remains until changed or board initialization. Closing
+a control-only connection does not itself change GPIOs; the existing DAP-owner
+release still deasserts reset. DAP SWJ_Pins reads the same last successful reset
+command as the board API, not a private transport cache or physical NRST voltage.
+
+POWER_SET `01` only releases GPIO9's open-drain output; `00` pulls it low.
+POWER_GET samples the shared status net without releasing or otherwise changing
+it. Neither a SET acknowledgement nor the sampled bit proves USB selection,
+VTref, full power-cycle sequencing or electrical safety under load. PCB power
+and reset electrical acceptance still requires instruments and the wired HIL
+procedure.
+
 ## Target UART service
 
 UART1 on GPIO17/GPIO18 has one physical RX worker and one active session slot
@@ -869,7 +915,7 @@ The other hardware-independent tests use the same pattern:
 for suite in \
     bootloader_artifact ota_layout setup_env board config_store device_identity voltage_monitor swd_protocol \
     dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame discovery \
-    dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning network_auth network_dap \
+    dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning network_auth network_dap network_control \
     target_uart network_uart usb_uart_bridge usb_descriptors project_version \
     debug_shell_commands debug_shell_diagnostics debug_shell_config_status \
     debug_shell_identity debug_shell_input debug_shell_wifi debug_shell_button \
@@ -897,7 +943,9 @@ session binding, single-owner/token admission, expiry/replay/revocation, the
 non-secret authentication and DAP-listener status snapshots, their concurrent
 getter behavior, aggregate network/session Debug Shell output, the
 Python pairing/TLS-PSK/DAP probe tools, authenticated AirDAP HELLO/AUTH framing,
-DAP dispatch/timeout response routing, revoke/disconnect cleanup, and
+DAP dispatch/timeout response routing, revoke/disconnect cleanup, authenticated
+reset/power framing, fake-board dispatch and error propagation, control/DAP
+operation exclusion, shared commanded reset state, and
 reset-after-release behavior, DAP owner
 transitions and physical-backend release calls, unified
 USB/Wi-Fi/provisioning/OTA mode transitions and DAP admission, CMSIS-DAP and OTA
