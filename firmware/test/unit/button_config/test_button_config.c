@@ -121,7 +121,7 @@ int main(void)
     const uint8_t expected[5] = {0, 1, 2, 0, 3};
     assert(memcmp(commands, expected, 5) == 0 && writes == 0);
     assert(shell("commands") == 0);
-    assert(strcmp(output, "none\ndap-toggle\nprovisioning\nclear-network-restart\ndap-usb\ndap-network\ndap-auto\n") == 0);
+    assert(strcmp(output, "none\ndap-toggle\nprovisioning\nclear-network-restart\ndap-usb\ndap-network\ndap-auto\nrestart\ntarget-reset\nwifi-toggle\ntarget-power-toggle\ntarget-power-cycle\n") == 0);
     assert(shell("bindings") == 0 && strstr(output, "hold6=none") && strstr(output, "dap-route=auto"));
     const char *invalid[] = {"bind single invalid", "bind hold3 none", "bind hold6 none extra", "bind hold6", "commands extra"};
     for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) assert(shell(invalid[i]) == 1);
@@ -152,6 +152,10 @@ int main(void)
     }
     assert(airdap_button_config_defaults() == ESP_OK);
     pthread_t first, second;
+    assert(shell("bind hold6 target-power-cycle") == 0);
+    airdap_button_config_test_reset();
+    assert(airdap_button_config_init() == ESP_OK);
+    assert(airdap_button_config_get(commands) == ESP_OK && commands[3] == AIRDAP_BUTTON_COMMAND_TARGET_POWER_CYCLE);
     airdap_button_gesture_t g1 = AIRDAP_BUTTON_GESTURE_SINGLE, g2 = AIRDAP_BUTTON_GESTURE_HOLD6;
     assert(pthread_create(&first, NULL, set_binding, &g1) == 0);
     assert(pthread_create(&second, NULL, set_binding, &g2) == 0);
@@ -161,7 +165,7 @@ int main(void)
     assert(airdap_button_config_get(commands) == ESP_OK && commands[0] == 4 && commands[3] == 4);
     assert(airdap_button_config_get(NULL) == ESP_ERR_INVALID_ARG);
     assert(airdap_button_config_set((airdap_button_gesture_t) 5, AIRDAP_BUTTON_COMMAND_NONE) == ESP_ERR_INVALID_ARG);
-    assert(airdap_button_config_set(g1, (airdap_button_command_t) 7) == ESP_ERR_INVALID_ARG);
+    assert(airdap_button_config_set(g1, AIRDAP_BUTTON_COMMAND_COUNT) == ESP_ERR_INVALID_ARG);
     airdap_button_config_test_reset();
     durable[0] = 99;
     assert(airdap_button_config_init() == ESP_ERR_INVALID_VERSION);

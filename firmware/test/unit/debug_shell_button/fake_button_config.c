@@ -27,7 +27,8 @@ esp_err_t airdap_button_config_defaults(void)
 }
 const char *airdap_button_command_name(airdap_button_command_t command)
 {
-    const char *names[] = {"none", "dap-toggle", "provisioning", "clear-network-restart", "dap-usb", "dap-network", "dap-auto"};
+    const char *names[] = {"none", "dap-toggle", "provisioning", "clear-network-restart", "dap-usb", "dap-network", "dap-auto",
+        "restart", "target-reset", "wifi-toggle", "target-power-toggle", "target-power-cycle"};
     return command >= 0 && command < AIRDAP_BUTTON_COMMAND_COUNT ? names[command] : NULL;
 }
 const char *airdap_button_gesture_name(airdap_button_gesture_t gesture)

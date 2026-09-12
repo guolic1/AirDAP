@@ -401,7 +401,7 @@ The default command bindings are:
 
 USB debug shell supports `button commands`, `button bindings`,
 `button bind <gesture> <command>`, and `button defaults`. Each bind/defaults
-operation saves immediately, with no separate save command. All seven supported
+operation saves immediately, with no separate save command. All twelve supported
 commands may be bound to any of the five gestures:
 
 | Command | Behavior |
@@ -413,11 +413,35 @@ commands may be bound to any of the five gestures:
 | `dap-auto` | Restore USB-when-attached, NETWORK-otherwise policy |
 | `provisioning` | Open or cancel the BLE provisioning window |
 | `clear-network-restart` | Clear Wi-Fi, pairing and network-auth configuration, then restart AirDAP |
+| `restart` | Restart AirDAP, preserving configuration |
+| `target-reset` | Assert target reset for 100 ms, then release |
+| `wifi-toggle` | Disable/enable Wi-Fi without clearing saved credentials |
+| `target-power-toggle` | Toggle AirDAP's last successfully commanded target power permission |
+| `target-power-cycle` | Disable target power permission for 500 ms, then allow power |
 
 For example, `button bind hold6 dap-auto` replaces the six-second no-op.
 `button bindings` prints all bindings and the current volatile DAP route.
-Commands are a fixed allowlist, not arbitrary shell text. Target reset, power
-cycling, and firmware flashing are not implemented button commands.
+Commands are a fixed allowlist, not arbitrary shell text. Firmware flashing is
+not a button command. The default five bindings remain unchanged.
+
+The five device commands added above reject active provisioning, any DAP owner,
+in-flight physical control, and OTA. USB CDC/debug shell may remain connected.
+Reset and power-cycle use a timer, holding the ownership reservation across the
+entire pulse; they do not block the button polling task or default event loop.
+Their initial success means the pulse started; completion or restoration failure
+is logged separately. An already asserted target reset rejects `target-reset`.
+Power-cycle ends with permission enabled, including when it started disabled.
+If timer startup fails, the previous output command is restored; any restoration
+failure is reported. Power permission is tracked separately from the externally
+driven ST input. These operations do not guarantee a target with independent
+power loses voltage, nor that 500 ms suffices to discharge a particular target.
+
+Wi-Fi radio selection is volatile and resets to enabled after reboot. Turning it
+off cancels retries and ignores late connection events; saved configuration can
+still be edited over USB. Turning it on reconnects using the latest saved
+configuration. Enable Wi-Fi before starting provisioning. `network-info` reports
+`radio_enabled`; target power permission also returns to the usual released
+open-drain startup state on reboot.
 
 Bindings use a separate versioned six-byte NVS record (`airdap_btn/bindings`),
 without changing the existing network configuration record. Missing bindings
@@ -432,7 +456,8 @@ enumeration and CDC/debug-shell interfaces, and never bypasses network authentic
 
 The binding snapshot is taken at the start of a gesture. Changes during a press
 apply to the next gesture. Clear/restart additionally waits for 200 ms of stable
-release even when mapped to a double click; a new press or read failure during
+release even when mapped to a double click; `restart` uses the same guard and
+rechecks the key before restarting. A new press or read failure during
 that extra wait cancels the pending clear. Flash timing remains gesture-based.
 
 With the default bindings, BLE is disabled during normal operation. Hold `BOOT_KEY` (GPIO0) until the

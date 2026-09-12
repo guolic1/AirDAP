@@ -24,6 +24,7 @@ static const uint8_t defaults[AIRDAP_BUTTON_GESTURE_COUNT] = {
 static const char *const command_names[] = {
     "none", "dap-toggle", "provisioning", "clear-network-restart",
     "dap-usb", "dap-network", "dap-auto",
+    "restart", "target-reset", "wifi-toggle", "target-power-toggle", "target-power-cycle",
 };
 static const char *const gesture_names[] = {"single", "double", "hold2", "hold6", "hold10"};
 _Static_assert(AIRDAP_BUTTON_COMMAND_COUNT <= 16, "bindings use four bits per command");

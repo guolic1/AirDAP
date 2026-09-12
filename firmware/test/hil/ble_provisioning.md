@@ -152,7 +152,7 @@ host-test results; polling and task scheduling can affect real flash durations.
 
 ## 7. Persistent bindings and DAP selection
 
-Record `button commands` (seven entries) and `button bindings` (five gestures).
+Record `button commands` (twelve entries) and `button bindings` (five gestures).
 Set `button bind hold6 dap-auto`, restart and confirm the binding survives while
 `dap-route=auto`. Restore the defaults and confirm that this change survives a
 second restart. Invalid gestures/commands or trailing tokens must fail without
@@ -171,3 +171,29 @@ USB detach/reattach until another command or reboot changes the selection.
 On a recoverable board only, map double-click to `clear-network-restart` and
 observe that restart cannot occur before 200 ms of stable release. A new press
 during that guard must cancel the pending clear. Restore defaults afterward.
+
+## 8. Optional device command bindings
+
+Obtain exclusive access to the identified AirDAP and target before these checks.
+Record the current bindings and test each new command by binding it to `hold6`.
+Restore the bindings after acceptance. Do not infer these results from host tests.
+
+- `restart`: confirm a normal AirDAP reboot with network and button configuration
+  intact. Also map to double-click and check the 200 ms release guard; pressing
+  again during the guard must cancel restart.
+- `target-reset`: scope target nRESET for a 100 ms low pulse and release. Confirm
+  AirDAP remains running and SWD is not acquired. Measure scheduling tolerance.
+- `wifi-toggle`: disable the radio, confirm no reconnect, and retain USB shell.
+  Enable it and confirm reconnection with the saved credentials. Repeat with no
+  saved SSID and after editing credentials while off. Reboot restores enabled.
+- `target-power-toggle`: scope GPIO9 and target voltage while toggling permission.
+  Confirm only open-drain pull-low/release behavior, with no push-pull high.
+  External ST low must not change which permission the next press selects.
+- `target-power-cycle`: scope the 500 ms disable interval followed by release.
+  Verify the actual target reset/power behavior for its load and power source;
+  an independently powered target may remain on.
+
+With DAP connected, OTA active, or provisioning active, verify each new command
+is rejected without changing the target, radio or AirDAP state. During a reset
+or power-cycle pulse, DAP acquisition and OTA writes must remain blocked. Repeat
+with USB debug shell disabled to confirm physical button operation is independent.

@@ -9,6 +9,7 @@
 #include "airdap_ble_provisioning_internal.h"
 #include "airdap_board.h"
 #include "airdap_button_config.h"
+#include "airdap_button_device_commands.h"
 #include "airdap_button_indicator.h"
 #include "airdap_device_identity.h"
 #include "airdap_mode_state.h"
@@ -445,7 +446,15 @@ static void handle_network_event(int32_t event_id, void *event_data)
 
 static esp_err_t execute_button_command(airdap_button_command_t command)
 {
+    if (airdap_button_device_command_busy()) return ESP_ERR_INVALID_STATE;
     switch (command) {
+    case AIRDAP_BUTTON_COMMAND_RESTART:
+    case AIRDAP_BUTTON_COMMAND_TARGET_RESET:
+    case AIRDAP_BUTTON_COMMAND_WIFI_TOGGLE:
+    case AIRDAP_BUTTON_COMMAND_TARGET_POWER_TOGGLE:
+    case AIRDAP_BUTTON_COMMAND_TARGET_POWER_CYCLE:
+        if (window_active) return ESP_ERR_INVALID_STATE;
+        return airdap_button_device_command_execute(command);
     case AIRDAP_BUTTON_COMMAND_NONE:
         return ESP_OK;
     case AIRDAP_BUTTON_COMMAND_DAP_TOGGLE:
@@ -619,7 +628,8 @@ static void button_task(void *argument)
         }
         const int recognized_gesture = gesture_for_action(action);
         if (recognized_gesture >= 0 &&
-            commands[recognized_gesture] == AIRDAP_BUTTON_COMMAND_CLEAR_NETWORK_RESTART &&
+            (commands[recognized_gesture] == AIRDAP_BUTTON_COMMAND_CLEAR_NETWORK_RESTART ||
+             commands[recognized_gesture] == AIRDAP_BUTTON_COMMAND_RESTART) &&
             stable_release_ms < 200U) {
             pending_clear = action;
             action = AIRDAP_PROVISIONING_BUTTON_NONE;
