@@ -300,6 +300,10 @@ class AirDapShellTests(unittest.TestCase):
             },
         ), mock.patch.object(
             airdap_shell,
+            "_windows_usb_backend",
+            return_value=mock.sentinel.usb_backend,
+        ), mock.patch.object(
+            airdap_shell,
             "select_airdap_device",
             return_value=device,
         ), mock.patch.object(
@@ -330,6 +334,12 @@ class AirDapShellTests(unittest.TestCase):
             )
 
         self.assertEqual(result, 0)
+        usb_core.find.assert_called_once_with(
+            find_all=True,
+            idVendor=airdap_shell.USB_VID,
+            idProduct=airdap_shell.USB_PID,
+            backend=mock.sentinel.usb_backend,
+        )
         run_sequence.assert_called_once_with(
             transport,
             ["button simulate hold2", "button status"],
