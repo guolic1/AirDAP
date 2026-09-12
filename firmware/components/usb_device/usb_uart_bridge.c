@@ -172,6 +172,24 @@ static void cdc_receive_callback(int interface_number, cdcacm_event_t *event)
     } while (received == sizeof(data));
 }
 
+static void configure_usb_uart_session(void)
+{
+    const airdap_target_uart_session_id_t session =
+        open_usb_uart_session();
+    if (session == 0U) {
+        return;
+    }
+    const airdap_target_uart_result_t acquire_result =
+        acquire_usb_uart_tx(session);
+    if (acquire_result != AIRDAP_TARGET_UART_OK &&
+        acquire_result != AIRDAP_TARGET_UART_ALREADY_OWNER) {
+        ESP_LOGW(TAG, "Target UART TX busy for CDC line coding: %u",
+            (unsigned int) acquire_result);
+        return;
+    }
+    apply_line_coding(session);
+}
+
 static void cdc_line_state_callback(
     int interface_number,
     cdcacm_event_t *event)
@@ -181,7 +199,7 @@ static void cdc_line_state_callback(
         return;
     }
     if (event->line_state_changed_data.dtr) {
-        (void) open_usb_uart_session();
+        configure_usb_uart_session();
     } else {
         close_usb_uart_session();
     }
@@ -199,20 +217,11 @@ static void cdc_line_coding_callback(
     current_line_coding =
         *event->line_coding_changed_data.p_line_coding;
 
-    const airdap_target_uart_session_id_t session =
-        open_usb_uart_session();
-    if (session == 0U) {
-        return;
+    /* Hosts may configure CDC during enumeration with DTR low. Cache that
+     * request until open so it cannot retain TX ownership without a close. */
+    if (tud_cdc_n_connected(0U)) {
+        configure_usb_uart_session();
     }
-    const airdap_target_uart_result_t acquire_result =
-        acquire_usb_uart_tx(session);
-    if (acquire_result != AIRDAP_TARGET_UART_OK &&
-        acquire_result != AIRDAP_TARGET_UART_ALREADY_OWNER) {
-        ESP_LOGW(TAG, "Target UART TX busy for CDC line coding: %u",
-            (unsigned int) acquire_result);
-        return;
-    }
-    apply_line_coding(session);
 }
 
 bool airdap_usb_uart_bridge_process_once(void)
