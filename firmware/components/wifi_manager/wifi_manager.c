@@ -43,6 +43,7 @@ static esp_event_handler_instance_t internal_event_instance;
 static bool event_loop_created;
 static bool wifi_initialized;
 static bool started;
+static bool radio_enabled;
 static bool link_active;
 static bool connection_in_progress;
 static bool reconfiguration_pending;
@@ -52,6 +53,7 @@ static uint8_t last_disconnect_reason;
 typedef struct {
     atomic_uint sequence;
     atomic_bool started;
+    atomic_bool radio_enabled;
     atomic_bool has_configuration;
     atomic_bool link_connected;
     atomic_bool provisioning_suspended;
@@ -88,6 +90,7 @@ static void publish_diagnostic_state(void)
         &diagnostic_state.started,
         started,
         memory_order_relaxed);
+    atomic_store_explicit(&diagnostic_state.radio_enabled, radio_enabled, memory_order_relaxed);
     atomic_store_explicit(
         &diagnostic_state.has_configuration,
         state_machine.has_configuration,
@@ -355,6 +358,7 @@ static void handle_state_event(airdap_wifi_sm_event_t event)
 
 static void handle_wifi_event(int32_t event_id, void *event_data)
 {
+    if (!radio_enabled) return;
     if (provisioning_suspended) {
         if (event_id == WIFI_EVENT_STA_CONNECTED) {
             connection_in_progress = false;
@@ -424,6 +428,11 @@ static void handle_configuration_changed(void)
         handle_state_event(AIRDAP_WIFI_SM_EVENT_CONFIGURATION_CLEARED);
         return;
     }
+    if (!radio_enabled) {
+        airdap_wifi_state_machine_init(&state_machine, found);
+        publish_diagnostic_state();
+        return;
+    }
     handle_state_event(found
         ? AIRDAP_WIFI_SM_EVENT_CONFIGURATION_UPDATED
         : AIRDAP_WIFI_SM_EVENT_CONFIGURATION_CLEARED);
@@ -439,6 +448,7 @@ static void event_handler(
     if (event_base == WIFI_EVENT) {
         handle_wifi_event(event_id, event_data);
     } else if (event_base == IP_EVENT) {
+        if (!radio_enabled) return;
         if (provisioning_suspended) {
             if (event_id == IP_EVENT_STA_GOT_IP) {
                 publish_state(AIRDAP_WIFI_SM_ONLINE);
@@ -457,6 +467,7 @@ static void event_handler(
             return;
         }
         if (event_id == AIRDAP_WIFI_INTERNAL_RETRY) {
+            if (!radio_enabled) return;
             handle_state_event(AIRDAP_WIFI_SM_EVENT_RETRY_EXPIRED);
         } else if (event_id == AIRDAP_WIFI_INTERNAL_CONFIGURATION_CHANGED) {
             handle_configuration_changed();
@@ -521,6 +532,7 @@ static void cleanup_failed_start(void)
         event_loop_created = false;
     }
     started = false;
+    radio_enabled = false;
     link_active = false;
     connection_in_progress = false;
     reconfiguration_pending = false;
@@ -612,12 +624,43 @@ esp_err_t airdap_wifi_manager_start(void)
     }
 
     started = true;
+    radio_enabled = true;
     publish_diagnostic_state();
     error = esp_wifi_start();
     if (error != ESP_OK) {
         cleanup_failed_start();
         return error;
     }
+    return ESP_OK;
+}
+
+esp_err_t airdap_wifi_manager_toggle(void)
+{
+    if (!started || provisioning_suspended) return ESP_ERR_INVALID_STATE;
+    bool found = state_machine.has_configuration;
+    esp_err_t error;
+    if (radio_enabled) {
+        error = esp_wifi_stop();
+        if (error != ESP_OK) return error;
+    } else {
+        airdap_wifi_credentials_t credentials;
+        error = load_stored_credentials(&credentials, &found);
+        airdap_wifi_credentials_clear(&credentials);
+        if (error == ESP_OK && found) error = configure_station_from_store();
+        if (error != ESP_OK) return error;
+        error = esp_wifi_start();
+        if (error != ESP_OK) return error;
+    }
+    radio_enabled = !radio_enabled;
+    cancel_retry();
+    link_active = false;
+    connection_in_progress = false;
+    reconfiguration_pending = false;
+    last_disconnect_reason = 0U;
+    airdap_wifi_state_machine_init(&state_machine, found);
+    publish_state(AIRDAP_WIFI_SM_STOPPED);
+    publish_diagnostic_state();
+    ESP_LOGI(TAG, "Wi-Fi radio %s (volatile)", radio_enabled ? "enabled" : "disabled");
     return ESP_OK;
 }
 
@@ -649,6 +692,7 @@ esp_err_t airdap_wifi_manager_get_info(airdap_wifi_manager_info_t *info)
         info->started = atomic_load_explicit(
             &diagnostic_state.started,
             memory_order_relaxed);
+        info->radio_enabled = atomic_load_explicit(&diagnostic_state.radio_enabled, memory_order_relaxed);
         info->has_configuration = atomic_load_explicit(
             &diagnostic_state.has_configuration,
             memory_order_relaxed);
@@ -768,7 +812,7 @@ static esp_err_t clear_driver_persistent_configuration(void)
 
 esp_err_t airdap_wifi_manager_prepare_provisioning(void)
 {
-    if (!started || provisioning_suspended) {
+    if (!started || !radio_enabled || provisioning_suspended) {
         return ESP_ERR_INVALID_STATE;
     }
     const esp_err_t error = esp_wifi_set_storage(WIFI_STORAGE_RAM);

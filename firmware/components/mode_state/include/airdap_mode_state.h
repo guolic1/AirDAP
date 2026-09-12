@@ -72,6 +72,18 @@ typedef struct {
     airdap_dap_owner_t dap_owner;
 } airdap_mode_snapshot_t;
 
+typedef enum {
+    AIRDAP_DAP_ROUTE_AUTO = 0,
+    AIRDAP_DAP_ROUTE_USB,
+    AIRDAP_DAP_ROUTE_NETWORK,
+    AIRDAP_DAP_ROUTE_TOGGLE,
+} airdap_dap_route_t;
+
+/* Volatile selection; AUTO uses USB when attached, NETWORK otherwise.
+ * Selection requires an idle owner and no OTA. Physical USB state is preserved. */
+airdap_mode_dap_result_t airdap_mode_state_set_dap_route(airdap_dap_route_t route);
+airdap_dap_route_t airdap_mode_state_get_dap_route(void);
+
 void airdap_mode_state_init(void);
 
 airdap_mode_state_result_t airdap_mode_state_transition(

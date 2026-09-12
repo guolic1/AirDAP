@@ -222,10 +222,14 @@ authentication before opening the NETWORK service session.
 The mode state publishes orthogonal USB, Wi-Fi, provisioning, OTA, and live DAP
 owner fields. USB attach/detach, Wi-Fi station, BLE provisioning, and OTA
 lifecycle events are wired today. USB DAP admission ignores Wi-Fi state.
-Authenticated NETWORK DAP admission requires USB to be absent and Wi-Fi to be
-online, while USB presence does not disable independent network status,
+By default, authenticated NETWORK DAP admission requires USB to be absent and Wi-Fi to be
+online. A button command can explicitly select NETWORK even with USB attached;
+that selection rejects USB DAP until changed or rebooted. USB presence does not disable independent network status,
 configuration, or OTA paths.
-USB attach conditionally revokes an idle NETWORK DAP owner. Ownership acquire
+USB attach conditionally revokes an idle NETWORK DAP owner unless NETWORK was
+explicitly selected. Selection changes require no DAP owner and no OTA; they
+retain physical USB presence and use the same policy epoch and ownership
+reservation as DAP transactions. Ownership acquire
 and physical-operation begin revalidate versioned mode policy, so an attach
 racing either transaction rolls it back without a blocking cross-task lock;
 Wi-Fi-only changes are excluded from the USB policy version.
@@ -331,27 +335,27 @@ The BOOT_KEY recognizer polls every 20 ms. Its internal states are:
 | --- | --- |
 | `IDLE` | No active press or pending click |
 | `PRESS_DEBOUNCE` | Confirming the first press for 40 ms |
-| `PRESSED` | First press confirmed, held for less than 3 seconds |
+| `PRESSED` | First press confirmed, held for less than 2 seconds |
 | `RELEASE_DEBOUNCE` | Confirming release; 40 ms for clicks, 200 ms for long holds |
 | `WAIT_SECOND_PRESS` | First click released, waiting for a second press |
 | `SECOND_PRESS_DEBOUNCE` | Confirming a candidate second press for 40 ms |
-| `SECOND_PRESSED` | Second press confirmed, held for less than 3 seconds |
-| `LONG_3S` | Provisioning threshold reached; STATUS slow flash, waiting for release |
-| `LONG_10S` | Clear threshold reached; STATUS fast flash, waiting for release |
+| `SECOND_PRESSED` | Second press confirmed, held for less than 2 seconds |
+| `LONG_2S` | 2-second threshold reached; STATUS slow flash, waiting for release |
+| `LONG_6S` | 6-second threshold reached; STATUS fast flash, waiting for release |
+| `LONG_10S` | 10-second threshold reached; STATUS very fast flash, waiting for release |
 
 A single click is reported 300 ms after the first release begins, including
 release confirmation. A second press beginning before that deadline forms a
 double click if it passes press confirmation and is then released. A rejected
 second-press bounce retains the first click and its original deadline. A
-confirmed second press may finish after the deadline; holding it to 3 seconds
+confirmed second press may finish after the deadline; holding it to 2 seconds
 or longer cancels pending clicks and selects the long-hold action instead.
 Double clicks never also emit single clicks. Triple clicks form a double click
 followed by a pending single click; there is no repeat or triple-click action.
 
-Single and double clicks emit `BOOT_KEY single click (unassigned)`
-or `BOOT_KEY double click (unassigned)` info logs and STATUS completion flashes.
-They do not reset either MCU,
-change power or DAP ownership, open BLE, or clear configuration. Long-hold
+Single and double clicks emit STATUS completion flashes. Completed gestures
+execute their configured command and log the gesture, command, and result.
+Long-hold
 threshold events are each emitted once; no long-hold action runs until release
 has remained stable for 200 ms. A brief release bounce preserves the current
 hold and does not repeat its indicator event. Press duration includes the
@@ -367,8 +371,9 @@ previous green/red threshold indications are replaced; NET stays off.
 | Idle, ordinary press, or waiting for a second press | Off |
 | Single click recognized | One 100 ms flash |
 | Double click recognized | Two 100 ms flashes, separated by 100 ms off |
-| Held for 3 to less than 10 seconds | Slow flash: 500 ms on, 500 ms off |
-| Held for at least 10 seconds | Fast flash: 100 ms on, 100 ms off |
+| Held for 2 to less than 6 seconds | Slow flash: 500 ms on, 500 ms off |
+| Held for 6 to less than 10 seconds | Fast flash: 200 ms on, 200 ms off |
+| Held for at least 10 seconds | Very fast flash: 60 ms on, 60 ms off |
 | Debouncing an edge | Continue the previous pattern |
 | Long-hold release confirmed | Off before the action is posted |
 
@@ -379,8 +384,84 @@ Only that task writes the button LED outputs, so delayed provisioning events
 cannot restore a stale indication. Flash durations are firmware constants in
 `components/ble_provisioning/button_indicator.c`, not persistent settings.
 
-BLE is disabled during normal operation. Hold `BOOT_KEY` (GPIO0) until the
-red STATUS LED starts flashing slowly at three seconds, then release it to open a
+Only the highest reached hold threshold executes on release. For example,
+releasing after 6 seconds selects `hold6`; it does not first execute `hold2`.
+Indications identify gestures, even when the configured command is `none` or
+is rejected as busy. Ordinary presses remain dark.
+
+The default command bindings are:
+
+| Gesture | Command |
+| --- | --- |
+| `single` | `none` |
+| `double` | `dap-toggle` |
+| `hold2` | `provisioning` |
+| `hold6` | `none` |
+| `hold10` | `clear-network-restart` |
+
+USB debug shell supports `button commands`, `button bindings`,
+`button bind <gesture> <command>`, and `button defaults`. Each bind/defaults
+operation saves immediately, with no separate save command. All twelve supported
+commands may be bound to any of the five gestures:
+
+| Command | Behavior |
+| --- | --- |
+| `none` | No device operation |
+| `dap-toggle` | Switch between USB and NETWORK DAP |
+| `dap-usb` | Select USB DAP |
+| `dap-network` | Select authenticated NETWORK DAP, including while USB is attached |
+| `dap-auto` | Restore USB-when-attached, NETWORK-otherwise policy |
+| `provisioning` | Open or cancel the BLE provisioning window |
+| `clear-network-restart` | Clear Wi-Fi, pairing and network-auth configuration, then restart AirDAP |
+| `restart` | Restart AirDAP, preserving configuration |
+| `target-reset` | Assert target reset for 100 ms, then release |
+| `wifi-toggle` | Disable/enable Wi-Fi without clearing saved credentials |
+| `target-power-toggle` | Toggle AirDAP's last successfully commanded target power permission |
+| `target-power-cycle` | Disable target power permission for 500 ms, then allow power |
+
+For example, `button bind hold6 dap-auto` replaces the six-second no-op.
+`button bindings` prints all bindings and the current volatile DAP route.
+Commands are a fixed allowlist, not arbitrary shell text. Firmware flashing is
+not a button command. The default five bindings remain unchanged.
+
+The five device commands added above reject active provisioning, any DAP owner,
+in-flight physical control, and OTA. USB CDC/debug shell may remain connected.
+Reset and power-cycle use a timer, holding the ownership reservation across the
+entire pulse; they do not block the button polling task or default event loop.
+Their initial success means the pulse started; completion or restoration failure
+is logged separately. An already asserted target reset rejects `target-reset`.
+Power-cycle ends with permission enabled, including when it started disabled.
+If timer startup fails, the previous output command is restored; any restoration
+failure is reported. Power permission is tracked separately from the externally
+driven ST input. These operations do not guarantee a target with independent
+power loses voltage, nor that 500 ms suffices to discharge a particular target.
+
+Wi-Fi radio selection is volatile and resets to enabled after reboot. Turning it
+off cancels retries and ignores late connection events; saved configuration can
+still be edited over USB. Turning it on reconnects using the latest saved
+configuration. Enable Wi-Fi before starting provisioning. `network-info` reports
+`radio_enabled`; target power permission also returns to the usual released
+open-drain startup state on reboot.
+
+Bindings use a separate versioned six-byte NVS record (`airdap_btn/bindings`),
+without changing the existing network configuration record. Missing bindings
+use the defaults above. Writes are serialized and RAM changes only after a
+successful commit. Invalid records or storage failures are reported, never
+treated as saved. If a corrupt record prevents the button monitor from starting,
+use `button defaults` over USB and restart to recover just the binding record.
+Clearing network configuration preserves the bindings.
+`button defaults` restores bindings; it does not change the current DAP route.
+Bindings survive reboot; DAP selection resets to `auto`. Selection preserves USB
+enumeration and CDC/debug-shell interfaces, and never bypasses network authentication.
+
+The binding snapshot is taken at the start of a gesture. Changes during a press
+apply to the next gesture. Clear/restart additionally waits for 200 ms of stable
+release even when mapped to a double click; `restart` uses the same guard and
+rechecks the key before restarting. A new press or read failure during
+that extra wait cancels the pending clear. Flash timing remains gesture-based.
+
+With the default bindings, BLE is disabled during normal operation. Hold `BOOT_KEY` (GPIO0) until the
+red STATUS LED starts flashing slowly at two seconds, then release it to open a
 120-second provisioning window. The button never starts BLE while it remains
 pressed. Repeating the same hold-and-release while the window is active cancels
 the attempt. The BLE service name is the shared
@@ -392,7 +473,7 @@ Failure leaves the window open for another client attempt; cancel and timeout
 stop BLE and restore the previously committed Wi-Fi configuration.
 
 Continue holding `BOOT_KEY` past the slow flash until the red STATUS LED
-starts flashing quickly at ten seconds. No provisioning or clear action runs while the button
+starts flashing very quickly at ten seconds. No provisioning or clear action runs while the button
 remains pressed. Release it to turn both indicators off, clear Wi-Fi
 credentials plus the reserved pairing and network-authentication slots, and
 restart without intentionally entering ROM download mode. After restart the
@@ -450,7 +531,7 @@ configured ESP-IDF environment and run `idf.py reconfigure` once.
 
 Security 2 still encrypts and authenticates the BLE provisioning session, but
 the published PoP does not identify an owner. Physical access to hold
-`BOOT_KEY` through the three-second indication and release it is therefore the
+`BOOT_KEY` through the two-second indication and release it (with default bindings) is therefore the
 only provisioning authorization boundary. Any nearby party that knows the
 public credential can race or replace Wi-Fi configuration while that window is
 open. This design is appropriate only where physical access to the button is
@@ -471,9 +552,10 @@ not an installed pyOCD discovery plugin or a Windows virtual USB device.
 Provide a target-specific **binary** and the exact pyOCD target name and flash
 address. The operation overwrites target flash; it does not update the AirDAP
 firmware. Use exclusive access to the AirDAP and target. AirDAP must have power
-and Wi-Fi but no USB data connection to the computer: the current USB-priority
-policy rejects network SWD ownership while USB is attached. Keep SWD, ground,
-target power, and target reset connected.
+and Wi-Fi. With the default automatic DAP route, disconnect USB data before
+using network SWD. Alternatively, use the default double-click binding to select
+NETWORK while USB remains attached; `button bindings` reports `dap-route=network`.
+Keep SWD, ground, target power, and target reset connected.
 
 From the repository root on Windows (validated with pyOCD 0.45.1):
 
@@ -999,21 +1081,33 @@ extending a single global command table. Available commands are:
 - `wifi set` — interactively replace the stored SSID and password, reset
   reconnect backoff, and reconnect immediately;
 - `wifi clear` — remove stored Wi-Fi credentials and stop reconnect attempts;
-- `button press|release|status` — set or inspect a RAM-only simulated
-  `BOOT_KEY`; physical and simulated presses pass through the same single-click,
-  double-click, 3-second, 10-second, and release-confirmation behavior. `status`
-  reports the simulated input level, not an internal recognizer-state snapshot;
+- `button simulate <single|double|hold2|hold6|hold10>` — queue one complete
+  RAM-only BOOT_KEY gesture, including automatic release. Simulation passes
+  through the same recognizer, STATUS patterns and configured commands as physical
+  input. The acknowledgement means accepted, not command execution completed;
+- `button status` — report the queued/running simulated gesture or `idle`;
+  this does not report the physical key level or completion of its bound command;
+- `button commands|bindings|defaults|bind <gesture> <command>` — list commands,
+  inspect or persistently change gesture bindings;
 - `swd-idcode [clock_khz]` — reset the SWD line, select SWD, and read the
   target DP IDCODE at 100 kHz by default; accepted clocks are 100–10,000 kHz;
 - `restart` — wait for the acknowledgement transfer to complete, then restart
   AirDAP; a bounded transfer timeout leaves the firmware running.
 
-For HIL automation, one host invocation can hold the simulated button across
-the normal device-side threshold before releasing it:
+`button press` and `button release` have been replaced by complete gestures.
+Simulation runs asynchronously in the existing 20 ms button polling task, with
+100 ms presses for clicks (100 ms gap for a double click), and 2.1/6.1/10.1 second
+holds. Release samples complete the normal debounce and restart guard. New
+requests are rejected while simulation or a physical gesture is in progress.
+A physical press or input read failure discards an unfinished simulated gesture;
+physical input then starts its own gesture. Already emitted actions cannot be
+cancelled. Bindings are sampled at the beginning of the generated press.
+
+For HIL automation, request a gesture and optionally wait to observe completion:
 
 ```powershell
 uv run python firmware/tools/airdap-shell.py `
-    -c "button press" --sleep 3.5 -c "button release"
+    -c "button simulate hold2" --sleep 3 -c "button status"
 uv run python firmware/tools/airdap-shell.py -c "button status"
 ```
 
@@ -1047,8 +1141,8 @@ early application messages, and direct standard output are not captured by the
 Vendor interface. The shell is intended for physically connected development
 systems: it has no authentication, and anyone with access to it can replace or
 clear persistent Wi-Fi credentials or simulate the physical provisioning/reset
-button. A simulated press remains active across shell sessions until
-`button release` or a device restart. The current development profile does not
+button. A simulated gesture finishes and releases automatically even after the
+shell closes; restarting discards it. The current development profile does not
 enable Flash Encryption, so those credentials remain plaintext at rest. The
 shell provides only bounded diagnostics, Wi-Fi credential management, and
 BOOT_KEY simulation; it deliberately provides no arbitrary DP/AP access,
@@ -1079,7 +1173,7 @@ The other hardware-independent tests use the same pattern:
 for suite in \
     bootloader_artifact ota_layout setup_env board config_store device_identity voltage_monitor swd_protocol \
     dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame discovery \
-    dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning network_auth network_dap network_control \
+    dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning button_config network_auth network_dap network_control \
     target_uart network_uart usb_uart_bridge usb_descriptors project_version \
     debug_shell_commands debug_shell_diagnostics debug_shell_config_status \
     debug_shell_identity debug_shell_input debug_shell_wifi debug_shell_button \
@@ -1121,7 +1215,7 @@ ordering, automatic AirDAP BLE discovery and public-credential command
 construction, UART line-coding mapping, independent bounded UART RX fan-out
 and overflow accounting, exact-session TX ownership and USB CDC session
 cleanup, both compile-time USB descriptor variants, bounded shell input, the
-simulated BOOT_KEY command/input merge, bounded SWD IDCODE command flow, debug
+bounded BOOT_KEY gesture simulation and physical-input cancellation, bounded SWD IDCODE command flow, debug
 TX completion state, host tools, and
 wired HIL helper's protocol checks. They do not prove USB enumeration, real NVS
 power-loss persistence or purge behavior, BLE enumeration or radio lifetime,

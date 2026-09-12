@@ -24,12 +24,15 @@ static const airdap_debug_shell_command_t core_commands[] = {
     },
     {
         .name = "button",
-        .usage = "button press|release|status",
-        .summary = "Simulate the BOOT_KEY input",
+        .usage = "button simulate <single|double|hold2|hold6|hold10>|status|commands|bindings|defaults|bind <gesture> <command>",
+        .summary = "Configure BOOT_KEY commands or simulate input",
         .details =
-            "Press or release the RAM-only simulated BOOT_KEY input, or show "
-            "its state. Physical and simulated input use the same hold and "
-            "release state machine.",
+            "Simulate a complete BOOT_KEY gesture with automatic release, or show "
+            "the queued/running gesture with status. commands lists the allowlist; bindings lists saved "
+            "single/double/hold2/hold6/hold10 commands and the volatile DAP route. "
+            "bind <gesture> <command> saves immediately; defaults saves the "
+            "default bindings. Simulation takes real time, rejects overlapping requests, "
+            "and is cancelled by physical input. Both use the same state machine.",
         .handler = airdap_debug_shell_button_command,
     },
     {

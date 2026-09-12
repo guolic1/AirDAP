@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 
-/* Starts the GPIO0 monitor. BLE remains off until a three-second press. */
+/* Loads persistent bindings and starts GPIO0 monitoring; default hold2 opens BLE. */
 esp_err_t airdap_ble_provisioning_start(void);
 
 #ifdef __cplusplus

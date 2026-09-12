@@ -23,9 +23,11 @@ idf.py build
 idf.py -p <airdap-programming-port> flash
 ```
 
-Restart and monitor AirDAP. Confirm BLE is not advertising before a button
+Restart and monitor AirDAP. Record `button bindings`, then use `button defaults`.
+The following steps assume the default mappings; restore custom bindings after
+acceptance. Confirm BLE is not advertising before a button
 press. Hold `BOOT_KEY` until the red STATUS LED starts its 500 ms on/off
-slow flash at three seconds. NET must remain off.
+slow flash at two seconds. NET must remain off.
 Before releasing it, confirm BLE has not initialized or started advertising
 and an attached debug-shell session remains connected. Release the button and
 confirm:
@@ -80,7 +82,7 @@ provisioning attempt, and the prior Wi-Fi configuration remains in effect.
 ## 3. Timeout cleanup
 
 Open another window and do not connect a client. Confirm the service disappears
-after 120 seconds and does not return without a new three-second
+after 120 seconds and does not return without a new two-second
 hold-and-release. Confirm the previously committed Wi-Fi configuration and
 normal USB interfaces remain usable. This is the resource-lifecycle acceptance
 check; a client disconnect alone is not evidence that the firmware stopped the
@@ -97,7 +99,7 @@ password interactively. Required observations:
 - the client reports provisioning success before the service disappears;
 - BLE stops and releases its resources within 30 seconds after success;
 - a power cycle reconnects to the same AP without opening BLE;
-- a fresh three-second hold-and-release can open a new window using the same public
+- a fresh two-second hold-and-release can open a new window using the same public
   Security 2 credential fingerprint.
 
 Repeat with an incorrect AP password before the successful attempt. Confirm the
@@ -111,9 +113,10 @@ public fingerprint.
 ## 5. Ten-second network reset and GPIO0 release guard
 
 With the device provisioned, hold `BOOT_KEY` continuously. Confirm STATUS stays
-off before three seconds, then flashes with 500 ms on/off without initializing
+off before two seconds, then flashes with 500 ms on/off without initializing
 BLE or disconnecting the debug shell. Continue holding until STATUS changes to
-100 ms on/off at ten seconds. NET must remain off throughout. Keep it pressed briefly and confirm AirDAP
+200 ms on/off at six seconds, then 60 ms on/off at ten seconds. NET must remain
+off throughout. Keep it pressed briefly and confirm AirDAP
 has not cleared configuration or restarted while GPIO0 remains low. Release the
 button and confirm both LEDs turn off before AirDAP clears configuration and
 restarts normally rather than entering the ROM download mode. The debug shell
@@ -121,7 +124,7 @@ disconnect caused by that restart is expected. After restart:
 
 - provisioning state is `unprovisioned` and Wi-Fi does not reconnect;
 - the reserved pairing and network-authentication slots are absent;
-- BLE remains off until another three-second hold-and-release;
+- BLE remains off until another two-second hold-and-release;
 - the new window reports the same Security 2 credential fingerprint and
   accepts the public PoP.
 
@@ -142,5 +145,73 @@ off. Start another ordinary press during a completion flash and confirm its
 
 Observe long-hold release bounce if suitable test equipment is available: a
 release shorter than 200 ms must retain the current flash phase and not execute
-the action or repeat threshold events. Record measured timing separately from
+the action or repeat threshold events. Releasing between 6 and 10 seconds with
+default bindings must log `hold6 command=none` and never open BLE or clear data.
+Record measured timing separately from
 host-test results; polling and task scheduling can affect real flash durations.
+
+## 7. Persistent bindings and DAP selection
+
+Record `button commands` (twelve entries) and `button bindings` (five gestures).
+Set `button bind hold6 dap-auto`, restart and confirm the binding survives while
+`dap-route=auto`. Restore the defaults and confirm that this change survives a
+second restart. Invalid gestures/commands or trailing tokens must fail without
+changing the stored bindings. Save and restore any pre-test custom mappings.
+
+With USB data attached, Wi-Fi online, and DAP disconnected, double-click and
+confirm `dap-route=network`. Verify authenticated pyOCD DAP access over TCP and
+verify that USB DAP cannot acquire the target. USB CDC and debug shell should
+remain enumerated. Unauthenticated network access must remain rejected.
+Disconnect DAP and double-click again; confirm `dap-route=usb`, wired DAP works,
+and network DAP is rejected. With a DAP owner or OTA active, verify the selection
+command reports busy and preserves the current route and transfer. Restart and
+confirm automatic selection is restored. Explicit NETWORK selection must survive
+USB detach/reattach until another command or reboot changes the selection.
+
+On a recoverable board only, map double-click to `clear-network-restart` and
+observe that restart cannot occur before 200 ms of stable release. A new press
+during that guard must cancel the pending clear. Restore defaults afterward.
+
+## 8. Optional device command bindings
+
+Obtain exclusive access to the identified AirDAP and target before these checks.
+Record the current bindings and test each new command by binding it to `hold6`.
+Restore the bindings after acceptance. Do not infer these results from host tests.
+
+- `restart`: confirm a normal AirDAP reboot with network and button configuration
+  intact. Also map to double-click and check the 200 ms release guard; pressing
+  again during the guard must cancel restart.
+- `target-reset`: scope target nRESET for a 100 ms low pulse and release. Confirm
+  AirDAP remains running and SWD is not acquired. Measure scheduling tolerance.
+- `wifi-toggle`: disable the radio, confirm no reconnect, and retain USB shell.
+  Enable it and confirm reconnection with the saved credentials. Repeat with no
+  saved SSID and after editing credentials while off. Reboot restores enabled.
+- `target-power-toggle`: scope GPIO9 and target voltage while toggling permission.
+  Confirm only open-drain pull-low/release behavior, with no push-pull high.
+  External ST low must not change which permission the next press selects.
+- `target-power-cycle`: scope the 500 ms disable interval followed by release.
+  Verify the actual target reset/power behavior for its load and power source;
+  an independently powered target may remain on.
+
+With DAP connected, OTA active, or provisioning active, verify each new command
+is rejected without changing the target, radio or AirDAP state. During a reset
+or power-cycle pulse, DAP acquisition and OTA writes must remain blocked. Repeat
+with USB debug shell disabled to confirm physical button operation is independent.
+
+## 9. Complete simulated gestures over USB
+
+Record bindings and use `none` for destructive actions during indicator-only
+checks. Run `button simulate single`, `double`, `hold2`, `hold6`, and `hold10`
+(with the full `button simulate` prefix each time). Confirm the matching STATUS
+patterns and exactly one terminal gesture, using the same configured command
+path as the physical button. Holds take real time and automatically release.
+`button status` reports the queued/running gesture, then `idle`; a second
+simulation during the first must fail. Legacy `button press`/`release` must fail.
+
+Close USB shell after submitting `button simulate hold6` and verify the gesture
+finishes normally. Reconnect and confirm `button status` is idle. Interrupt an
+unfinished simulated hold with a physical press; confirm the simulated hold
+action does not execute and the physical press begins a fresh gesture. A
+simulation requested during a physical gesture must not alter that gesture.
+Restore the saved bindings after the test. Obtain separate authorization for
+commands that reboot, clear configuration, reset the target, or change power.

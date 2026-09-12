@@ -16,12 +16,14 @@ static bool wifi_disconnect_during_acquire;
 static bool wifi_disconnect_during_operation_begin;
 static bool operation_active;
 static unsigned shell_changes_during_control_begin;
+static bool select_usb_during_acquire;
+static bool select_network_during_revoke;
 
 airdap_dap_ownership_result_t airdap_dap_ownership_control_begin(
     airdap_dap_owner_t owner,
     airdap_dap_ownership_operation_t *operation)
 {
-    assert(owner == AIRDAP_DAP_OWNER_NETWORK);
+    assert(owner == AIRDAP_DAP_OWNER_NETWORK || owner == AIRDAP_DAP_OWNER_DIAGNOSTIC);
     if (operation_active) {
         return AIRDAP_DAP_OWNERSHIP_BUSY;
     }
@@ -61,6 +63,10 @@ airdap_dap_ownership_result_t airdap_dap_ownership_acquire(
 {
     assert(claim != NULL);
     ++acquire_calls;
+    if (select_usb_during_acquire) {
+        select_usb_during_acquire = false;
+        assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_USB) == AIRDAP_MODE_DAP_ALLOWED);
+    }
     if (attach_during_acquire) {
         attach_during_acquire = false;
         assert(airdap_mode_state_transition(
@@ -89,6 +95,13 @@ airdap_dap_ownership_result_t airdap_dap_ownership_revoke_owner(
     airdap_dap_owner_t owner)
 {
     ++conditional_revoke_calls;
+    if (select_network_during_revoke) {
+        select_network_during_revoke = false;
+        const airdap_dap_owner_t previous = current_owner;
+        current_owner = AIRDAP_DAP_OWNER_NONE;
+        assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_NETWORK) == AIRDAP_MODE_DAP_BUSY);
+        current_owner = previous;
+    }
     if (operation_active) {
         return AIRDAP_DAP_OWNERSHIP_BUSY;
     }
@@ -171,6 +184,8 @@ static void reset_state(void)
     operation_active = false;
     airdap_mode_state_init();
     shell_changes_during_control_begin = 0U;
+    select_usb_during_acquire = false;
+    select_network_during_revoke = false;
 }
 
 static void test_initial_state_and_authentication_boundary(void)
@@ -502,6 +517,60 @@ static void test_control_allows_idle_usb_and_tracks_shell_sessions(void)
     assert(acquire_calls == 0U);
 }
 
+static void test_manual_route_selection(void)
+{
+    reset_state();
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_AUTO);
+    select_network_during_revoke = true;
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED) == AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_WIFI_CONNECTING) == AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_WIFI_ONLINE) == AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_TOGGLE) == AIRDAP_MODE_DAP_ALLOWED);
+    assert(snapshot().usb_present);
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_NETWORK);
+    assert(airdap_mode_state_dap_admission(AIRDAP_DAP_OWNER_NETWORK, true) == AIRDAP_MODE_DAP_ALLOWED);
+    assert(airdap_mode_state_dap_admission(AIRDAP_DAP_OWNER_NETWORK, false) == AIRDAP_MODE_DAP_UNAUTHENTICATED);
+    assert(airdap_mode_state_dap_admission(AIRDAP_DAP_OWNER_USB, false) == AIRDAP_MODE_DAP_BUSY);
+    airdap_dap_ownership_claim_t claim;
+    assert(airdap_mode_state_dap_acquire(AIRDAP_DAP_OWNER_NETWORK, true, &claim) == AIRDAP_MODE_DAP_ALLOWED);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED) == AIRDAP_MODE_STATE_OK);
+    assert(current_owner == AIRDAP_DAP_OWNER_NETWORK);
+    const unsigned revokes = conditional_revoke_calls;
+    airdap_dap_ownership_claim_t rejected;
+    assert(airdap_mode_state_dap_acquire(AIRDAP_DAP_OWNER_USB, false, &rejected) == AIRDAP_MODE_DAP_BUSY);
+    assert(conditional_revoke_calls == revokes);
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_TOGGLE) == AIRDAP_MODE_DAP_BUSY);
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_NETWORK);
+    assert(airdap_dap_ownership_release(&claim) == AIRDAP_DAP_OWNERSHIP_OK);
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_TOGGLE) == AIRDAP_MODE_DAP_ALLOWED);
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_USB);
+    assert(airdap_mode_state_dap_admission(AIRDAP_DAP_OWNER_NETWORK, true) == AIRDAP_MODE_DAP_BUSY);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_STARTED) == AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_AUTO) == AIRDAP_MODE_DAP_BUSY);
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_USB);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_ABORTED) == AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_AUTO) == AIRDAP_MODE_DAP_ALLOWED);
+    assert(airdap_mode_state_set_dap_route((airdap_dap_route_t) 99) == AIRDAP_MODE_DAP_INVALID_ARGUMENT);
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_NETWORK) == AIRDAP_MODE_DAP_ALLOWED);
+    select_usb_during_acquire = true;
+    assert(airdap_mode_state_dap_acquire(AIRDAP_DAP_OWNER_NETWORK, true, &claim) == AIRDAP_MODE_DAP_BUSY);
+    assert(current_owner == AIRDAP_DAP_OWNER_NONE && !operation_active);
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_USB);
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_NETWORK) == AIRDAP_MODE_DAP_ALLOWED);
+    assert(airdap_mode_state_dap_acquire(AIRDAP_DAP_OWNER_NETWORK, true, &claim) == AIRDAP_MODE_DAP_ALLOWED);
+    airdap_dap_ownership_operation_t operation = {0};
+    assert(airdap_mode_state_dap_operation_begin(AIRDAP_DAP_OWNER_NETWORK, true, &claim, &operation) == AIRDAP_MODE_DAP_ALLOWED);
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_USB) == AIRDAP_MODE_DAP_BUSY);
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_NETWORK);
+    airdap_dap_ownership_operation_end(&operation);
+    reset_state();
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED) == AIRDAP_MODE_STATE_OK);
+    current_owner = AIRDAP_DAP_OWNER_NETWORK;
+    select_network_during_revoke = true;
+    assert(airdap_mode_state_dap_acquire(AIRDAP_DAP_OWNER_USB, false, &claim) == AIRDAP_MODE_DAP_ALLOWED);
+    assert(!select_network_during_revoke && airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_AUTO);
+}
+
 int main(void)
 {
     test_initial_state_and_authentication_boundary();
@@ -515,6 +584,7 @@ int main(void)
     test_invalid_requests_are_rejected();
     test_control_reservation_rechecks_mode_stamp();
     test_control_allows_idle_usb_and_tracks_shell_sessions();
+    test_manual_route_selection();
     puts("Mode state tests passed");
     return 0;
 }

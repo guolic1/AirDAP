@@ -47,13 +47,18 @@ add_test(
 add_executable(
     ble_provisioning_adapter_test
     test_ble_provisioning_adapter.c
+    ../debug_shell_button/fake_button_config.c
     ../../../components/ble_provisioning/button_indicator.c
     ../../../components/ble_provisioning/ble_provisioning.c
+    ../../../components/ble_provisioning/button_simulation.c
     ../../../components/ble_provisioning/provisioning_button.c
 )
 target_include_directories(
     ble_provisioning_adapter_test
     PRIVATE
+        ../../../components/button_config/include
+        ../../../components/mode_state/include
+        ../../../components/dap_ownership/include
         fake_include
         ../../../components/ble_provisioning/include
         ../../../components/ble_provisioning/private_include
@@ -69,3 +74,20 @@ target_compile_definitions(
 )
 
 add_test(NAME ble_provisioning_adapter COMMAND ble_provisioning_adapter_test)
+
+add_executable(button_device_commands_test test_button_device_commands.c
+    ../../../components/ble_provisioning/button_device_commands.c
+    ../../../components/board/board.c
+    ../../../components/mode_state/mode_state.c
+    ../../../components/dap_ownership/dap_ownership.c)
+target_include_directories(button_device_commands_test PRIVATE
+    ../../../components/ble_provisioning/private_include
+    ../../../components/button_config/include
+    ../../../components/board/include
+    ../../../components/mode_state/include
+    ../../../components/dap_ownership/include
+    ../../../components/wifi_manager/include
+    fake_include ../board/fake_include)
+target_compile_features(button_device_commands_test PRIVATE c_std_11)
+target_compile_options(button_device_commands_test PRIVATE -Wall -Wextra -Werror -pedantic)
+add_test(NAME button_device_commands COMMAND button_device_commands_test)

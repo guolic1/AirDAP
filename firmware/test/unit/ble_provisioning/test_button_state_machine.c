@@ -17,9 +17,9 @@ static void step(Button *button, bool pressed, uint32_t ms, Action expected)
 #define NONE AIRDAP_PROVISIONING_BUTTON_NONE
 #define SINGLE AIRDAP_PROVISIONING_BUTTON_SINGLE_CLICK
 #define DOUBLE AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK
-#define READY3 AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY
+#define READY2 AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY
 #define READY10 AIRDAP_PROVISIONING_BUTTON_CLEAR_READY
-#define LONG3 AIRDAP_PROVISIONING_BUTTON_TOGGLE
+#define LONG2 AIRDAP_PROVISIONING_BUTTON_TOGGLE
 #define LONG10 AIRDAP_PROVISIONING_BUTTON_CLEAR
 
 static Button fresh(void)
@@ -106,10 +106,13 @@ static void test_long_hold_suppresses_clicks_and_waits_for_release(void)
 {
     Button button = fresh();
     first_click(&button);
-    step(&button, true, 2999, NONE);
-    step(&button, true, 1, READY3);
-    assert(button.state == AIRDAP_BUTTON_LONG_3S);
-    step(&button, true, 6999, NONE);
+    step(&button, true, 1999, NONE);
+    step(&button, true, 1, READY2);
+    assert(button.state == AIRDAP_BUTTON_LONG_2S);
+    step(&button, true, 3999, NONE);
+    step(&button, true, 1, AIRDAP_PROVISIONING_BUTTON_HOLD_6_READY);
+    assert(button.state == AIRDAP_BUTTON_LONG_6S);
+    step(&button, true, 3999, NONE);
     step(&button, true, 1, READY10);
     assert(button.state == AIRDAP_BUTTON_LONG_10S);
     step(&button, true, UINT32_MAX, NONE);
@@ -119,8 +122,8 @@ static void test_long_hold_suppresses_clicks_and_waits_for_release(void)
     step(&button, false, 1000, NONE);
 
     button = fresh();
-    step(&button, true, 3000, READY3);
-    step(&button, false, 200, LONG3);
+    step(&button, true, 2000, READY2);
+    step(&button, false, 200, LONG2);
     step(&button, false, 1000, NONE);
 }
 
@@ -148,11 +151,14 @@ static void test_late_second_press_and_long_boundaries(void)
     step(&button, false, 260, SINGLE);
 
     button = fresh();
-    step(&button, true, 2999, NONE);
+    step(&button, true, 1999, NONE);
     step(&button, false, 300, SINGLE);
-    step(&button, true, 3000, READY3);
-    step(&button, true, 6999, NONE);
-    step(&button, false, 200, LONG3);
+    step(&button, true, 2000, READY2);
+    step(&button, true, 3999, NONE);
+    step(&button, true, 1, AIRDAP_PROVISIONING_BUTTON_HOLD_6_READY);
+    assert(button.state == AIRDAP_BUTTON_LONG_6S);
+    step(&button, true, 3999, NONE);
+    step(&button, false, 200, AIRDAP_PROVISIONING_BUTTON_HOLD_6);
     step(&button, false, 300, NONE);
 }
 

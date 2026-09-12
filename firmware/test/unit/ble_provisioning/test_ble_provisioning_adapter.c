@@ -9,6 +9,9 @@
 
 #include "airdap_ble_provisioning.h"
 #include "airdap_ble_provisioning_internal.h"
+#include "airdap_button_config.h"
+#include "airdap_button_device_commands.h"
+#include "airdap_button_simulation.h"
 #include "airdap_device_identity.h"
 #include "airdap_mode_state.h"
 #include "airdap_network_auth.h"
@@ -72,7 +75,17 @@ static TaskFunction_t button_task_function;
 static jmp_buf task_done;
 static unsigned task_tick;
 static unsigned task_scenario;
-static unsigned button_action_counts[7];
+static bool test_restart_binding;
+static unsigned button_action_counts[9];
+extern airdap_mode_dap_result_t fake_dap_route_result;
+static airdap_button_command_t last_device_command;
+static bool device_command_busy;
+bool airdap_button_device_command_busy(void) { return device_command_busy; }
+esp_err_t airdap_button_device_command_execute(airdap_button_command_t command)
+{
+    last_device_command = command;
+    return ESP_OK;
+}
 
 const airdap_device_identity_t *airdap_device_identity_get(void)
 {
@@ -326,7 +339,16 @@ esp_err_t esp_event_post(
     uint32_t ticks_to_wait)
 {
     if (event_base == AIRDAP_PROVISIONING_INTERNAL_EVENT &&
-        event_id > 0 && event_id < 7) {
+        event_id > 0 && event_id < 9) {
+        assert(event_data != NULL && event_data_size == 1);
+        const uint8_t command = *(const uint8_t *) event_data;
+        if (event_id == AIRDAP_PROVISIONING_BUTTON_SINGLE_CLICK) assert(command == AIRDAP_BUTTON_COMMAND_NONE);
+        if (event_id == AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK) {
+            assert(command == (task_scenario == 3 ? (test_restart_binding ? AIRDAP_BUTTON_COMMAND_RESTART : AIRDAP_BUTTON_COMMAND_CLEAR_NETWORK_RESTART) : AIRDAP_BUTTON_COMMAND_DAP_TOGGLE));
+            if (task_scenario == 3) assert(task_tick == 15);
+        }
+        if (event_id == AIRDAP_PROVISIONING_BUTTON_HOLD_6) assert(command == AIRDAP_BUTTON_COMMAND_NONE);
+        if (event_id == AIRDAP_PROVISIONING_BUTTON_CLEAR) assert(command == AIRDAP_BUTTON_COMMAND_CLEAR_NETWORK_RESTART);
         ++button_action_counts[event_id];
     }
     (void) event_data;
@@ -354,22 +376,31 @@ void vTaskDelay(TickType_t ticks)
 {
     assert(ticks == pdMS_TO_TICKS(20));
     bool expected_status = false;
-    if (task_scenario == 0) {
+    if (task_scenario == 6) {
+        expected_status = task_tick >= 99 && task_tick < 114;
+    } else if (task_scenario == 0) {
         expected_status = task_tick >= 16 && task_tick < 21;
-    } else if (task_scenario == 1) {
+    } else if (task_scenario == 1 || task_scenario == 3) {
         expected_status = (task_tick >= 7 && task_tick < 12) ||
             (task_tick >= 17 && task_tick < 22);
-    } else if (task_tick >= 149 && task_tick < 499) {
-        expected_status = ((task_tick - 149) % 50) < 25;
+    } else if (task_scenario == 4) {
+        expected_status = (task_tick >= 7 && task_tick < 11) ||
+            (task_tick >= 26 && task_tick < 31);
+    } else if (task_scenario == 5 && task_tick >= 309) {
+        expected_status = false;
+    } else if (task_tick >= 99 && task_tick < 299) {
+        expected_status = ((task_tick - 99) % 50) < 25;
+    } else if (task_tick >= 299 && task_tick < 499) {
+        expected_status = ((task_tick - 299) % 20) < 10;
     } else if (task_tick >= 499 && task_tick < 519) {
-        expected_status = ((task_tick - 499) % 10) < 5;
+        expected_status = ((task_tick - 499) % 6) < 3;
     }
     /* The first threshold write fails; retry must succeed on the next tick. */
-    if (task_scenario == 2 && task_tick == 149) expected_status = false;
+    if (task_scenario == 2 && task_tick == 99) expected_status = false;
     assert(status_led_on == expected_status);
     assert(!network_led_on);
     ++task_tick;
-    if (task_tick == (task_scenario == 2 ? 530U : 30U)) {
+    if (task_tick == (task_scenario == 2 ? 530U : task_scenario == 5 ? 320U : task_scenario == 6 ? 130U : 40U)) {
         longjmp(task_done, 1);
     }
 }
@@ -377,9 +408,19 @@ void vTaskDelay(TickType_t ticks)
 esp_err_t airdap_boot_key_get_pressed(bool *pressed)
 {
     assert(pressed != NULL);
-    *pressed = task_scenario == 2 ? task_tick < 510 :
-        task_tick < 2 || (task_scenario == 1 && task_tick >= 4 && task_tick < 6);
-    led_result = task_scenario == 2 && task_tick == 149 ? ESP_FAIL : ESP_OK;
+    if (task_scenario == 6) {
+        *pressed = false;
+        if (task_tick == 0) assert(airdap_button_simulate(AIRDAP_BUTTON_GESTURE_HOLD2) == ESP_OK);
+        led_result = ESP_OK;
+        return ESP_OK;
+    }
+    *pressed = task_scenario == 2 ? task_tick < 510 : task_scenario == 5 ? task_tick < 300 :
+        task_tick < 2 || ((task_scenario == 1 || task_scenario == 3 || task_scenario == 4) && task_tick >= 4 && task_tick < 6) ||
+        (task_scenario == 4 && task_tick >= 10 && task_tick < 12);
+    if (task_scenario == 0 && task_tick == 1) {
+        assert(airdap_button_config_set(AIRDAP_BUTTON_GESTURE_SINGLE, AIRDAP_BUTTON_COMMAND_PROVISIONING) == ESP_OK);
+    }
+    led_result = task_scenario == 2 && task_tick == 99 ? ESP_FAIL : ESP_OK;
     return ESP_OK;
 }
 
@@ -412,6 +453,41 @@ static void finish_window(void)
     assert(!airdap_ble_provisioning_test_window_active());
 }
 
+static void test_route_commands(void)
+{
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_NETWORK);
+    assert(airdap_ble_provisioning_test_button_action(AIRDAP_PROVISIONING_BUTTON_HOLD_6) == ESP_OK);
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_NETWORK);
+    const airdap_button_command_t route_commands[] = {
+        AIRDAP_BUTTON_COMMAND_DAP_USB, AIRDAP_BUTTON_COMMAND_DAP_NETWORK, AIRDAP_BUTTON_COMMAND_DAP_AUTO};
+    const airdap_dap_route_t expected_routes[] = {
+        AIRDAP_DAP_ROUTE_USB, AIRDAP_DAP_ROUTE_NETWORK, AIRDAP_DAP_ROUTE_AUTO};
+    for (unsigned i = 0; i < 3; ++i) {
+        assert(airdap_button_config_set(AIRDAP_BUTTON_GESTURE_HOLD6, route_commands[i]) == ESP_OK);
+        assert(airdap_ble_provisioning_test_button_action(AIRDAP_PROVISIONING_BUTTON_HOLD_6) == ESP_OK);
+        assert(airdap_mode_state_get_dap_route() == expected_routes[i]);
+    }
+    fake_dap_route_result = AIRDAP_MODE_DAP_BUSY;
+    assert(airdap_ble_provisioning_test_button_action(AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK) == ESP_ERR_INVALID_STATE);
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_AUTO);
+    fake_dap_route_result = AIRDAP_MODE_DAP_ALLOWED;
+    assert(airdap_button_config_defaults() == ESP_OK);
+}
+
+static void test_device_bindings(void)
+{
+    for (int c = AIRDAP_BUTTON_COMMAND_RESTART; c < AIRDAP_BUTTON_COMMAND_COUNT; ++c) {
+        assert(airdap_button_config_set(AIRDAP_BUTTON_GESTURE_HOLD6, (airdap_button_command_t) c) == ESP_OK);
+        last_device_command = AIRDAP_BUTTON_COMMAND_NONE;
+        assert(airdap_ble_provisioning_test_button_action(AIRDAP_PROVISIONING_BUTTON_HOLD_6) == ESP_OK);
+        assert(last_device_command == (airdap_button_command_t) c);
+        device_command_busy = true;
+        assert(airdap_ble_provisioning_test_button_action(AIRDAP_PROVISIONING_BUTTON_HOLD_6) == ESP_ERR_INVALID_STATE);
+        device_command_busy = false;
+    }
+    assert(airdap_button_config_defaults() == ESP_OK);
+}
+
 int main(void)
 {
     assert(airdap_ble_provisioning_start() == ESP_OK);
@@ -423,6 +499,8 @@ int main(void)
         AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK) == ESP_OK);
     assert(manager_init_count == 0U && manager_start_count == 0U);
     assert(clear_count == 0U && restart_count == 0U && led_change_count == 0U);
+    test_route_commands();
+    test_device_bindings();
     assert(!airdap_ble_provisioning_test_window_active());
 
     assert(airdap_ble_provisioning_test_button_action(
@@ -431,6 +509,9 @@ int main(void)
     assert(manager_init_count == 0U && manager_start_count == 0U);
     assert(airdap_ble_provisioning_test_button_action(
         AIRDAP_PROVISIONING_BUTTON_TOGGLE) == ESP_OK);
+    assert(airdap_button_config_set(AIRDAP_BUTTON_GESTURE_HOLD6, AIRDAP_BUTTON_COMMAND_WIFI_TOGGLE) == ESP_OK);
+    assert(airdap_ble_provisioning_test_button_action(AIRDAP_PROVISIONING_BUTTON_HOLD_6) == ESP_ERR_INVALID_STATE);
+    assert(airdap_button_config_defaults() == ESP_OK);
     assert(led_change_count == 0U && !status_led_on && !network_led_on);
     assert(airdap_ble_provisioning_test_window_active());
     assert(credential_load_count == 1U && manager_init_count == 1U);
@@ -638,16 +719,41 @@ int main(void)
     /* Run the real polling task against sampled button inputs and GPIO output.
      * Event actions remain separate; failed LED writes must not suppress them. */
     memset(button_action_counts, 0, sizeof(button_action_counts));
-    for (task_scenario = 0; task_scenario < 3; ++task_scenario) {
+    for (task_scenario = 0; task_scenario < 6; ++task_scenario) {
+        assert(airdap_button_config_defaults() == ESP_OK);
+        if (task_scenario == 3 || task_scenario == 4) {
+            assert(airdap_button_config_set(AIRDAP_BUTTON_GESTURE_DOUBLE, AIRDAP_BUTTON_COMMAND_CLEAR_NETWORK_RESTART) == ESP_OK);
+        }
         task_tick = 0;
         if (setjmp(task_done) == 0) button_task_function(NULL);
     }
-    assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_SINGLE_CLICK] == 1);
-    assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK] == 1);
-    assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY] == 1);
+    assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_SINGLE_CLICK] == 2);
+    assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK] == 2);
+    assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY] == 2);
     assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_CLEAR_READY] == 1);
+    assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_HOLD_6_READY] == 2);
+    assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_HOLD_6] == 1);
     assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_CLEAR] == 1);
     assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_TOGGLE] == 0);
+    test_restart_binding = true;
+    for (task_scenario = 3; task_scenario <= 4; ++task_scenario) {
+        memset(button_action_counts, 0, sizeof(button_action_counts));
+        assert(airdap_button_config_defaults() == ESP_OK);
+        assert(airdap_button_config_set(AIRDAP_BUTTON_GESTURE_DOUBLE, AIRDAP_BUTTON_COMMAND_RESTART) == ESP_OK);
+        task_tick = 0;
+        if (setjmp(task_done) == 0) button_task_function(NULL);
+        assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK] == (task_scenario == 3 ? 1U : 0U));
+    }
+    task_scenario = 6;
+    task_tick = 0;
+    memset(button_action_counts, 0, sizeof(button_action_counts));
+    assert(airdap_button_config_defaults() == ESP_OK);
+    if (setjmp(task_done) == 0) button_task_function(NULL);
+    assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY] == 1);
+    assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_TOGGLE] == 1);
+    assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_HOLD_6_READY] == 0);
+    airdap_button_gesture_t simulated;
+    assert(airdap_button_simulation_get(&simulated) == ESP_OK && simulated == AIRDAP_BUTTON_GESTURE_COUNT);
     puts("BLE provisioning adapter tests passed");
     return 0;
 }

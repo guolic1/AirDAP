@@ -347,6 +347,21 @@ static void test_reset_state_tracks_only_successful_gpio_commands(void)
 
 int main(void)
 {
+    reset_fake_gpio();
+    assert(airdap_board_init_safe() == ESP_OK);
+    assert(airdap_target_power_is_allowed());
+    input_level = 0; /* External ST low must not change the commanded permission. */
+    bool active;
+    assert(airdap_target_power_get_active(&active) == ESP_OK && !active);
+    assert(airdap_target_power_is_allowed());
+    assert(airdap_target_power_set_allowed(false) == ESP_OK);
+    assert(!airdap_target_power_is_allowed());
+    fail_at_call = event_count;
+    assert(airdap_target_power_set_allowed(true) == ESP_FAIL);
+    assert(!airdap_target_power_is_allowed());
+    reset_fake_gpio();
+    assert(airdap_board_init_safe() == ESP_OK);
+    assert(airdap_target_power_is_allowed());
     test_safe_gpio_state();
     test_first_gpio_failure_is_returned();
     test_gpio_config_failure_is_returned();

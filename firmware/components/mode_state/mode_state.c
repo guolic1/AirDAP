@@ -20,11 +20,15 @@ enum {
     MODE_WIFI_EPOCH_MASK = 0xFFU << MODE_WIFI_EPOCH_SHIFT,
     MODE_DEBUG_SHELL_ACTIVE = 1U << 24,
     MODE_DEBUG_SHELL_EPOCH_SHIFT = 25,
+    MODE_DAP_ROUTE_SHIFT = 30,
 };
 
 static const unsigned int MODE_DEBUG_SHELL_EPOCH_MASK =
-    0x7FU << MODE_DEBUG_SHELL_EPOCH_SHIFT;
+    0x1FU << MODE_DEBUG_SHELL_EPOCH_SHIFT;
+static const unsigned int MODE_DAP_ROUTE_MASK = 0x3U << MODE_DAP_ROUTE_SHIFT;
 static atomic_uint mode_control;
+/* Keep USB attach/acquire revocations from crossing a manual route selection. */
+static atomic_uint usb_preemptions_inflight;
 
 static unsigned int replace_field(
     unsigned int control,
@@ -225,15 +229,19 @@ static airdap_mode_state_result_t next_control(
 
 void airdap_mode_state_init(void)
 {
+    atomic_store(&usb_preemptions_inflight, 0U);
     atomic_store(&mode_control, MODE_INITIALIZED);
 }
 
 airdap_mode_state_result_t airdap_mode_state_transition(
     airdap_mode_event_t event)
 {
+    const bool attaching = event == AIRDAP_MODE_EVENT_USB_ATTACHED;
+    if (attaching) atomic_fetch_add(&usb_preemptions_inflight, 1U);
     unsigned int current = atomic_load(&mode_control);
     for (;;) {
         if ((current & MODE_INITIALIZED) == 0U) {
+            if (attaching) atomic_fetch_sub(&usb_preemptions_inflight, 1U);
             return AIRDAP_MODE_STATE_INVALID_STATE;
         }
 
@@ -243,13 +251,17 @@ airdap_mode_state_result_t airdap_mode_state_transition(
             event,
             &next);
         if (result != AIRDAP_MODE_STATE_OK) {
+            if (attaching) atomic_fetch_sub(&usb_preemptions_inflight, 1U);
             return result;
         }
         if (atomic_compare_exchange_weak(&mode_control, &current, next)) {
-            if (event == AIRDAP_MODE_EVENT_USB_ATTACHED) {
+            if (event == AIRDAP_MODE_EVENT_USB_ATTACHED &&
+                field_value(next, MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT) !=
+                    AIRDAP_DAP_ROUTE_NETWORK) {
                 (void) airdap_dap_ownership_revoke_owner(
                     AIRDAP_DAP_OWNER_NETWORK);
             }
+            if (attaching) atomic_fetch_sub(&usb_preemptions_inflight, 1U);
             return AIRDAP_MODE_STATE_OK;
         }
     }
@@ -311,6 +323,10 @@ static airdap_mode_dap_result_t dap_admission_for_control(
 
     switch (requested_owner) {
     case AIRDAP_DAP_OWNER_USB:
+        if (field_value(control, MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT) ==
+            AIRDAP_DAP_ROUTE_NETWORK) {
+            return AIRDAP_MODE_DAP_BUSY;
+        }
         if ((control & MODE_USB_PRESENT) == 0U) {
             return AIRDAP_MODE_DAP_OFFLINE;
         }
@@ -318,7 +334,10 @@ static airdap_mode_dap_result_t dap_admission_for_control(
     case AIRDAP_DAP_OWNER_NETWORK:
         if (board_control
                 ? (control & MODE_DEBUG_SHELL_ACTIVE) != 0U
-                : (control & MODE_USB_PRESENT) != 0U) {
+                : (field_value(control, MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT) ==
+                    AIRDAP_DAP_ROUTE_USB ||
+                   (field_value(control, MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT) ==
+                    AIRDAP_DAP_ROUTE_AUTO && (control & MODE_USB_PRESENT) != 0U))) {
             return AIRDAP_MODE_DAP_BUSY;
         }
         if ((airdap_wifi_state_t) field_value(
@@ -374,19 +393,66 @@ static airdap_mode_dap_result_t ownership_result(
     }
 }
 
+airdap_dap_route_t airdap_mode_state_get_dap_route(void)
+{
+    return (airdap_dap_route_t) field_value(
+        atomic_load(&mode_control), MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT);
+}
+
+airdap_mode_dap_result_t airdap_mode_state_set_dap_route(airdap_dap_route_t route)
+{
+    if (route < AIRDAP_DAP_ROUTE_AUTO || route > AIRDAP_DAP_ROUTE_TOGGLE) {
+        return AIRDAP_MODE_DAP_INVALID_ARGUMENT;
+    }
+    airdap_dap_ownership_operation_t operation = {0};
+    airdap_mode_dap_result_t result = ownership_result(
+        airdap_dap_ownership_control_begin(AIRDAP_DAP_OWNER_DIAGNOSTIC, &operation));
+    if (result != AIRDAP_MODE_DAP_ALLOWED) return result;
+    if (operation.owner != AIRDAP_DAP_OWNER_NONE) {
+        airdap_dap_ownership_operation_end(&operation);
+        return AIRDAP_MODE_DAP_BUSY;
+    }
+    unsigned int current = atomic_load(&mode_control);
+    for (;;) {
+        if ((current & MODE_INITIALIZED) == 0U) {
+            result = AIRDAP_MODE_DAP_INVALID_STATE;
+            break;
+        }
+        if ((current & MODE_OTA_MASK) != 0U || atomic_load(&usb_preemptions_inflight) != 0U) {
+            result = AIRDAP_MODE_DAP_BUSY;
+            break;
+        }
+        unsigned int selected = (unsigned int) route;
+        if (route == AIRDAP_DAP_ROUTE_TOGGLE) {
+            const unsigned int previous = field_value(
+                current, MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT);
+            const bool usb = previous == AIRDAP_DAP_ROUTE_USB ||
+                (previous == AIRDAP_DAP_ROUTE_AUTO && (current & MODE_USB_PRESENT) != 0U);
+            selected = usb ? AIRDAP_DAP_ROUTE_NETWORK : AIRDAP_DAP_ROUTE_USB;
+        }
+        unsigned int next = replace_field(current,
+            MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT, selected);
+        if (next == current) break;
+        next = increment_field(next, MODE_USB_OTA_EPOCH_MASK, MODE_USB_OTA_EPOCH_SHIFT);
+        if (atomic_compare_exchange_weak(&mode_control, &current, next)) break;
+    }
+    airdap_dap_ownership_operation_end(&operation);
+    return result;
+}
+
 static unsigned int dap_policy_stamp(
     unsigned int control,
     airdap_dap_owner_t owner)
 {
     unsigned int stamp = control &
-        (MODE_USB_PRESENT | MODE_OTA_MASK | MODE_USB_OTA_EPOCH_MASK);
+        (MODE_USB_PRESENT | MODE_OTA_MASK | MODE_USB_OTA_EPOCH_MASK | MODE_DAP_ROUTE_MASK);
     if (owner == AIRDAP_DAP_OWNER_NETWORK) {
         stamp |= control & (MODE_WIFI_MASK | MODE_WIFI_EPOCH_MASK);
     }
     return stamp;
 }
 
-airdap_mode_dap_result_t airdap_mode_state_dap_acquire(
+static airdap_mode_dap_result_t dap_acquire(
     airdap_dap_owner_t requested_owner,
     bool authenticated,
     airdap_dap_ownership_claim_t *claim)
@@ -403,6 +469,8 @@ airdap_mode_dap_result_t airdap_mode_state_dap_acquire(
         authenticated, false);
     if (result == AIRDAP_MODE_DAP_BUSY &&
         requested_owner == AIRDAP_DAP_OWNER_USB &&
+        field_value(before, MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT) !=
+            AIRDAP_DAP_ROUTE_NETWORK &&
         airdap_dap_ownership_current() == AIRDAP_DAP_OWNER_NETWORK) {
         const airdap_dap_ownership_result_t revoke_result =
             airdap_dap_ownership_revoke_owner(AIRDAP_DAP_OWNER_NETWORK);
@@ -448,6 +516,18 @@ airdap_mode_dap_result_t airdap_mode_state_dap_acquire(
             ? AIRDAP_MODE_DAP_BUSY
             : latest;
     }
+    return result;
+}
+
+airdap_mode_dap_result_t airdap_mode_state_dap_acquire(
+    airdap_dap_owner_t requested_owner,
+    bool authenticated,
+    airdap_dap_ownership_claim_t *claim)
+{
+    const bool usb = requested_owner == AIRDAP_DAP_OWNER_USB;
+    if (usb) atomic_fetch_add(&usb_preemptions_inflight, 1U);
+    const airdap_mode_dap_result_t result = dap_acquire(requested_owner, authenticated, claim);
+    if (usb) atomic_fetch_sub(&usb_preemptions_inflight, 1U);
     return result;
 }
 
