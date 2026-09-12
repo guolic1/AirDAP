@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "airdap_button_config.h"
+#include "airdap_button_simulation.h"
 #include "airdap_debug_shell_button.h"
 #include "airdap_mode_state.h"
 #include "freertos/semphr.h"
@@ -79,15 +80,15 @@ esp_err_t nvs_commit(nvs_handle_t handle)
     durable_size = pending_size;
     return ESP_OK;
 }
-esp_err_t airdap_boot_key_set_simulated_pressed(bool pressed)
+esp_err_t airdap_button_simulate(airdap_button_gesture_t gesture)
 {
-    (void) pressed;
+    (void) gesture;
     ++input_changes;
     return ESP_OK;
 }
-esp_err_t airdap_boot_key_get_simulated_pressed(bool *pressed)
+esp_err_t airdap_button_simulation_get(airdap_button_gesture_t *gesture)
 {
-    *pressed = false;
+    *gesture = AIRDAP_BUTTON_GESTURE_COUNT;
     return ESP_OK;
 }
 airdap_dap_route_t airdap_mode_state_get_dap_route(void) { return AIRDAP_DAP_ROUTE_AUTO; }

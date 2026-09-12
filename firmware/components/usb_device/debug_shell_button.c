@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "airdap_board.h"
+#include "airdap_button_simulation.h"
 #include "airdap_button_config.h"
 #include "airdap_mode_state.h"
 #include "airdap_debug_shell_button.h"
@@ -28,7 +28,7 @@ int airdap_debug_shell_button_command(
     void *context)
 {
     (void) context;
-    bool pressed;
+    airdap_button_gesture_t gesture;
     esp_err_t error;
 
     if (arguments != NULL && strcmp(arguments, "commands") == 0) {
@@ -77,46 +77,33 @@ int airdap_debug_shell_button_command(
         }
     }
 
-    if (arguments != NULL && strcmp(arguments, "press") == 0) {
-        pressed = true;
-        error = airdap_boot_key_set_simulated_pressed(pressed);
-        if (error != ESP_OK) {
-            return print_component_error(invocation, "update", error);
+    if (arguments != NULL && strncmp(arguments, "simulate ", 9) == 0) {
+        for (int value = 0; value < AIRDAP_BUTTON_GESTURE_COUNT; ++value) {
+            const char *name = airdap_button_gesture_name((airdap_button_gesture_t) value);
+            if (strcmp(arguments + 9, name) != 0) continue;
+            error = airdap_button_simulate((airdap_button_gesture_t) value);
+            if (error != ESP_OK) return print_component_error(invocation, "simulate", error);
+            airdap_debug_shell_printf(invocation, AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
+                "button: simulation=%s accepted\n", name);
+            return 0;
         }
-        airdap_debug_shell_printf(
-            invocation,
-            AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
-            "button: simulated=pressed\n");
-        return 0;
-    }
-    if (arguments != NULL && strcmp(arguments, "release") == 0) {
-        pressed = false;
-        error = airdap_boot_key_set_simulated_pressed(pressed);
-        if (error != ESP_OK) {
-            return print_component_error(invocation, "update", error);
-        }
-        airdap_debug_shell_printf(
-            invocation,
-            AIRDAP_DEBUG_SHELL_STYLE_SUCCESS,
-            "button: simulated=released\n");
-        return 0;
     }
     if (arguments != NULL && strcmp(arguments, "status") == 0) {
-        error = airdap_boot_key_get_simulated_pressed(&pressed);
+        error = airdap_button_simulation_get(&gesture);
         if (error != ESP_OK) {
             return print_component_error(invocation, "status", error);
         }
         airdap_debug_shell_printf(
             invocation,
             AIRDAP_DEBUG_SHELL_STYLE_DEFAULT,
-            "button: simulated=%s\n",
-            pressed ? "pressed" : "released");
+            "button: simulation=%s\n",
+            gesture == AIRDAP_BUTTON_GESTURE_COUNT ? "idle" : airdap_button_gesture_name(gesture));
         return 0;
     }
 
     airdap_debug_shell_printf(
         invocation,
         AIRDAP_DEBUG_SHELL_STYLE_WARNING,
-        "usage: button press|release|status|commands|bindings|defaults|bind <single|double|hold2|hold6|hold10> <command>\n");
+        "usage: button simulate <single|double|hold2|hold6|hold10>|status|commands|bindings|defaults|bind <gesture> <command>\n");
     return 1;
 }

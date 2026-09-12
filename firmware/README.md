@@ -1040,21 +1040,33 @@ extending a single global command table. Available commands are:
 - `wifi set` — interactively replace the stored SSID and password, reset
   reconnect backoff, and reconnect immediately;
 - `wifi clear` — remove stored Wi-Fi credentials and stop reconnect attempts;
-- `button press|release|status|commands|bindings|defaults|bind <gesture> <command>` — configure persistent gesture commands, list bindings, or set/inspect a RAM-only simulated
-  `BOOT_KEY`; physical and simulated presses pass through the same single-click,
-  double-click, 2-second, 6-second, 10-second, and release-confirmation behavior. `status`
-  reports the simulated input level, not an internal recognizer-state snapshot;
+- `button simulate <single|double|hold2|hold6|hold10>` — queue one complete
+  RAM-only BOOT_KEY gesture, including automatic release. Simulation passes
+  through the same recognizer, STATUS patterns and configured commands as physical
+  input. The acknowledgement means accepted, not command execution completed;
+- `button status` — report the queued/running simulated gesture or `idle`;
+  this does not report the physical key level or completion of its bound command;
+- `button commands|bindings|defaults|bind <gesture> <command>` — list commands,
+  inspect or persistently change gesture bindings;
 - `swd-idcode [clock_khz]` — reset the SWD line, select SWD, and read the
   target DP IDCODE at 100 kHz by default; accepted clocks are 100–10,000 kHz;
 - `restart` — wait for the acknowledgement transfer to complete, then restart
   AirDAP; a bounded transfer timeout leaves the firmware running.
 
-For HIL automation, one host invocation can hold the simulated button across
-the normal device-side threshold before releasing it:
+`button press` and `button release` have been replaced by complete gestures.
+Simulation runs asynchronously in the existing 20 ms button polling task, with
+100 ms presses for clicks (100 ms gap for a double click), and 2.1/6.1/10.1 second
+holds. Release samples complete the normal debounce and restart guard. New
+requests are rejected while simulation or a physical gesture is in progress.
+A physical press or input read failure discards an unfinished simulated gesture;
+physical input then starts its own gesture. Already emitted actions cannot be
+cancelled. Bindings are sampled at the beginning of the generated press.
+
+For HIL automation, request a gesture and optionally wait to observe completion:
 
 ```powershell
 uv run python firmware/tools/airdap-shell.py `
-    -c "button press" --sleep 3.5 -c "button release"
+    -c "button simulate hold2" --sleep 3 -c "button status"
 uv run python firmware/tools/airdap-shell.py -c "button status"
 ```
 
@@ -1088,8 +1100,8 @@ early application messages, and direct standard output are not captured by the
 Vendor interface. The shell is intended for physically connected development
 systems: it has no authentication, and anyone with access to it can replace or
 clear persistent Wi-Fi credentials or simulate the physical provisioning/reset
-button. A simulated press remains active across shell sessions until
-`button release` or a device restart. The current development profile does not
+button. A simulated gesture finishes and releases automatically even after the
+shell closes; restarting discards it. The current development profile does not
 enable Flash Encryption, so those credentials remain plaintext at rest. The
 shell provides only bounded diagnostics, Wi-Fi credential management, and
 BOOT_KEY simulation; it deliberately provides no arbitrary DP/AP access,
@@ -1162,7 +1174,7 @@ ordering, automatic AirDAP BLE discovery and public-credential command
 construction, UART line-coding mapping, independent bounded UART RX fan-out
 and overflow accounting, exact-session TX ownership and USB CDC session
 cleanup, both compile-time USB descriptor variants, bounded shell input, the
-simulated BOOT_KEY command/input merge, bounded SWD IDCODE command flow, debug
+bounded BOOT_KEY gesture simulation and physical-input cancellation, bounded SWD IDCODE command flow, debug
 TX completion state, host tools, and
 wired HIL helper's protocol checks. They do not prove USB enumeration, real NVS
 power-loss persistence or purge behavior, BLE enumeration or radio lifetime,

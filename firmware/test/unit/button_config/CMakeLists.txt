@@ -9,6 +9,7 @@ add_executable(button_config_test test_button_config.c
 target_include_directories(button_config_test PRIVATE fake_include
     ../config_store/fake_include ../../../components/board/include
     ../../../components/button_config/include
+    ../../../components/ble_provisioning/include
     ../../../components/mode_state/include
     ../../../components/dap_ownership/include
     ../../../components/usb_device/private_include)

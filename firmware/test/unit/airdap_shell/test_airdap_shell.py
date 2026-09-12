@@ -262,15 +262,15 @@ class AirDapShellTests(unittest.TestCase):
         args = airdap_shell.make_parser().parse_args(
             [
                 "-c",
-                "button press",
+                "button simulate hold2",
                 "--sleep",
                 "3.5",
                 "-c",
-                "button release",
+                "button status",
             ]
         )
 
-        self.assertEqual(args.command, ["button press", "button release"])
+        self.assertEqual(args.command, ["button simulate hold2", "button status"])
         self.assertEqual(args.sleep, 3.5)
 
     def test_sleep_seconds_must_be_non_negative_and_finite(self) -> None:
@@ -321,18 +321,18 @@ class AirDapShellTests(unittest.TestCase):
             result = airdap_shell.main(
                 [
                     "-c",
-                    "button press",
+                    "button simulate hold2",
                     "--sleep",
                     "3.5",
                     "-c",
-                    "button release",
+                    "button status",
                 ]
             )
 
         self.assertEqual(result, 0)
         run_sequence.assert_called_once_with(
             transport,
-            ["button press", "button release"],
+            ["button simulate hold2", "button status"],
             3.0,
             3.5,
             output,
@@ -403,7 +403,7 @@ class AirDapShellTests(unittest.TestCase):
         ):
             airdap_shell.run_command_sequence(
                 transport,
-                ["button press", "button release"],
+                ["button simulate hold2", "button status"],
                 timeout_seconds=3.0,
                 sleep_seconds=3.5,
                 output_stream=output,
@@ -412,12 +412,12 @@ class AirDapShellTests(unittest.TestCase):
         self.assertEqual(
             events,
             [
-                ("command", "button press"),
+                ("command", "button simulate hold2"),
                 ("sleep", 3.5),
-                ("command", "button release"),
+                ("command", "button status"),
             ],
         )
-        self.assertEqual(output.getvalue(), b"button press\nbutton release\n")
+        self.assertEqual(output.getvalue(), b"button simulate hold2\nbutton status\n")
 
     def test_colored_command_waits_for_prompt_reset_suffix(self) -> None:
         transport = FakeCommandTransport([

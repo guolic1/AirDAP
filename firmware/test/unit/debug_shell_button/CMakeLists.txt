@@ -15,6 +15,7 @@ target_include_directories(
     debug_shell_button_test
     PRIVATE
         ../../../components/button_config/include
+        ../../../components/ble_provisioning/include
         ../../../components/mode_state/include
         ../../../components/dap_ownership/include
         fake_include
@@ -34,6 +35,7 @@ add_executable(
     fake_button_config.c
     ../../../components/board/board.c
     ../../../components/ble_provisioning/provisioning_button.c
+    ../../../components/ble_provisioning/button_simulation.c
     ../../../components/usb_device/debug_shell_button.c
     ../../../components/usb_device/debug_shell_commands.c
 )
@@ -44,6 +46,7 @@ target_include_directories(
         ../../../components/mode_state/include
         ../../../components/dap_ownership/include
         ../../../components/board/include
+        ../../../components/ble_provisioning/include
         fake_include
         ../board/fake_include
         ../../../components/ble_provisioning/private_include

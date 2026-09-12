@@ -1,162 +1,69 @@
 #include <assert.h>
 #include <stdarg.h>
-#include <stdbool.h>
-#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-
-#include "airdap_board.h"
+#include "airdap_button_simulation.h"
 #include "airdap_debug_shell_button.h"
-#include "airdap_debug_shell_commands.h"
 
-typedef struct {
-    char text[256];
-    airdap_debug_shell_style_t style;
-} captured_output_t;
-
-static bool simulated_pressed;
-static unsigned int set_calls;
-static unsigned int get_calls;
-static esp_err_t set_result = ESP_OK;
-static esp_err_t get_result = ESP_OK;
-
-static void reset_fake_button(void)
+typedef struct { char text[256]; airdap_debug_shell_style_t style; } output_t;
+static airdap_button_gesture_t active = AIRDAP_BUTTON_GESTURE_COUNT;
+static unsigned requests, reads;
+static esp_err_t request_error, read_error;
+esp_err_t airdap_button_simulate(airdap_button_gesture_t gesture)
 {
-    simulated_pressed = false;
-    set_calls = 0U;
-    get_calls = 0U;
-    set_result = ESP_OK;
-    get_result = ESP_OK;
+    ++requests;
+    if (request_error == ESP_OK) active = gesture;
+    return request_error;
 }
-
-esp_err_t airdap_boot_key_set_simulated_pressed(bool pressed)
+esp_err_t airdap_button_simulation_get(airdap_button_gesture_t *gesture)
 {
-    ++set_calls;
-    if (set_result == ESP_OK) {
-        simulated_pressed = pressed;
-    }
-    return set_result;
+    ++reads;
+    if (read_error == ESP_OK) *gesture = active;
+    return read_error;
 }
-
-esp_err_t airdap_boot_key_get_simulated_pressed(bool *pressed)
+static void capture(airdap_debug_shell_style_t style, const char *format, va_list args, void *context)
 {
-    assert(pressed != NULL);
-    ++get_calls;
-    if (get_result == ESP_OK) {
-        *pressed = simulated_pressed;
-    }
-    return get_result;
-}
-
-static void capture_vprintf(
-    airdap_debug_shell_style_t style,
-    const char *format,
-    va_list arguments,
-    void *context)
-{
-    captured_output_t *output = context;
+    output_t *output = context;
     output->style = style;
     const size_t used = strlen(output->text);
-    (void) vsnprintf(
-        output->text + used,
-        sizeof(output->text) - used,
-        format,
-        arguments);
+    vsnprintf(output->text + used, sizeof(output->text) - used, format, args);
 }
-
-static int run_command(const char *arguments, captured_output_t *output)
+static int run(const char *arguments, output_t *output)
 {
-    const airdap_debug_shell_invocation_t invocation = {
-        .vprintf = capture_vprintf,
-        .output_context = output,
-    };
+    *output = (output_t) {0};
+    const airdap_debug_shell_invocation_t invocation = {.vprintf = capture, .output_context = output};
     return airdap_debug_shell_button_command(arguments, &invocation, NULL);
 }
-
-static void test_press_release_and_status_are_idempotent(void)
-{
-    reset_fake_button();
-    captured_output_t output = {0};
-    assert(run_command("press", &output) == 0);
-    assert(simulated_pressed && set_calls == 1U && get_calls == 0U);
-    assert(output.style == AIRDAP_DEBUG_SHELL_STYLE_SUCCESS);
-    assert(strcmp(output.text, "button: simulated=pressed\n") == 0);
-
-    output = (captured_output_t) {0};
-    assert(run_command("press", &output) == 0);
-    assert(simulated_pressed && set_calls == 2U);
-
-    output = (captured_output_t) {0};
-    assert(run_command("status", &output) == 0);
-    assert(simulated_pressed && set_calls == 2U && get_calls == 1U);
-    assert(output.style == AIRDAP_DEBUG_SHELL_STYLE_DEFAULT);
-    assert(strcmp(output.text, "button: simulated=pressed\n") == 0);
-
-    output = (captured_output_t) {0};
-    assert(run_command("release", &output) == 0);
-    assert(!simulated_pressed && set_calls == 3U);
-    assert(output.style == AIRDAP_DEBUG_SHELL_STYLE_SUCCESS);
-    assert(strcmp(output.text, "button: simulated=released\n") == 0);
-
-    output = (captured_output_t) {0};
-    assert(run_command("status", &output) == 0);
-    assert(!simulated_pressed && get_calls == 2U);
-    assert(strcmp(output.text, "button: simulated=released\n") == 0);
-}
-
-static void test_invalid_arguments_do_not_change_state(void)
-{
-    static const char *const invalid[] = {
-        "",
-        "tap",
-        "PRESS",
-        "press extra",
-        "release ",
-        "status extra",
-    };
-    reset_fake_button();
-    simulated_pressed = true;
-    const unsigned int sets_before = set_calls;
-    const unsigned int gets_before = get_calls;
-    for (size_t index = 0U;
-         index < sizeof(invalid) / sizeof(invalid[0]);
-         ++index) {
-        captured_output_t output = {0};
-        assert(run_command(invalid[index], &output) == 1);
-        assert(output.style == AIRDAP_DEBUG_SHELL_STYLE_WARNING);
-        assert(strcmp(
-            output.text,
-            "usage: button press|release|status|commands|bindings|defaults|bind <single|double|hold2|hold6|hold10> <command>\n") == 0);
-    }
-    assert(simulated_pressed);
-    assert(set_calls == sets_before && get_calls == gets_before);
-}
-
-static void test_component_errors_are_visible(void)
-{
-    reset_fake_button();
-    simulated_pressed = true;
-    captured_output_t output = {0};
-    set_result = ESP_FAIL;
-    assert(run_command("release", &output) == 1);
-    assert(simulated_pressed);
-    assert(output.style == AIRDAP_DEBUG_SHELL_STYLE_ERROR);
-    assert(strcmp(output.text, "button: update failed: ESP_FAIL\n") == 0);
-    set_result = ESP_OK;
-
-    output = (captured_output_t) {0};
-    get_result = ESP_FAIL;
-    assert(run_command("status", &output) == 1);
-    assert(output.style == AIRDAP_DEBUG_SHELL_STYLE_ERROR);
-    assert(strcmp(output.text, "button: status failed: ESP_FAIL\n") == 0);
-    get_result = ESP_OK;
-}
-
 int main(void)
 {
-    test_press_release_and_status_are_idempotent();
-    test_invalid_arguments_do_not_change_state();
-    test_component_errors_are_visible();
-    puts("Debug shell button tests passed");
+    output_t output;
+    for (int g = 0; g < AIRDAP_BUTTON_GESTURE_COUNT; ++g) {
+        char command[40], expected[80];
+        const char *name = airdap_button_gesture_name((airdap_button_gesture_t) g);
+        snprintf(command, sizeof(command), "simulate %s", name);
+        assert(run(command, &output) == 0 && active == (airdap_button_gesture_t) g);
+        snprintf(expected, sizeof(expected), "button: simulation=%s accepted\n", name);
+        assert(strcmp(output.text, expected) == 0 && output.style == AIRDAP_DEBUG_SHELL_STYLE_SUCCESS);
+        assert(run("status", &output) == 0);
+        snprintf(expected, sizeof(expected), "button: simulation=%s\n", name);
+        assert(strcmp(output.text, expected) == 0);
+    }
+    const char *invalid[] = {NULL, "", "press", "release", "simulate", "simulate hold3", "simulate HOLD2",
+        "simulate single extra", "simulate single ", "simulate  single", "status extra"};
+    const unsigned before_requests = requests, before_reads = reads;
+    for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
+        assert(run(invalid[i], &output) == 1);
+        assert(output.style == AIRDAP_DEBUG_SHELL_STYLE_WARNING && strstr(output.text, "usage: button simulate"));
+    }
+    assert(requests == before_requests && reads == before_reads);
+    request_error = ESP_FAIL;
+    assert(run("simulate single", &output) == 1 && active == AIRDAP_BUTTON_GESTURE_HOLD10);
+    assert(output.style == AIRDAP_DEBUG_SHELL_STYLE_ERROR && strstr(output.text, "simulate failed: ESP_FAIL"));
+    read_error = ESP_FAIL;
+    assert(run("status", &output) == 1 && strstr(output.text, "status failed: ESP_FAIL"));
+    read_error = ESP_OK;
+    active = AIRDAP_BUTTON_GESTURE_COUNT;
+    assert(run("status", &output) == 0 && strcmp(output.text, "button: simulation=idle\n") == 0);
+    puts("Debug shell button simulation commands passed");
     return 0;
 }

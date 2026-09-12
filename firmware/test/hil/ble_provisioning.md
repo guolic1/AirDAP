@@ -197,3 +197,21 @@ With DAP connected, OTA active, or provisioning active, verify each new command
 is rejected without changing the target, radio or AirDAP state. During a reset
 or power-cycle pulse, DAP acquisition and OTA writes must remain blocked. Repeat
 with USB debug shell disabled to confirm physical button operation is independent.
+
+## 9. Complete simulated gestures over USB
+
+Record bindings and use `none` for destructive actions during indicator-only
+checks. Run `button simulate single`, `double`, `hold2`, `hold6`, and `hold10`
+(with the full `button simulate` prefix each time). Confirm the matching STATUS
+patterns and exactly one terminal gesture, using the same configured command
+path as the physical button. Holds take real time and automatically release.
+`button status` reports the queued/running gesture, then `idle`; a second
+simulation during the first must fail. Legacy `button press`/`release` must fail.
+
+Close USB shell after submitting `button simulate hold6` and verify the gesture
+finishes normally. Reconnect and confirm `button status` is idle. Interrupt an
+unfinished simulated hold with a physical press; confirm the simulated hold
+action does not execute and the physical press begins a fresh gesture. A
+simulation requested during a physical gesture must not alter that gesture.
+Restore the saved bindings after the test. Obtain separate authorization for
+commands that reboot, clear configuration, reset the target, or change power.
