@@ -50,7 +50,7 @@ void app_main(void)
     } else {
         const esp_err_t network_dap_error = airdap_network_dap_start();
         if (network_dap_error != ESP_OK) {
-            ESP_LOGW(TAG, "DAP TCP unavailable: %s",
+            ESP_LOGW(TAG, "DAP/UART TCP unavailable: %s",
                 esp_err_to_name(network_dap_error));
         } else {
             const esp_err_t discovery_error = airdap_discovery_start();

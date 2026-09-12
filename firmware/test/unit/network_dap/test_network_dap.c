@@ -21,6 +21,7 @@
 #include "airdap_mode_state.h"
 #include "airdap_network_auth.h"
 #include "airdap_network_dap.h"
+#include "airdap_network_uart.h"
 #include "airdap_network_dap_internal.h"
 #include "esp_tls.h"
 #include "freertos/queue.h"
@@ -92,6 +93,7 @@ static unsigned int dap_submit_calls;
 static unsigned int shutdown_calls;
 static unsigned int socket_close_calls;
 static unsigned int task_create_calls;
+static unsigned int listener_bind_calls;
 static unsigned int queue_timeout_count;
 static airdap_network_auth_revoke_fn revoke_handler;
 static void *revoke_context;
@@ -124,8 +126,17 @@ static bool tls_write_paused;
 static bool allow_tls_write;
 static unsigned int tls_write_calls;
 
+static unsigned int uart_open_calls, uart_close_calls, uart_write_calls;
+static bool uart_live;
+static unsigned int fail_validation_at;
+static size_t block_write_after;
+
 static void reset_connection_fakes(void)
 {
+    uart_open_calls = uart_close_calls = uart_write_calls = 0;
+    uart_live = false;
+    fail_validation_at = 0;
+    block_write_after = SIZE_MAX;
     tls_input_size = 0U;
     tls_input_offset = 0U;
     tls_read_chunk = SIZE_MAX;
@@ -357,6 +368,7 @@ ssize_t airdap_network_auth_tls_write(
     if (socket_shutdown) {
         return -1;
     }
+    if (tls_output_size >= block_write_after) return ESP_TLS_ERR_SSL_WANT_WRITE;
     assert(tls_output_size + length <= sizeof(tls_output));
     memcpy(tls_output + tls_output_size, buffer, length);
     tls_output_size += length;
@@ -403,6 +415,8 @@ airdap_network_auth_result_t airdap_network_auth_session_validate(
     assert(connection == &auth_connection);
     assert(session_id == 77U);
     ++auth_validate_calls;
+    if (fail_validation_at != 0 && auth_validate_calls >= fail_validation_at)
+        return AIRDAP_NETWORK_AUTH_EXPIRED;
     return validate_result;
 }
 
@@ -665,6 +679,9 @@ int bind(int socket_fd, const struct sockaddr *address, socklen_t address_length
 {
     assert(socket_fd == TEST_LISTENER_FD);
     assert(address != NULL && address_length == sizeof(struct sockaddr_in));
+    const struct sockaddr_in *bound = (const struct sockaddr_in *) address;
+    assert(ntohs(bound->sin_port) == (listener_bind_calls == 0 ? 3260 : 3261));
+    ++listener_bind_calls;
     return 0;
 }
 
@@ -719,7 +736,7 @@ int fcntl(int socket_fd, int command, ...)
 int poll(struct pollfd *descriptors, nfds_t count, int timeout_ms)
 {
     assert(descriptors != NULL && count == 1U && timeout_ms >= 0);
-    if (timeout_at_end_of_input && descriptors[0].fd == TEST_CLIENT_FD) {
+    if ((timeout_at_end_of_input || block_write_after != SIZE_MAX) && descriptors[0].fd == TEST_CLIENT_FD) {
         now_us += (int64_t) timeout_ms * 1000;
         return 0;
     }
@@ -1212,6 +1229,111 @@ static void test_pre_auth_partial_frame_times_out(void)
     assert(auth_close_calls == 1U && socket_close_calls == 1U);
 }
 
+airdap_target_uart_result_t airdap_target_uart_session_open(
+    airdap_target_uart_transport_t transport, bool authenticated, uint32_t *session)
+{
+    assert(transport == AIRDAP_TARGET_UART_TRANSPORT_NETWORK && authenticated);
+    ++uart_open_calls; uart_live = true; *session = 123;
+    return AIRDAP_TARGET_UART_OK;
+}
+airdap_target_uart_result_t airdap_target_uart_session_close(
+    airdap_target_uart_transport_t transport, uint32_t session)
+{
+    assert(transport == AIRDAP_TARGET_UART_TRANSPORT_NETWORK && session == 123);
+    ++uart_close_calls; uart_live = false;
+    return AIRDAP_TARGET_UART_OK;
+}
+airdap_target_uart_result_t airdap_target_uart_tx_acquire(
+    airdap_target_uart_transport_t transport, uint32_t session)
+{
+    assert(transport == AIRDAP_TARGET_UART_TRANSPORT_NETWORK && session == 123);
+    return uart_live ? AIRDAP_TARGET_UART_OK : AIRDAP_TARGET_UART_STALE_SESSION;
+}
+airdap_target_uart_result_t airdap_target_uart_session_configure(
+    airdap_target_uart_transport_t t, uint32_t s, uint32_t baud, uint8_t stop,
+    uint8_t parity, uint8_t bits)
+{
+    (void)t; (void)s; (void)baud; (void)stop; (void)parity; (void)bits;
+    return AIRDAP_TARGET_UART_OK;
+}
+airdap_target_uart_result_t airdap_target_uart_session_get_status(
+    airdap_target_uart_transport_t t, uint32_t s, airdap_target_uart_session_status_t *status)
+{
+    (void)t; (void)s; memset(status, 0, sizeof(*status));
+    return AIRDAP_TARGET_UART_OK;
+}
+esp_err_t airdap_target_uart_get_status(airdap_target_uart_status_t *status)
+{
+    memset(status, 0, sizeof(*status)); status->baud_rate = 115200; status->data_bits = 8;
+    return ESP_OK;
+}
+airdap_target_uart_result_t airdap_target_uart_session_read(
+    airdap_target_uart_transport_t t, uint32_t s, uint8_t *data, size_t capacity, size_t *received)
+{
+    (void)t; (void)s; assert(capacity > 0); data[0] = 0xA5; *received = 1;
+    return AIRDAP_TARGET_UART_OK;
+}
+airdap_target_uart_result_t airdap_target_uart_session_write(
+    airdap_target_uart_transport_t t, uint32_t s, const uint8_t *data, size_t size, size_t *written)
+{
+    (void)t; (void)s; assert(data != NULL && uart_live); ++uart_write_calls;
+    *written = size; return AIRDAP_TARGET_UART_OK;
+}
+
+static void uart_handshake(void)
+{
+    append_request(AIRDAP_FRAME_TYPE_HELLO, 9, 1, NULL, 0);
+    append_request(AIRDAP_FRAME_TYPE_AUTH, 9, 2, NULL, 0);
+}
+
+static void test_uart_transport(void)
+{
+    const uint8_t write[] = {0x13, 0xA5};
+    const uint8_t read[] = {0x14, 0, 1};
+    for (size_t chunk = 1; chunk <= 4096; chunk *= 16) {
+        reset_connection_fakes(); tls_read_chunk = chunk;
+        uart_handshake();
+        append_request(AIRDAP_FRAME_TYPE_CONTROL_REQUEST, 9, 3, write, 2);
+        append_request(AIRDAP_FRAME_TYPE_CONTROL_REQUEST, 9, 3, write, 2);
+        append_request(AIRDAP_FRAME_TYPE_CONTROL_REQUEST, 9, 4, read, 3);
+        airdap_network_uart_handle_socket(TEST_CLIENT_FD);
+        assert(uart_open_calls == 1 && uart_close_calls == 1 && uart_write_calls == 1);
+        assert(dap_open_calls == 0 && dap_submit_calls == 0 && !uart_live);
+        size_t offset = 0; const uint8_t *payload;
+        next_response(&offset, &payload); next_response(&offset, &payload);
+        airdap_frame_header_t h = next_response(&offset, &payload);
+        assert(h.type == AIRDAP_FRAME_TYPE_CONTROL_RESPONSE && h.sequence == 3);
+        const uint8_t accepted[] = {0x13, 0, 1};
+        assert(h.payload_length == 3 && memcmp(payload, accepted, 3) == 0);
+        h = next_response(&offset, &payload);
+        assert_error_payload(payload, h.payload_length, AIRDAP_FRAME_ERROR_SEQUENCE_DUPLICATE);
+        h = next_response(&offset, &payload);
+        const uint8_t rx[] = {0x14, 0, 0, 0, 0, 0xA5};
+        assert(h.type == AIRDAP_FRAME_TYPE_CONTROL_RESPONSE && h.payload_length == 6);
+        assert(memcmp(payload, rx, 6) == 0);
+    }
+    reset_connection_fakes();
+    append_request(AIRDAP_FRAME_TYPE_HELLO, 9, 1, NULL, 0);
+    append_request(AIRDAP_FRAME_TYPE_CONTROL_REQUEST, 9, 2, write, 2);
+    airdap_network_uart_handle_socket(TEST_CLIENT_FD);
+    assert(uart_open_calls == 0 && uart_write_calls == 0);
+    reset_connection_fakes(); uart_handshake(); fail_validation_at = 3;
+    append_request(AIRDAP_FRAME_TYPE_CONTROL_REQUEST, 9, 3, write, 2);
+    airdap_network_uart_handle_socket(TEST_CLIENT_FD);
+    assert(uart_open_calls == 1 && uart_close_calls == 1 && uart_write_calls == 0);
+    reset_connection_fakes(); uart_handshake(); revoke_session_id_at_end = 77;
+    airdap_network_uart_handle_socket(TEST_CLIENT_FD);
+    assert(shutdown_calls == 1 && uart_close_calls == 2 && !uart_live);
+    reset_connection_fakes(); uart_handshake();
+    append_request(AIRDAP_FRAME_TYPE_CONTROL_REQUEST, 9, 3, read, 3);
+    block_write_after = 2 * AIRDAP_FRAME_HEADER_SIZE +
+        AIRDAP_NETWORK_DAP_HELLO_FIXED_SIZE + strlen(identity.firmware_version) +
+        AIRDAP_NETWORK_DAP_AUTH_RESPONSE_SIZE;
+    airdap_network_uart_handle_socket(TEST_CLIENT_FD);
+    assert(uart_close_calls == 1 && now_us >= 5000000 && !uart_live);
+    assert_network_dap_status(true, 0, 0, 0, 0);
+}
+
 int main(int argument_count, char **arguments)
 {
     if (argument_count == 2 &&
@@ -1223,6 +1345,7 @@ int main(int argument_count, char **arguments)
     assert(argument_count == 1);
     reset_connection_fakes();
     test_status_is_empty_during_listener_startup();
+    assert(listener_bind_calls == 2);
     test_concurrent_status_tracks_connection_lifecycle();
     test_authenticated_hello_dap_info_and_keepalive();
     test_dap_before_auth_is_rejected_without_dispatch();
@@ -1238,6 +1361,7 @@ int main(int argument_count, char **arguments)
     test_unrelated_revoke_does_not_shutdown_registered_connection();
     test_revoke_closes_service_before_queued_dap_can_respond();
     test_pre_auth_partial_frame_times_out();
+    test_uart_transport();
     assert_network_dap_status(true, 0U, 0U, 0U, 0U);
     puts("Network DAP transport tests passed");
     return 0;
