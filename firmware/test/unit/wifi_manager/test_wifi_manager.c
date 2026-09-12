@@ -118,6 +118,8 @@ static void test_connect_start_failure_is_transient_and_retried(void)
 static void test_esp_wifi_wrong_password_reasons_are_classified(void)
 {
     assert(airdap_wifi_disconnect_is_authentication_failure(
+        WIFI_REASON_AUTH_EXPIRE));
+    assert(airdap_wifi_disconnect_is_authentication_failure(
         WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT));
     assert(airdap_wifi_disconnect_is_authentication_failure(
         WIFI_REASON_802_1X_AUTH_FAILED));
