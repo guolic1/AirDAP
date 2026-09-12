@@ -44,6 +44,8 @@ typedef enum {
     AIRDAP_MODE_EVENT_OTA_FAILED,
     AIRDAP_MODE_EVENT_OTA_COMMITTED,
     AIRDAP_MODE_EVENT_OTA_RESET,
+    AIRDAP_MODE_EVENT_DEBUG_SHELL_STARTED,
+    AIRDAP_MODE_EVENT_DEBUG_SHELL_ENDED,
 } airdap_mode_event_t;
 
 typedef enum {
@@ -98,8 +100,9 @@ airdap_mode_dap_result_t airdap_mode_state_dap_operation_begin(
     const airdap_dap_ownership_claim_t *claim,
     airdap_dap_ownership_operation_t *operation);
 
-/* Apply NETWORK policy and reserve a short reset/power operation without
- * acquiring a DAP claim or emitting SWD traffic. */
+/* Reserve a short authenticated reset/power operation without acquiring a DAP
+ * claim or emitting SWD traffic. Idle USB attachment is allowed; an active
+ * Debug Shell session, conflicting DAP ownership or OTA blocks control. */
 airdap_mode_dap_result_t airdap_mode_state_control_operation_begin(
     bool authenticated,
     airdap_dap_ownership_operation_t *operation);

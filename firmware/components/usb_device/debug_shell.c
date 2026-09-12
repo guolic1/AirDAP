@@ -16,6 +16,7 @@
 #include "airdap_debug_shell_swd_probe.h"
 #include "airdap_debug_shell_tx_state.h"
 #include "airdap_debug_shell_wifi.h"
+#include "airdap_mode_state.h"
 #include "airdap_swd.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -753,6 +754,7 @@ static void start_session(
     portENTER_CRITICAL(&tx_state_lock);
     airdap_debug_shell_tx_state_connected(&tx_state);
     atomic_store(&session_color_enabled, color_enabled);
+    (void) airdap_mode_state_transition(AIRDAP_MODE_EVENT_DEBUG_SHELL_STARTED);
     atomic_store(&session_active, true);
     portEXIT_CRITICAL(&tx_state_lock);
     xSemaphoreGive(output_mutex);
@@ -893,11 +895,11 @@ esp_err_t airdap_debug_shell_start(void)
 
 void airdap_debug_shell_disconnected(void)
 {
-    atomic_store(&session_active, false);
-    atomic_store(&session_color_enabled, false);
-
     TaskHandle_t waiter;
     portENTER_CRITICAL(&tx_state_lock);
+    atomic_store(&session_active, false);
+    atomic_store(&session_color_enabled, false);
+    (void) airdap_mode_state_transition(AIRDAP_MODE_EVENT_DEBUG_SHELL_ENDED);
     airdap_debug_shell_tx_state_disconnected(&tx_state);
     waiter = tx_idle_waiter;
     tx_idle_waiter = NULL;

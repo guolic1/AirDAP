@@ -136,6 +136,8 @@ static void test_set_and_get(void)
     for (size_t index = 0U; index < sizeof(opcodes); ++index) {
         for (uint8_t value = 0U; value <= 1U; ++value) {
             reset_test();
+            assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED) ==
+                AIRDAP_MODE_STATE_OK);
             power_status = value != 0U;
             const uint8_t payload[] = {opcodes[index], value};
             expect(payload, index == 2U ? 1U : 2U, AIRDAP_FRAME_ERROR_NONE);
@@ -202,7 +204,7 @@ static void test_mode_ownership_and_board_failure(void)
 {
     const uint8_t request[] = {0x21U, 1U};
     const airdap_mode_event_t denied[] = {
-        AIRDAP_MODE_EVENT_USB_ATTACHED, AIRDAP_MODE_EVENT_WIFI_DISCONNECTED,
+        AIRDAP_MODE_EVENT_DEBUG_SHELL_STARTED, AIRDAP_MODE_EVENT_WIFI_DISCONNECTED,
         AIRDAP_MODE_EVENT_WIFI_STOPPED, AIRDAP_MODE_EVENT_OTA_STARTED,
     };
     for (size_t index = 0U; index < sizeof(denied) / sizeof(denied[0]); ++index) {

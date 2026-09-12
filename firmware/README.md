@@ -527,8 +527,12 @@ short payload `0001`, unknown opcode `0004`, busy/disallowed target state
 `0020`, unauthenticated `0021`, invalid value/trailing bytes `0023`, and board
 or internal failure `00ff`. Errors consume the accepted request sequence.
 
-USB presence, offline Wi-Fi, non-idle OTA, USB/DIAGNOSTIC DAP ownership and
-in-flight physical DAP work block control. POWER_SET also requires no DAP
+An attached but idle USB connection permits authenticated reset/power control.
+An active Debug Shell session, offline Wi-Fi, non-idle OTA, USB/DIAGNOSTIC DAP
+ownership and in-flight physical DAP work block control. The shell tool's
+START/END markers track session occupancy; firmware cannot observe a host merely
+opening a USB handle. Normal shell close releases this gate. NETWORK DAP's
+USB-presence policy is unchanged. POWER_SET also requires no DAP
 owner: issue DAP_Disconnect before changing power permission. Control uses a
 short ownership reservation without acquiring DAP or emitting SWD Line Reset.
 The reservation ends before any TLS output, including on board failure.
