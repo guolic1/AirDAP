@@ -21,6 +21,7 @@
 #include "airdap_network_auth.h"
 #include "airdap_network_dap.h"
 #include "airdap_network_dap_internal.h"
+#include "airdap_network_uart.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_tls.h"
@@ -65,12 +66,14 @@ typedef struct {
 typedef struct {
     bool allocated;
     bool registered;
-    bool dap_claimed;
+    bool service_claimed;
+    bool uart;
     int socket_fd;
     airdap_network_auth_connection_t *auth_connection;
     QueueHandle_t response_queue;
     atomic_uint auth_session_id;
     atomic_uint dap_session;
+    atomic_uint uart_session;
     atomic_uintptr_t pending_response_token;
     uintptr_t next_response_token;
     uint8_t frame_buffer[FRAME_BUFFER_SIZE];
@@ -102,7 +105,9 @@ static atomic_bool initialization_started;
 static atomic_bool revoke_all;
 static atomic_bool listener_ready;
 static bool dap_claimed;
+static bool uart_claimed;
 static int listener_socket = -1;
+static int uart_listener_socket = -1;
 
 static void clear_bytes(void *data, size_t size)
 {
@@ -140,7 +145,7 @@ esp_err_t airdap_network_dap_get_status(airdap_network_dap_status_t *status)
          index < AIRDAP_NETWORK_DAP_MAX_CONNECTIONS;
          ++index) {
         const network_connection_t *connection = &connections[index];
-        if (!connection->allocated) {
+        if (!connection->allocated || connection->uart) {
             continue;
         }
         ++status->allocated_connections;
@@ -269,6 +274,9 @@ static io_result_t tls_write_all(
 {
     size_t offset = 0U;
     while (offset < input_size) {
+        if (deadline_us != INT64_MAX && esp_timer_get_time() >= deadline_us) {
+            return IO_TIMEOUT;
+        }
         const ssize_t written = airdap_network_auth_tls_write(
             connection->auth_connection,
             input + offset,
@@ -433,10 +441,10 @@ static bool send_error(
             sizeof(payload));
 }
 
-static network_connection_t *allocate_connection(int socket_fd)
+static network_connection_t *allocate_connection(int socket_fd, bool uart)
 {
-    QueueHandle_t response_queue = xQueueCreate(1U, sizeof(dap_response_item_t));
-    if (response_queue == NULL || !registry_lock()) {
+    QueueHandle_t response_queue = uart ? NULL : xQueueCreate(1U, sizeof(dap_response_item_t));
+    if ((!uart && response_queue == NULL) || !registry_lock()) {
         if (response_queue != NULL) {
             vQueueDelete(response_queue);
         }
@@ -451,33 +459,36 @@ static network_connection_t *allocate_connection(int socket_fd)
             selected = &connections[index];
             selected->allocated = true;
             selected->registered = true;
-            selected->dap_claimed = false;
+            selected->service_claimed = false;
+            selected->uart = uart;
             selected->socket_fd = socket_fd;
             selected->auth_connection = NULL;
             selected->response_queue = response_queue;
             selected->next_response_token = 1U;
             atomic_store(&selected->auth_session_id, 0U);
             atomic_store(&selected->dap_session, 0U);
+            atomic_store(&selected->uart_session, 0U);
             atomic_store(&selected->pending_response_token, 0U);
             break;
         }
     }
     registry_unlock();
-    if (selected == NULL) {
+    if (selected == NULL && response_queue != NULL) {
         vQueueDelete(response_queue);
     }
     return selected;
 }
 
-static bool claim_dap_connection(network_connection_t *connection)
+static bool claim_service_connection(network_connection_t *connection)
 {
     if (!registry_lock()) {
         return false;
     }
-    const bool available = !dap_claimed;
+    bool *claimed = connection->uart ? &uart_claimed : &dap_claimed;
+    const bool available = !*claimed;
     if (available) {
-        dap_claimed = true;
-        connection->dap_claimed = true;
+        *claimed = true;
+        connection->service_claimed = true;
     }
     registry_unlock();
     return available;
@@ -515,9 +526,16 @@ static void release_connection(network_connection_t *connection)
         }
     }
 
-    if (connection->dap_claimed && registry_lock()) {
-        dap_claimed = false;
-        connection->dap_claimed = false;
+    const uint32_t uart_session = atomic_exchange(&connection->uart_session, 0U);
+    if (uart_session != 0U) {
+        (void) airdap_target_uart_session_close(
+            AIRDAP_TARGET_UART_TRANSPORT_NETWORK, uart_session);
+    }
+
+    if (connection->service_claimed && registry_lock()) {
+        if (connection->uart) uart_claimed = false;
+        else dap_claimed = false;
+        connection->service_claimed = false;
         registry_unlock();
     }
     airdap_network_auth_connection_t *auth_connection = NULL;
@@ -562,6 +580,8 @@ static void revoke_session(void *context, uint32_t session_id)
 
 static void process_revoked_session(uint32_t session_id, bool all_sessions)
 {
+    uint32_t uart_sessions[AIRDAP_NETWORK_DAP_MAX_CONNECTIONS] = {0};
+    size_t uart_session_count = 0U;
     airdap_dap_session_id_t dap_sessions[
         AIRDAP_NETWORK_DAP_MAX_CONNECTIONS] = {0};
     size_t dap_session_count = 0U;
@@ -579,6 +599,10 @@ static void process_revoked_session(uint32_t session_id, bool all_sessions)
             current_session != 0U &&
             (all_sessions || current_session == session_id)) {
             (void) shutdown(connection->socket_fd, SHUT_RDWR);
+            const uint32_t uart_session = atomic_load(&connection->uart_session);
+            if (uart_session != 0U) {
+                uart_sessions[uart_session_count++] = uart_session;
+            }
             const airdap_dap_session_id_t dap_session =
                 atomic_load(&connection->dap_session);
             if (dap_session != 0U) {
@@ -587,6 +611,11 @@ static void process_revoked_session(uint32_t session_id, bool all_sessions)
         }
     }
     registry_unlock();
+
+    for (size_t index = 0U; index < uart_session_count; ++index) {
+        (void) airdap_target_uart_session_close(
+            AIRDAP_TARGET_UART_TRANSPORT_NETWORK, uart_sessions[index]);
+    }
 
     /* Do not clear dap_session here. The connection task remains the teardown
      * owner and must also pass through session_close before deleting its
@@ -708,7 +737,7 @@ static bool bind_session(
             AIRDAP_FRAME_ERROR_UNSUPPORTED_TYPE);
         return false;
     }
-    if (!claim_dap_connection(connection)) {
+    if (!claim_service_connection(connection)) {
         (void) send_error(connection, request, AIRDAP_FRAME_ERROR_BUSY);
         return false;
     }
@@ -750,33 +779,54 @@ static bool bind_session(
         return false;
     }
 
-    airdap_dap_session_id_t dap_session = 0U;
-    const airdap_dap_service_result_t open_result =
-        airdap_dap_service_session_open(
-            AIRDAP_DAP_TRANSPORT_NETWORK,
-            true,
-            &dap_session);
-    if (open_result != AIRDAP_DAP_SERVICE_OK) {
-        (void) send_error(
-            connection,
-            request,
-            dap_service_error_code(open_result));
-        clear_bytes(&session_info, sizeof(session_info));
-        return false;
+    if (connection->uart) {
+        uint32_t uart_session = 0U;
+        const airdap_target_uart_result_t result = airdap_target_uart_session_open(
+            AIRDAP_TARGET_UART_TRANSPORT_NETWORK, true, &uart_session);
+        if (result != AIRDAP_TARGET_UART_OK) {
+            (void) send_error(connection, request, airdap_network_uart_error_code(result));
+            clear_bytes(&session_info, sizeof(session_info));
+            return false;
+        }
+        atomic_store(&connection->uart_session, uart_session);
+        /* A revoke can race subscriber creation; never publish AUTH success
+         * after it. Teardown closes the exact session even if the revoke
+         * listener passed the registry before uart_session was published. */
+        if (airdap_network_auth_session_validate(connection->auth_connection,
+                session_info.session_id) != AIRDAP_NETWORK_AUTH_OK) {
+            (void) send_error(connection, request, AIRDAP_FRAME_ERROR_UNAUTHENTICATED);
+            clear_bytes(&session_info, sizeof(session_info));
+            return false;
+        }
+    } else {
+        airdap_dap_session_id_t dap_session = 0U;
+        const airdap_dap_service_result_t open_result =
+            airdap_dap_service_session_open(
+                AIRDAP_DAP_TRANSPORT_NETWORK,
+                true,
+                &dap_session);
+        if (open_result != AIRDAP_DAP_SERVICE_OK) {
+            (void) send_error(
+                connection,
+                request,
+                dap_service_error_code(open_result));
+            clear_bytes(&session_info, sizeof(session_info));
+            return false;
+        }
+        if (!registry_lock()) {
+            (void) airdap_dap_service_session_close(
+                AIRDAP_DAP_TRANSPORT_NETWORK,
+                dap_session);
+            (void) send_error(
+                connection,
+                request,
+                AIRDAP_FRAME_ERROR_INTERNAL);
+            clear_bytes(&session_info, sizeof(session_info));
+            return false;
+        }
+        atomic_store(&connection->dap_session, dap_session);
+        registry_unlock();
     }
-    if (!registry_lock()) {
-        (void) airdap_dap_service_session_close(
-            AIRDAP_DAP_TRANSPORT_NETWORK,
-            dap_session);
-        (void) send_error(
-            connection,
-            request,
-            AIRDAP_FRAME_ERROR_INTERNAL);
-        clear_bytes(&session_info, sizeof(session_info));
-        return false;
-    }
-    atomic_store(&connection->dap_session, dap_session);
-    registry_unlock();
 
     uint8_t response[AIRDAP_NETWORK_DAP_AUTH_RESPONSE_SIZE];
     write_u32_be(response, session_info.session_id);
@@ -1002,6 +1052,10 @@ static void run_connection(network_connection_t *connection)
             break;
 
         case AIRDAP_FRAME_TYPE_DAP_REQUEST:
+            if (connection->uart) {
+                if (!send_error(connection, &request, AIRDAP_FRAME_ERROR_UNSUPPORTED_TYPE)) return;
+                break;
+            }
             if (!authenticated) {
                 if (!send_error(
                         connection,
@@ -1015,6 +1069,28 @@ static void run_connection(network_connection_t *connection)
                 return;
             }
             break;
+
+        case AIRDAP_FRAME_TYPE_CONTROL_REQUEST: {
+            if (!connection->uart) {
+                if (!send_error(connection, &request, AIRDAP_FRAME_ERROR_UNSUPPORTED_TYPE)) return;
+                break;
+            }
+            uint8_t response[AIRDAP_NETWORK_UART_MAX_RESPONSE];
+            size_t response_size = 0U;
+            const airdap_frame_error_code_t error = airdap_network_uart_dispatch(
+                connection->auth_connection, atomic_load(&connection->auth_session_id),
+                atomic_load(&connection->uart_session), payload, request.payload_length,
+                response, sizeof(response), &response_size);
+            if (error != AIRDAP_FRAME_ERROR_NONE) {
+                if (!send_error(connection, &request, error) ||
+                    error == AIRDAP_FRAME_ERROR_UNAUTHENTICATED) return;
+            } else {
+                if (!validate_bound_session(connection)) return;
+                if (!send_frame(connection, &request, AIRDAP_FRAME_TYPE_CONTROL_RESPONSE,
+                        response, response_size)) return;
+            }
+            break;
+        }
 
         case AIRDAP_FRAME_TYPE_KEEPALIVE:
             if (!authenticated || request.payload_length != 0U ||
@@ -1051,7 +1127,18 @@ static void run_connection(network_connection_t *connection)
 
 void airdap_network_dap_handle_socket(int socket_fd)
 {
-    network_connection_t *connection = allocate_connection(socket_fd);
+    network_connection_t *connection = allocate_connection(socket_fd, false);
+    if (connection == NULL) {
+        (void) close(socket_fd);
+        return;
+    }
+    run_connection(connection);
+    release_connection(connection);
+}
+
+void airdap_network_uart_handle_socket(int socket_fd)
+{
+    network_connection_t *connection = allocate_connection(socket_fd, true);
     if (connection == NULL) {
         (void) close(socket_fd);
         return;
@@ -1073,45 +1160,67 @@ static void listener_task(void *argument)
     (void) argument;
     for (;;) {
         airdap_network_dap_process_revocations();
-        struct pollfd descriptor = {
-            .fd = listener_socket,
-            .events = POLLIN,
+        struct pollfd descriptors[2] = {
+            {.fd = listener_socket, .events = POLLIN},
+            {.fd = uart_listener_socket, .events = POLLIN},
         };
-        const int ready = poll(&descriptor, 1U, LISTENER_POLL_MS);
+        const int ready = poll(descriptors, 2U, LISTENER_POLL_MS);
         if (ready <= 0) {
             continue;
         }
-        if ((descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
-            ESP_LOGE(TAG, "DAP TCP listener failed");
-            continue;
-        }
-        if ((descriptor.revents & POLLIN) == 0) {
-            continue;
-        }
-
-        const int accepted_socket = accept(listener_socket, NULL, NULL);
-        if (accepted_socket < 0) {
-            if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
-                ESP_LOGW(TAG, "DAP TCP accept failed: %d", errno);
+        for (size_t index = 0; index < 2; ++index) {
+            const struct pollfd descriptor = descriptors[index];
+            if ((descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+                ESP_LOGE(TAG, "DAP TCP listener failed");
+                continue;
             }
-            continue;
-        }
-        network_connection_t *connection = allocate_connection(
-            accepted_socket);
-        if (connection == NULL) {
-            (void) close(accepted_socket);
-            continue;
-        }
-        if (xTaskCreate(
-                connection_task,
-                "dap_tcp_connection",
-                CONNECTION_TASK_STACK_SIZE,
-                connection,
-                CONNECTION_TASK_PRIORITY,
-                NULL) != pdPASS) {
-            release_connection(connection);
+            if ((descriptor.revents & POLLIN) == 0) {
+                continue;
+            }
+
+            const int accepted_socket = accept(descriptor.fd, NULL, NULL);
+            if (accepted_socket < 0) {
+                if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+                    ESP_LOGW(TAG, "DAP TCP accept failed: %d", errno);
+                }
+                continue;
+            }
+            network_connection_t *connection = allocate_connection(
+                accepted_socket, index == 1);
+            if (connection == NULL) {
+                (void) close(accepted_socket);
+                continue;
+            }
+            if (xTaskCreate(
+                    connection_task,
+                    "dap_tcp_connection",
+                    CONNECTION_TASK_STACK_SIZE,
+                    connection,
+                    CONNECTION_TASK_PRIORITY,
+                    NULL) != pdPASS) {
+                release_connection(connection);
+            }
         }
     }
+}
+
+static int create_listener(uint16_t port)
+{
+    const int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (fd < 0) return -1;
+    const int reuse_address = 1;
+    const struct sockaddr_in address = {
+        .sin_family = AF_INET, .sin_port = htons(port),
+        .sin_addr.s_addr = htonl(INADDR_ANY),
+    };
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse_address, sizeof(reuse_address)) != 0 ||
+        !make_nonblocking(fd) ||
+        bind(fd, (const struct sockaddr *) &address, sizeof(address)) != 0 ||
+        listen(fd, AIRDAP_NETWORK_DAP_MAX_CONNECTIONS) != 0) {
+        (void) close(fd);
+        return -1;
+    }
+    return fd;
 }
 
 esp_err_t airdap_network_dap_start(void)
@@ -1132,32 +1241,10 @@ esp_err_t airdap_network_dap_start(void)
         return ESP_ERR_NO_MEM;
     }
 
-    listener_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (listener_socket < 0) {
-        return ESP_FAIL;
-    }
-    const int reuse_address = 1;
-    if (setsockopt(
-            listener_socket,
-            SOL_SOCKET,
-            SO_REUSEADDR,
-            &reuse_address,
-            sizeof(reuse_address)) != 0 ||
-        !make_nonblocking(listener_socket)) {
-        (void) close(listener_socket);
-        listener_socket = -1;
-        return ESP_FAIL;
-    }
-    const struct sockaddr_in address = {
-        .sin_family = AF_INET,
-        .sin_port = htons(AIRDAP_NETWORK_DAP_PORT),
-        .sin_addr.s_addr = htonl(INADDR_ANY),
-    };
-    if (bind(
-            listener_socket,
-            (const struct sockaddr *) &address,
-            sizeof(address)) != 0 ||
-        listen(listener_socket, AIRDAP_NETWORK_DAP_MAX_CONNECTIONS) != 0) {
+    listener_socket = create_listener(AIRDAP_NETWORK_DAP_PORT);
+    if (listener_socket < 0) return ESP_FAIL;
+    uart_listener_socket = create_listener(AIRDAP_NETWORK_UART_PORT);
+    if (uart_listener_socket < 0) {
         (void) close(listener_socket);
         listener_socket = -1;
         return ESP_FAIL;
@@ -1168,6 +1255,8 @@ esp_err_t airdap_network_dap_start(void)
     if (revoke_error != ESP_OK) {
         (void) close(listener_socket);
         listener_socket = -1;
+        (void) close(uart_listener_socket);
+        uart_listener_socket = -1;
         return revoke_error;
     }
     if (xTaskCreate(
@@ -1179,10 +1268,12 @@ esp_err_t airdap_network_dap_start(void)
             NULL) != pdPASS) {
         (void) close(listener_socket);
         listener_socket = -1;
+        (void) close(uart_listener_socket);
+        uart_listener_socket = -1;
         return ESP_ERR_NO_MEM;
     }
     atomic_store(&listener_ready, true);
-    ESP_LOGI(TAG, "Authenticated DAP TCP listener started on port %u",
+    ESP_LOGI(TAG, "Authenticated DAP/UART TCP listeners started on ports %u/3261",
         AIRDAP_NETWORK_DAP_PORT);
     return ESP_OK;
 }

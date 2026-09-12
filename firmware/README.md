@@ -147,6 +147,8 @@ not part of this repository. The application currently provides:
   one authenticated network-owner session;
 - a bounded authenticated DAP listener on TCP 3260 with AirDAP v1 framing,
   strict session/sequence checks, and disconnect-safe response routing;
+- an authenticated UART listener on TCP 3261 sharing the same TLS lifecycle,
+  with bounded RX polling, per-operation auth and non-preemptive TX ownership;
 - a bounded transport-independent DAP service with session-safe response
   routing for USB and authenticated network sessions;
 - target reset, power/status GPIO, VTref, and USB VBUS monitoring.
@@ -158,7 +160,7 @@ digits. Its 128-bit UUID is the first 16 bytes of
 development identifiers; product firmware must use identifiers the project is
 authorized to ship. The checked-in layout is for the confirmed 8 MiB module
 and provides two 4032 KiB OTA application slots. Secure Boot, Flash Encryption,
-authenticated updates, authenticated UART/control listeners, and a production
+authenticated updates, authenticated reset/power control, and a production
 credential lifecycle remain deferred.
 
 The firmware version is the single tag pointing directly at the built commit.
@@ -456,8 +458,9 @@ python tools/airdap-tls-probe.py 192.0.2.10 \
     --credential "${XDG_CONFIG_HOME:-$HOME/.config}/airdap/ADP-001122334455.json"
 ```
 
-The DAP listener starts only after the Wi-Fi manager starts successfully, and
-mDNS is published only after that listener is ready. Each connection completes
+The DAP and UART listeners start after the Wi-Fi manager starts successfully,
+and mDNS is published only after both are ready. Four connection slots and one
+revocation registry are shared across the ports. Each connection completes
 TLS before reading AirDAP data and then requires `HELLO` followed by `AUTH`.
 The frame `session_id` is a non-zero client-selected connection ID with sequence
 numbers starting at one; the logical authenticated owner session remains a
@@ -525,10 +528,59 @@ opens and closes its service session with the CDC lifecycle, caches the current
 line coding, and does not consume service RX bytes while the TinyUSB IN queue
 has no space.
 
-USB CDC remains an unauthenticated physical development interface. The shared
-service rejects unauthenticated NETWORK session creation, but TCP 3261,
-network parameter negotiation, and per-operation authentication revalidation
-belong to P5-T2 and are not implemented here.
+USB CDC remains an unauthenticated physical development interface. TCP 3261
+uses the same TLS/HELLO/AUTH contract as 3260. AUTH opens a read-only subscriber;
+all UART operations revalidate the authenticated session. An additional UART
+or DAP connection must join with the existing owner's token. Closing any bound
+connection revokes that logical owner's other service connections.
+
+UART uses CONTROL_REQUEST/CONTROL_RESPONSE with a one-byte opcode. Success
+echoes the opcode; ERROR contains only the existing big-endian u16 error code.
+Each request has one response with the same frame session and sequence. No
+unsolicited stream frames are emitted. All multibyte values are big endian.
+
+| Opcode | Request after opcode | Success after opcode |
+|---|---|---|
+| `0x10` STATUS | empty | baud:u32, stop:u8, parity:u8, bits:u8, tx_owner:u8, buffered:u16, dropped:u32 |
+| `0x11` ACQUIRE_TX | empty | empty |
+| `0x12` CONFIGURE | baud:u32, stop:u8, parity:u8, bits:u8 | empty |
+| `0x13` WRITE | 1..256 data bytes | accepted:u16 |
+| `0x14` READ | capacity:u16, 1..256 | dropped:u32, 0..capacity data bytes |
+
+CONFIGURE/WRITE require explicit ACQUIRE_TX. Stop bits and parity use CDC
+encodings: stop 0/1/2 means 1/1.5/2, parity 0/1/2 means none/odd/even; data bits
+5..8 and baud 1..5,000,000 are accepted. Invalid parameters preserve the previous
+configuration and return INVALID_ARGUMENT `0x0023`. Competing or unowned TX
+returns BUSY `0x0020`; stale/unbound auth returns UNAUTHENTICATED `0x0021`.
+Unknown opcodes return UNSUPPORTED_TYPE `0x0004`; driver errors return INTERNAL
+`0x00ff`. Network WRITE accepts only immediately enqueueable bytes, including
+zero; retry only the unaccepted suffix. READ returns immediately and includes
+the subscriber's cumulative dropped-byte count. Pace empty reads and retries.
+Socket writes have a five-second deadline; logical owner idle expiry is 60s.
+The DAP diagnostic snapshot still counts only 3260 connections; `sessions`
+authentication counts include both ports.
+
+With GPIO17/GPIO18 looped back, run the three-baud probe (Python >=3.13):
+
+```powershell
+uv run --locked python firmware/tools/airdap-uart-probe.py 192.0.2.10 `
+    --credential C:/private/airdap.json --bytes 4096 --chunk 256 --reconnects 10
+```
+
+The physical coexistence test additionally requires the existing pyserial test
+dependency, a CDC port, and no other serial terminal. It checks USB read fan-out,
+TX conflict in both directions, slow network RX/drop isolation, cross-port token
+binding/revocation, idle expiry, and reacquisition. It restores 115200 8N1 and
+closes its connections on success:
+
+```powershell
+uv run --locked --with pyserial python firmware/test/hil/network_uart.py 192.0.2.10 `
+    --credential C:/private/airdap.json --usb-port COM11 --idle-expiry `
+    --output build/uart-coexistence.json
+```
+
+These probes prove chunked functional loopback, not line-rate throughput or
+electrical waveform timing. Credentials remain local and are never printed.
 
 ## Persistent configuration
 
@@ -818,12 +870,12 @@ for suite in \
     bootloader_artifact ota_layout setup_env board config_store device_identity voltage_monitor swd_protocol \
     dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame discovery \
     dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning network_auth network_dap \
-    target_uart usb_uart_bridge usb_descriptors project_version \
+    target_uart network_uart usb_uart_bridge usb_descriptors project_version \
     debug_shell_commands debug_shell_diagnostics debug_shell_config_status \
     debug_shell_identity debug_shell_input debug_shell_wifi debug_shell_button \
     debug_shell_swd_probe \
     debug_shell_tx_state airdap_shell airdap_update \
-    airdap_provision airdap_pair airdap_tls_probe airdap_dap_probe wired_hil; do
+    airdap_provision airdap_pair airdap_tls_probe airdap_dap_probe airdap_uart_probe wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
     cmake --build "build-host/$suite"
     ctest --test-dir "build-host/$suite" --output-on-failure

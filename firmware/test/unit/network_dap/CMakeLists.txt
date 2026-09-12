@@ -11,6 +11,7 @@ add_executable(network_dap_test
     test_network_dap.c
     ../../../components/network_dap/network_dap.c
     ../../../components/airdap_frame/airdap_frame.c
+    ../../../components/network_uart/network_uart.c
 )
 
 target_include_directories(network_dap_test PRIVATE
@@ -20,6 +21,8 @@ target_include_directories(network_dap_test PRIVATE
     ../../../components/airdap_frame/include
     ../../../components/device_identity/include
     ../../../components/network_auth/include
+    ../../../components/network_uart/include
+    ../../../components/target_uart/include
 )
 
 target_compile_options(network_dap_test PRIVATE

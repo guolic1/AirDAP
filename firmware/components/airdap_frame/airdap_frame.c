@@ -56,6 +56,7 @@ static bool valid_error_code(airdap_frame_error_code_t error_code)
     case AIRDAP_FRAME_ERROR_BUSY:
     case AIRDAP_FRAME_ERROR_UNAUTHENTICATED:
     case AIRDAP_FRAME_ERROR_TIMEOUT:
+    case AIRDAP_FRAME_ERROR_INVALID_ARGUMENT:
     case AIRDAP_FRAME_ERROR_INTERNAL:
         return true;
     case AIRDAP_FRAME_ERROR_NONE:

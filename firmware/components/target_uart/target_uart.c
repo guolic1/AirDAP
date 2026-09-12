@@ -718,6 +718,23 @@ airdap_target_uart_result_t airdap_target_uart_session_write(
         return owner_result;
     }
 
+    if (transport == AIRDAP_TARGET_UART_TRANSPORT_NETWORK) {
+        /* The TCP caller can retry a partial acceptance. Never hold the owner
+         * lock waiting for ring space: even a very low baud must permit auth
+         * revocation and disconnect cleanup. IDF's free-size API accounts for
+         * the transaction descriptor; the sole writer holds this mutex. */
+        size_t available = 0U;
+        if (uart_get_tx_buffer_free_size(TARGET_UART_PORT, &available) != ESP_OK) {
+            (void) atomic_fetch_add(&diagnostic_state.write_failures, 1U);
+            tx_operation_unlock();
+            return AIRDAP_TARGET_UART_IO_ERROR;
+        }
+        if (length > available) length = available;
+        if (length == 0U) {
+            tx_operation_unlock();
+            return AIRDAP_TARGET_UART_OK;
+        }
+    }
     const int result = uart_write_bytes(TARGET_UART_PORT, data, length);
     tx_operation_unlock();
     if (result < 0) {
