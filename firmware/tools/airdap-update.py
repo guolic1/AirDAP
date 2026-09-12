@@ -47,6 +47,8 @@ OTA_STATUS_NAMES = {
     7: "image validation error",
     8: "boot activation error",
     9: "internal error",
+    10: "unauthenticated",
+    11: "OTA owned by another transport",
 }
 
 
