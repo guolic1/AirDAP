@@ -8,7 +8,8 @@ enum {
     PRESS_CONFIRM_MS = 40,
     CLICK_RELEASE_MS = 40,
     DOUBLE_CLICK_MS = 300,
-    PROVISIONING_TOGGLE_MS = 3000,
+    PROVISIONING_TOGGLE_MS = 2000,
+    HOLD_6_MS = 6000,
     PROVISIONING_CLEAR_MS = 10000,
     RELEASE_CONFIRM_MS = 200,
 };
@@ -45,8 +46,14 @@ static airdap_provisioning_button_action_t hold(
             ? AIRDAP_PROVISIONING_BUTTON_CLEAR_READY
             : AIRDAP_PROVISIONING_BUTTON_NONE;
     }
+    if (button->held_ms >= HOLD_6_MS) {
+        button->state = AIRDAP_BUTTON_LONG_6S;
+        return previous < HOLD_6_MS
+            ? AIRDAP_PROVISIONING_BUTTON_HOLD_6_READY
+            : AIRDAP_PROVISIONING_BUTTON_NONE;
+    }
     if (button->held_ms >= PROVISIONING_TOGGLE_MS) {
-        button->state = AIRDAP_BUTTON_LONG_3S;
+        button->state = AIRDAP_BUTTON_LONG_2S;
         return previous < PROVISIONING_TOGGLE_MS
             ? AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY
             : AIRDAP_PROVISIONING_BUTTON_NONE;
@@ -82,7 +89,9 @@ static airdap_provisioning_button_action_t release(
     }
     if (long_hold) {
         return finish(button, button->held_ms >= PROVISIONING_CLEAR_MS
-            ? AIRDAP_PROVISIONING_BUTTON_CLEAR : AIRDAP_PROVISIONING_BUTTON_TOGGLE);
+            ? AIRDAP_PROVISIONING_BUTTON_CLEAR
+            : button->held_ms >= HOLD_6_MS ? AIRDAP_PROVISIONING_BUTTON_HOLD_6
+            : AIRDAP_PROVISIONING_BUTTON_TOGGLE);
     }
     if (button->second_press) {
         return finish(button, AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK);
@@ -122,7 +131,8 @@ airdap_provisioning_button_action_t airdap_provisioning_button_step(
         return hold(button, elapsed_ms);
     case AIRDAP_BUTTON_PRESSED:
     case AIRDAP_BUTTON_SECOND_PRESSED:
-    case AIRDAP_BUTTON_LONG_3S:
+    case AIRDAP_BUTTON_LONG_2S:
+    case AIRDAP_BUTTON_LONG_6S:
     case AIRDAP_BUTTON_LONG_10S:
     case AIRDAP_BUTTON_RELEASE_DEBOUNCE:
         return pressed ? hold(button, elapsed_ms) : release(button, elapsed_ms);

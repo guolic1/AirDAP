@@ -72,7 +72,7 @@ static TaskFunction_t button_task_function;
 static jmp_buf task_done;
 static unsigned task_tick;
 static unsigned task_scenario;
-static unsigned button_action_counts[7];
+static unsigned button_action_counts[9];
 
 const airdap_device_identity_t *airdap_device_identity_get(void)
 {
@@ -326,7 +326,7 @@ esp_err_t esp_event_post(
     uint32_t ticks_to_wait)
 {
     if (event_base == AIRDAP_PROVISIONING_INTERNAL_EVENT &&
-        event_id > 0 && event_id < 7) {
+        event_id > 0 && event_id < 9) {
         ++button_action_counts[event_id];
     }
     (void) event_data;
@@ -359,13 +359,15 @@ void vTaskDelay(TickType_t ticks)
     } else if (task_scenario == 1) {
         expected_status = (task_tick >= 7 && task_tick < 12) ||
             (task_tick >= 17 && task_tick < 22);
-    } else if (task_tick >= 149 && task_tick < 499) {
-        expected_status = ((task_tick - 149) % 50) < 25;
+    } else if (task_tick >= 99 && task_tick < 299) {
+        expected_status = ((task_tick - 99) % 50) < 25;
+    } else if (task_tick >= 299 && task_tick < 499) {
+        expected_status = ((task_tick - 299) % 20) < 10;
     } else if (task_tick >= 499 && task_tick < 519) {
-        expected_status = ((task_tick - 499) % 10) < 5;
+        expected_status = ((task_tick - 499) % 6) < 3;
     }
     /* The first threshold write fails; retry must succeed on the next tick. */
-    if (task_scenario == 2 && task_tick == 149) expected_status = false;
+    if (task_scenario == 2 && task_tick == 99) expected_status = false;
     assert(status_led_on == expected_status);
     assert(!network_led_on);
     ++task_tick;
@@ -379,7 +381,7 @@ esp_err_t airdap_boot_key_get_pressed(bool *pressed)
     assert(pressed != NULL);
     *pressed = task_scenario == 2 ? task_tick < 510 :
         task_tick < 2 || (task_scenario == 1 && task_tick >= 4 && task_tick < 6);
-    led_result = task_scenario == 2 && task_tick == 149 ? ESP_FAIL : ESP_OK;
+    led_result = task_scenario == 2 && task_tick == 99 ? ESP_FAIL : ESP_OK;
     return ESP_OK;
 }
 

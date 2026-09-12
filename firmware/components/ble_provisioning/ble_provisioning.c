@@ -448,6 +448,8 @@ static esp_err_t handle_button_action(
     switch (action) {
     case AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY:
     case AIRDAP_PROVISIONING_BUTTON_CLEAR_READY:
+    case AIRDAP_PROVISIONING_BUTTON_HOLD_6_READY:
+    case AIRDAP_PROVISIONING_BUTTON_HOLD_6:
         return ESP_OK;
     case AIRDAP_PROVISIONING_BUTTON_TOGGLE:
         if (window_active) {

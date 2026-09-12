@@ -8,6 +8,7 @@ typedef enum {
     AIRDAP_BUTTON_INDICATOR_DOUBLE,
     AIRDAP_BUTTON_INDICATOR_SLOW,
     AIRDAP_BUTTON_INDICATOR_FAST,
+    AIRDAP_BUTTON_INDICATOR_VERY_FAST,
 } airdap_button_indicator_pattern_t;
 
 typedef struct {

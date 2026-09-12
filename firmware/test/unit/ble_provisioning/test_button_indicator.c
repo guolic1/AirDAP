@@ -37,16 +37,20 @@ int main(void)
     step(AIRDAP_BUTTON_IDLE, none, 1, false);
     step(AIRDAP_BUTTON_IDLE, none, 200, false);
 
-    button.held_ms = 3000;
-    step(AIRDAP_BUTTON_LONG_3S, none, 20, true);
-    step(AIRDAP_BUTTON_LONG_3S, none, 499, true);
+    button.held_ms = 2000;
+    step(AIRDAP_BUTTON_LONG_2S, none, 20, true);
+    step(AIRDAP_BUTTON_LONG_2S, none, 499, true);
     step(AIRDAP_BUTTON_RELEASE_DEBOUNCE, none, 1, false);
-    step(AIRDAP_BUTTON_LONG_3S, none, 500, true);
+    step(AIRDAP_BUTTON_LONG_2S, none, 500, true);
+    step(AIRDAP_BUTTON_LONG_6S, none, 20, true);
+    step(AIRDAP_BUTTON_LONG_6S, none, 199, true);
+    step(AIRDAP_BUTTON_LONG_6S, none, 1, false);
+    step(AIRDAP_BUTTON_LONG_6S, none, 200, true);
     button.held_ms = 10000;
     step(AIRDAP_BUTTON_LONG_10S, none, 20, true);
-    step(AIRDAP_BUTTON_LONG_10S, none, 99, true);
+    step(AIRDAP_BUTTON_LONG_10S, none, 59, true);
     step(AIRDAP_BUTTON_RELEASE_DEBOUNCE, none, 1, false);
-    step(AIRDAP_BUTTON_LONG_10S, none, 100, true);
+    step(AIRDAP_BUTTON_LONG_10S, none, 60, true);
     step(AIRDAP_BUTTON_IDLE, AIRDAP_PROVISIONING_BUTTON_CLEAR, 20, false);
 
     button.held_ms = 0;

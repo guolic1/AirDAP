@@ -331,19 +331,20 @@ The BOOT_KEY recognizer polls every 20 ms. Its internal states are:
 | --- | --- |
 | `IDLE` | No active press or pending click |
 | `PRESS_DEBOUNCE` | Confirming the first press for 40 ms |
-| `PRESSED` | First press confirmed, held for less than 3 seconds |
+| `PRESSED` | First press confirmed, held for less than 2 seconds |
 | `RELEASE_DEBOUNCE` | Confirming release; 40 ms for clicks, 200 ms for long holds |
 | `WAIT_SECOND_PRESS` | First click released, waiting for a second press |
 | `SECOND_PRESS_DEBOUNCE` | Confirming a candidate second press for 40 ms |
-| `SECOND_PRESSED` | Second press confirmed, held for less than 3 seconds |
-| `LONG_3S` | Provisioning threshold reached; STATUS slow flash, waiting for release |
-| `LONG_10S` | Clear threshold reached; STATUS fast flash, waiting for release |
+| `SECOND_PRESSED` | Second press confirmed, held for less than 2 seconds |
+| `LONG_2S` | Provisioning threshold reached; STATUS slow flash, waiting for release |
+| `LONG_6S` | Six-second threshold reached; STATUS fast flash, waiting for release |
+| `LONG_10S` | Clear threshold reached; STATUS very fast flash, waiting for release |
 
 A single click is reported 300 ms after the first release begins, including
 release confirmation. A second press beginning before that deadline forms a
 double click if it passes press confirmation and is then released. A rejected
 second-press bounce retains the first click and its original deadline. A
-confirmed second press may finish after the deadline; holding it to 3 seconds
+confirmed second press may finish after the deadline; holding it to 2 seconds
 or longer cancels pending clicks and selects the long-hold action instead.
 Double clicks never also emit single clicks. Triple clicks form a double click
 followed by a pending single click; there is no repeat or triple-click action.
@@ -367,8 +368,9 @@ previous green/red threshold indications are replaced; NET stays off.
 | Idle, ordinary press, or waiting for a second press | Off |
 | Single click recognized | One 100 ms flash |
 | Double click recognized | Two 100 ms flashes, separated by 100 ms off |
-| Held for 3 to less than 10 seconds | Slow flash: 500 ms on, 500 ms off |
-| Held for at least 10 seconds | Fast flash: 100 ms on, 100 ms off |
+| Held for 2 to less than 6 seconds | Slow flash: 500 ms on, 500 ms off |
+| Held for 6 to less than 10 seconds | Fast flash: 200 ms on, 200 ms off |
+| Held for at least 10 seconds | Very fast flash: 60 ms on, 60 ms off |
 | Debouncing an edge | Continue the previous pattern |
 | Long-hold release confirmed | Off before the action is posted |
 
@@ -380,7 +382,7 @@ cannot restore a stale indication. Flash durations are firmware constants in
 `components/ble_provisioning/button_indicator.c`, not persistent settings.
 
 BLE is disabled during normal operation. Hold `BOOT_KEY` (GPIO0) until the
-red STATUS LED starts flashing slowly at three seconds, then release it to open a
+red STATUS LED starts flashing slowly at two seconds, then release it to open a
 120-second provisioning window. The button never starts BLE while it remains
 pressed. Repeating the same hold-and-release while the window is active cancels
 the attempt. The BLE service name is the shared
@@ -450,7 +452,7 @@ configured ESP-IDF environment and run `idf.py reconfigure` once.
 
 Security 2 still encrypts and authenticates the BLE provisioning session, but
 the published PoP does not identify an owner. Physical access to hold
-`BOOT_KEY` through the three-second indication and release it is therefore the
+`BOOT_KEY` through the two-second indication and release it is therefore the
 only provisioning authorization boundary. Any nearby party that knows the
 public credential can race or replace Wi-Fi configuration while that window is
 open. This design is appropriate only where physical access to the button is
@@ -961,7 +963,7 @@ extending a single global command table. Available commands are:
 - `wifi clear` — remove stored Wi-Fi credentials and stop reconnect attempts;
 - `button press|release|status` — set or inspect a RAM-only simulated
   `BOOT_KEY`; physical and simulated presses pass through the same single-click,
-  double-click, 3-second, 10-second, and release-confirmation behavior. `status`
+  double-click, 2-second, 6-second, 10-second, and release-confirmation behavior. `status`
   reports the simulated input level, not an internal recognizer-state snapshot;
 - `swd-idcode [clock_khz]` — reset the SWD line, select SWD, and read the
   target DP IDCODE at 100 kHz by default; accepted clocks are 100–10,000 kHz;

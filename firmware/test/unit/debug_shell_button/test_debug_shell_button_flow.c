@@ -68,8 +68,10 @@ static void assert_hold_actions(
 {
     for (unsigned int count = 1U; count <= poll_count; ++count) {
         const airdap_provisioning_button_action_t action = poll_button(button);
-        if (count == 30U) {
+        if (count == 20U) {
             assert(action == AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY);
+        } else if (count == 60U) {
+            assert(action == AIRDAP_PROVISIONING_BUTTON_HOLD_6_READY);
         } else if (expect_clear && count == 100U) {
             assert(action == AIRDAP_PROVISIONING_BUTTON_CLEAR_READY);
         } else {

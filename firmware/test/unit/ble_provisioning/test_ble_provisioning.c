@@ -18,15 +18,16 @@ static void test_button_defers_clear_until_release(void)
     airdap_provisioning_button_t button;
     airdap_provisioning_button_init(&button);
 
-    for (unsigned tick = 0U; tick < 29U; ++tick) {
+    for (unsigned tick = 0U; tick < 19U; ++tick) {
         assert(airdap_provisioning_button_step(&button, true, 100U) ==
             AIRDAP_PROVISIONING_BUTTON_NONE);
     }
     assert(airdap_provisioning_button_step(&button, true, 100U) ==
         AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY);
-    for (unsigned tick = 0U; tick < 69U; ++tick) {
+    for (unsigned tick = 0U; tick < 79U; ++tick) {
         assert(airdap_provisioning_button_step(&button, true, 100U) ==
-            AIRDAP_PROVISIONING_BUTTON_NONE);
+            (tick == 39U ? AIRDAP_PROVISIONING_BUTTON_HOLD_6_READY :
+                AIRDAP_PROVISIONING_BUTTON_NONE));
     }
     assert(airdap_provisioning_button_step(&button, true, 100U) ==
         AIRDAP_PROVISIONING_BUTTON_CLEAR_READY);
@@ -45,9 +46,9 @@ static void test_button_defers_toggle_until_release(void)
     airdap_provisioning_button_t button;
     airdap_provisioning_button_init(&button);
 
-    assert(airdap_provisioning_button_step(&button, true, 3000U) ==
+    assert(airdap_provisioning_button_step(&button, true, 2000U) ==
         AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY);
-    assert(airdap_provisioning_button_step(&button, true, 6000U) ==
+    assert(airdap_provisioning_button_step(&button, true, 3000U) ==
         AIRDAP_PROVISIONING_BUTTON_NONE);
     assert(airdap_provisioning_button_step(&button, false, 100U) ==
         AIRDAP_PROVISIONING_BUTTON_NONE);
@@ -66,12 +67,12 @@ static void test_button_ignores_transient_release_while_held(void)
     airdap_provisioning_button_t button;
     airdap_provisioning_button_init(&button);
 
-    assert(airdap_provisioning_button_step(&button, true, 3000U) ==
+    assert(airdap_provisioning_button_step(&button, true, 2000U) ==
         AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY);
     assert(airdap_provisioning_button_step(&button, false, 100U) ==
         AIRDAP_PROVISIONING_BUTTON_NONE);
-    assert(airdap_provisioning_button_step(&button, true, 6900U) ==
-        AIRDAP_PROVISIONING_BUTTON_NONE);
+    assert(airdap_provisioning_button_step(&button, true, 7900U) ==
+        AIRDAP_PROVISIONING_BUTTON_HOLD_6_READY);
     assert(airdap_provisioning_button_step(&button, true, 100U) ==
         AIRDAP_PROVISIONING_BUTTON_CLEAR_READY);
     assert(airdap_provisioning_button_step(&button, false, 100U) ==

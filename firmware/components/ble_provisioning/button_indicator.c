@@ -3,7 +3,8 @@
 enum {
     CLICK_FLASH_MS = 100,
     SLOW_HALF_PERIOD_MS = 500,
-    FAST_HALF_PERIOD_MS = 100,
+    FAST_HALF_PERIOD_MS = 200,
+    VERY_FAST_HALF_PERIOD_MS = 60,
 };
 
 void airdap_button_indicator_step(
@@ -32,11 +33,14 @@ void airdap_button_indicator_step(
         case AIRDAP_BUTTON_SECOND_PRESSED:
             pattern = AIRDAP_BUTTON_INDICATOR_OFF;
             break;
-        case AIRDAP_BUTTON_LONG_3S:
+        case AIRDAP_BUTTON_LONG_2S:
             pattern = AIRDAP_BUTTON_INDICATOR_SLOW;
             break;
-        case AIRDAP_BUTTON_LONG_10S:
+        case AIRDAP_BUTTON_LONG_6S:
             pattern = AIRDAP_BUTTON_INDICATOR_FAST;
+            break;
+        case AIRDAP_BUTTON_LONG_10S:
+            pattern = AIRDAP_BUTTON_INDICATOR_VERY_FAST;
             break;
         case AIRDAP_BUTTON_PRESS_DEBOUNCE:
         case AIRDAP_BUTTON_SECOND_PRESS_DEBOUNCE:
@@ -52,7 +56,9 @@ void airdap_button_indicator_step(
     } else {
         /* Bound the phase before addition, including unusually large steps. */
         const uint32_t period = pattern == AIRDAP_BUTTON_INDICATOR_SLOW
-            ? 2U * SLOW_HALF_PERIOD_MS : 2U * FAST_HALF_PERIOD_MS;
+            ? 2U * SLOW_HALF_PERIOD_MS
+            : pattern == AIRDAP_BUTTON_INDICATOR_FAST
+                ? 2U * FAST_HALF_PERIOD_MS : 2U * VERY_FAST_HALF_PERIOD_MS;
         if (pattern == AIRDAP_BUTTON_INDICATOR_SINGLE ||
             pattern == AIRDAP_BUTTON_INDICATOR_DOUBLE) {
             const uint32_t duration = pattern == AIRDAP_BUTTON_INDICATOR_SINGLE
@@ -84,6 +90,9 @@ void airdap_button_indicator_step(
         break;
     case AIRDAP_BUTTON_INDICATOR_FAST:
         indicator->status_on = indicator->phase_ms < FAST_HALF_PERIOD_MS;
+        break;
+    case AIRDAP_BUTTON_INDICATOR_VERY_FAST:
+        indicator->status_on = indicator->phase_ms < VERY_FAST_HALF_PERIOD_MS;
         break;
     }
 }

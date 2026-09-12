@@ -25,7 +25,7 @@ idf.py -p <airdap-programming-port> flash
 
 Restart and monitor AirDAP. Confirm BLE is not advertising before a button
 press. Hold `BOOT_KEY` until the red STATUS LED starts its 500 ms on/off
-slow flash at three seconds. NET must remain off.
+slow flash at two seconds. NET must remain off.
 Before releasing it, confirm BLE has not initialized or started advertising
 and an attached debug-shell session remains connected. Release the button and
 confirm:
@@ -80,7 +80,7 @@ provisioning attempt, and the prior Wi-Fi configuration remains in effect.
 ## 3. Timeout cleanup
 
 Open another window and do not connect a client. Confirm the service disappears
-after 120 seconds and does not return without a new three-second
+after 120 seconds and does not return without a new two-second
 hold-and-release. Confirm the previously committed Wi-Fi configuration and
 normal USB interfaces remain usable. This is the resource-lifecycle acceptance
 check; a client disconnect alone is not evidence that the firmware stopped the
@@ -97,7 +97,7 @@ password interactively. Required observations:
 - the client reports provisioning success before the service disappears;
 - BLE stops and releases its resources within 30 seconds after success;
 - a power cycle reconnects to the same AP without opening BLE;
-- a fresh three-second hold-and-release can open a new window using the same public
+- a fresh two-second hold-and-release can open a new window using the same public
   Security 2 credential fingerprint.
 
 Repeat with an incorrect AP password before the successful attempt. Confirm the
@@ -111,9 +111,9 @@ public fingerprint.
 ## 5. Ten-second network reset and GPIO0 release guard
 
 With the device provisioned, hold `BOOT_KEY` continuously. Confirm STATUS stays
-off before three seconds, then flashes with 500 ms on/off without initializing
+off before two seconds, then flashes with 500 ms on/off without initializing
 BLE or disconnecting the debug shell. Continue holding until STATUS changes to
-100 ms on/off at ten seconds. NET must remain off throughout. Keep it pressed briefly and confirm AirDAP
+200 ms on/off at six seconds, then 60 ms on/off at ten seconds. NET must remain off throughout. Keep it pressed briefly and confirm AirDAP
 has not cleared configuration or restarted while GPIO0 remains low. Release the
 button and confirm both LEDs turn off before AirDAP clears configuration and
 restarts normally rather than entering the ROM download mode. The debug shell
@@ -121,7 +121,7 @@ disconnect caused by that restart is expected. After restart:
 
 - provisioning state is `unprovisioned` and Wi-Fi does not reconnect;
 - the reserved pairing and network-authentication slots are absent;
-- BLE remains off until another three-second hold-and-release;
+- BLE remains off until another two-second hold-and-release;
 - the new window reports the same Security 2 credential fingerprint and
   accepts the public PoP.
 
