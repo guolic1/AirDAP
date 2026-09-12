@@ -233,6 +233,15 @@ def validate_layout(partitions: Sequence[Partition]) -> None:
         previous = partition
 
 
+def validate_runtime_slots(capacity: int, running: int, inactive: int) -> None:
+    """Check an authenticated OTA QUERY against the same fixed A/B layout."""
+    first, second = (REQUIRED_PARTITIONS[name] for name in ("ota_0", "ota_1"))
+    if {running, inactive} != {first[2], second[2]} or running == inactive:
+        raise VerificationError("runtime OTA addresses do not match the fixed A/B layout")
+    if capacity != first[3] or capacity != second[3]:
+        raise VerificationError("runtime inactive slot capacity is not 4032 KiB")
+
+
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(

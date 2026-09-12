@@ -7,6 +7,9 @@
 #include "airdap_device_identity.h"
 #include "airdap_mode_state.h"
 #include "airdap_ota.h"
+#include "airdap_target_uart.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "esp_err.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
@@ -24,9 +27,35 @@ typedef struct {
     uint32_t expected_size;
     uint32_t written_size;
     ota_session_state_t state;
+    void *connection;
+    uint32_t owner_session;
+    bool disconnected;
 } ota_session_t;
 
 static ota_session_t session;
+static SemaphoreHandle_t session_mutex;
+
+static bool lock_session(void)
+{
+    return session_mutex != NULL && xSemaphoreTake(session_mutex, portMAX_DELAY) == pdTRUE;
+}
+
+static void unlock_session(void)
+{
+    (void) xSemaphoreGive(session_mutex);
+}
+
+static bool authorized(const airdap_ota_client_t *client)
+{
+    return client == NULL || (client->connection != NULL && client->session_id != 0U &&
+        client->authorize != NULL && client->authorize(client->connection, client->session_id));
+}
+
+static bool owns_session(const airdap_ota_client_t *client)
+{
+    return session.connection == (client == NULL ? NULL : client->connection) &&
+        session.owner_session == (client == NULL ? 0U : client->session_id);
+}
 
 static void reset_session(void)
 {
@@ -43,10 +72,11 @@ static bool restore_idle_mode(airdap_mode_event_t event)
     }
     const airdap_dap_ownership_result_t ownership_result =
         airdap_dap_ownership_resume();
-    return ownership_result == AIRDAP_DAP_OWNERSHIP_OK;
+    return ownership_result == AIRDAP_DAP_OWNERSHIP_OK &&
+        airdap_target_uart_resume() == ESP_OK;
 }
 
-esp_err_t airdap_ota_initialize(void)
+static esp_err_t initialize_locked(void)
 {
     esp_err_t abort_error = ESP_OK;
     if (session.state == OTA_SESSION_RECEIVING) {
@@ -63,10 +93,10 @@ esp_err_t airdap_ota_initialize(void)
         ownership_result != AIRDAP_DAP_OWNERSHIP_INVALID_STATE) {
         return ESP_ERR_INVALID_STATE;
     }
-    return abort_error;
+    return airdap_target_uart_resume() == ESP_OK ? abort_error : ESP_FAIL;
 }
 
-bool airdap_ota_debug_allowed(void)
+static bool debug_allowed_locked(void)
 {
     airdap_mode_snapshot_t mode;
     return session.state == OTA_SESSION_IDLE &&
@@ -74,7 +104,7 @@ bool airdap_ota_debug_allowed(void)
         mode.ota == AIRDAP_OTA_IDLE;
 }
 
-airdap_ota_status_t airdap_ota_get_info(airdap_ota_info_t *info)
+static airdap_ota_status_t get_info_locked(airdap_ota_info_t *info)
 {
     if (info == NULL) {
         return AIRDAP_OTA_STATUS_INVALID_ARGUMENT;
@@ -87,6 +117,14 @@ airdap_ota_status_t airdap_ota_get_info(airdap_ota_info_t *info)
     }
 
     memset(info, 0, sizeof(*info));
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t running_state;
+    if (running == NULL || esp_ota_get_state_partition(running, &running_state) != ESP_OK) {
+        return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
+    }
+    info->running_address = running->address;
+    info->update_address = partition->address;
+    info->running_valid = running_state == ESP_OTA_IMG_VALID;
     info->protocol_version = AIRDAP_OTA_PROTOCOL_VERSION;
     info->flags = AIRDAP_OTA_FLAG_ROLLBACK;
     info->max_image_size = (uint32_t) partition->size;
@@ -100,7 +138,7 @@ airdap_ota_status_t airdap_ota_get_info(airdap_ota_info_t *info)
     return AIRDAP_OTA_STATUS_OK;
 }
 
-airdap_ota_status_t airdap_ota_begin(uint32_t image_size)
+static airdap_ota_status_t begin_locked(const airdap_ota_client_t *client, uint32_t image_size)
 {
     if (session.state != OTA_SESSION_IDLE) {
         return AIRDAP_OTA_STATUS_INVALID_STATE;
@@ -135,6 +173,15 @@ airdap_ota_status_t airdap_ota_begin(uint32_t image_size)
         return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
     }
 
+    if (airdap_target_uart_suspend() != ESP_OK) {
+        (void) restore_idle_mode(AIRDAP_MODE_EVENT_OTA_FAILED);
+        return AIRDAP_OTA_STATUS_BUSY;
+    }
+    if (!authorized(client)) {
+        (void) restore_idle_mode(AIRDAP_MODE_EVENT_OTA_FAILED);
+        return AIRDAP_OTA_STATUS_UNAUTHENTICATED;
+    }
+
     esp_ota_handle_t handle = 0U;
     if (esp_ota_begin(
             partition,
@@ -152,10 +199,12 @@ airdap_ota_status_t airdap_ota_begin(uint32_t image_size)
     session.expected_size = image_size;
     session.written_size = 0U;
     session.state = OTA_SESSION_RECEIVING;
+    session.connection = client == NULL ? NULL : client->connection;
+    session.owner_session = client == NULL ? 0U : client->session_id;
     return AIRDAP_OTA_STATUS_OK;
 }
 
-airdap_ota_status_t airdap_ota_write(
+static airdap_ota_status_t write_locked(
     uint32_t offset,
     const void *data,
     size_t size,
@@ -189,7 +238,7 @@ airdap_ota_status_t airdap_ota_write(
     return AIRDAP_OTA_STATUS_OK;
 }
 
-airdap_ota_status_t airdap_ota_commit(void)
+static airdap_ota_status_t commit_locked(const airdap_ota_client_t *client)
 {
     if (session.state != OTA_SESSION_RECEIVING) {
         return AIRDAP_OTA_STATUS_INVALID_STATE;
@@ -205,6 +254,11 @@ airdap_ota_status_t airdap_ota_commit(void)
         return restore_idle_mode(AIRDAP_MODE_EVENT_OTA_FAILED)
             ? AIRDAP_OTA_STATUS_VALIDATION_FAILED
             : AIRDAP_OTA_STATUS_INTERNAL_ERROR;
+    }
+    if (!authorized(client)) {
+        reset_session();
+        (void) restore_idle_mode(AIRDAP_MODE_EVENT_OTA_FAILED);
+        return AIRDAP_OTA_STATUS_UNAUTHENTICATED;
     }
     if (esp_ota_set_boot_partition(partition) != ESP_OK) {
         reset_session();
@@ -225,7 +279,7 @@ airdap_ota_status_t airdap_ota_commit(void)
     return AIRDAP_OTA_STATUS_OK;
 }
 
-airdap_ota_status_t airdap_ota_abort(void)
+static airdap_ota_status_t abort_locked(void)
 {
     if (session.state == OTA_SESSION_IDLE) {
         return AIRDAP_OTA_STATUS_OK;
@@ -244,14 +298,7 @@ airdap_ota_status_t airdap_ota_abort(void)
         : AIRDAP_OTA_STATUS_INTERNAL_ERROR;
 }
 
-void airdap_ota_handle_disconnect(void)
-{
-    if (session.state == OTA_SESSION_RECEIVING) {
-        (void) airdap_ota_abort();
-    }
-}
-
-airdap_ota_status_t airdap_ota_reboot(void)
+static airdap_ota_status_t reboot_locked(void)
 {
     if (session.state != OTA_SESSION_COMMITTED) {
         return AIRDAP_OTA_STATUS_INVALID_STATE;
@@ -276,4 +323,144 @@ esp_err_t airdap_ota_confirm_running_image(void)
         return esp_ota_mark_app_valid_cancel_rollback();
     }
     return ESP_OK;
+}
+
+esp_err_t airdap_ota_initialize(void)
+{
+    /* Called once by app_main before transports start. */
+    if (session_mutex == NULL) session_mutex = xSemaphoreCreateMutex();
+    if (!lock_session()) return ESP_FAIL;
+    const esp_err_t result = initialize_locked();
+    unlock_session();
+    return result;
+}
+
+bool airdap_ota_debug_allowed(void)
+{
+    if (!lock_session()) return false;
+    const bool result = debug_allowed_locked();
+    unlock_session();
+    return result;
+}
+
+airdap_ota_status_t airdap_ota_get_info(airdap_ota_info_t *info)
+{
+    if (!lock_session()) return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
+    const airdap_ota_status_t result = get_info_locked(info);
+    unlock_session();
+    return result;
+}
+
+airdap_ota_status_t airdap_ota_begin_for_client(
+    const airdap_ota_client_t *client, uint32_t image_size)
+{
+    if (!lock_session()) return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
+    airdap_ota_status_t result;
+    if (!authorized(client)) result = AIRDAP_OTA_STATUS_UNAUTHENTICATED;
+    else if (session.state != OTA_SESSION_IDLE && !owns_session(client)) result = AIRDAP_OTA_STATUS_BUSY;
+    else result = begin_locked(client, image_size);
+    unlock_session();
+    return result;
+}
+
+airdap_ota_status_t airdap_ota_begin(uint32_t image_size)
+{
+    return airdap_ota_begin_for_client(NULL, image_size);
+}
+
+airdap_ota_status_t airdap_ota_write_for_client(
+    const airdap_ota_client_t *client, uint32_t offset, const void *data, size_t size, uint32_t *next_offset)
+{
+    if (!lock_session()) return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
+    airdap_ota_status_t result;
+    if (!authorized(client)) result = AIRDAP_OTA_STATUS_UNAUTHENTICATED;
+    else if (session.state != OTA_SESSION_IDLE && !owns_session(client)) result = AIRDAP_OTA_STATUS_BUSY;
+    else result = write_locked(offset, data, size, next_offset);
+    unlock_session();
+    return result;
+}
+
+airdap_ota_status_t airdap_ota_write(uint32_t offset, const void *data, size_t size, uint32_t *next_offset)
+{
+    return airdap_ota_write_for_client(NULL, offset, data, size, next_offset);
+}
+
+airdap_ota_status_t airdap_ota_commit_for_client(
+    const airdap_ota_client_t *client)
+{
+    if (!lock_session()) return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
+    airdap_ota_status_t result;
+    if (!authorized(client)) result = AIRDAP_OTA_STATUS_UNAUTHENTICATED;
+    else if (session.state != OTA_SESSION_IDLE && !owns_session(client)) result = AIRDAP_OTA_STATUS_BUSY;
+    else result = commit_locked(client);
+    unlock_session();
+    return result;
+}
+
+airdap_ota_status_t airdap_ota_commit(void)
+{
+    return airdap_ota_commit_for_client(NULL);
+}
+
+airdap_ota_status_t airdap_ota_abort_for_client(
+    const airdap_ota_client_t *client)
+{
+    if (!lock_session()) return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
+    airdap_ota_status_t result;
+    if (!authorized(client)) result = AIRDAP_OTA_STATUS_UNAUTHENTICATED;
+    else if (session.state != OTA_SESSION_IDLE && !owns_session(client) && !session.disconnected) result = AIRDAP_OTA_STATUS_BUSY;
+    else result = abort_locked();
+    unlock_session();
+    return result;
+}
+
+airdap_ota_status_t airdap_ota_abort(void)
+{
+    return airdap_ota_abort_for_client(NULL);
+}
+
+airdap_ota_status_t airdap_ota_reboot_for_client(
+    const airdap_ota_client_t *client)
+{
+    if (!lock_session()) return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
+    airdap_ota_status_t result;
+    if (!authorized(client)) result = AIRDAP_OTA_STATUS_UNAUTHENTICATED;
+    else result = reboot_locked();
+    unlock_session();
+    return result;
+}
+
+airdap_ota_status_t airdap_ota_reboot(void)
+{
+    return airdap_ota_reboot_for_client(NULL);
+}
+
+airdap_ota_status_t airdap_ota_disconnect_client(const airdap_ota_client_t *client)
+{
+    if (!lock_session()) return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
+    airdap_ota_status_t result = AIRDAP_OTA_STATUS_OK;
+    if (session.state == OTA_SESSION_RECEIVING && owns_session(client)) {
+        session.disconnected = true;
+        result = abort_locked();
+        /* Failed cleanup remains blocked, but a new authorized client may
+         * retry ABORT after the old TLS connection has been destroyed. */
+    }
+    unlock_session();
+    return result;
+}
+
+void airdap_ota_handle_disconnect(void)
+{
+    (void) airdap_ota_disconnect_client(NULL);
+}
+
+airdap_ota_status_t airdap_ota_prepare_reboot(const airdap_ota_client_t *client)
+{
+    if (!lock_session()) return AIRDAP_OTA_STATUS_INTERNAL_ERROR;
+    const airdap_ota_status_t result = !authorized(client)
+        ? AIRDAP_OTA_STATUS_UNAUTHENTICATED
+        : session.state == OTA_SESSION_COMMITTED
+        ? AIRDAP_OTA_STATUS_OK : AIRDAP_OTA_STATUS_INVALID_STATE;
+    unlock_session();
+    return result;
 }

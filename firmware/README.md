@@ -160,8 +160,8 @@ digits. Its 128-bit UUID is the first 16 bytes of
 development identifiers; product firmware must use identifiers the project is
 authorized to ship. The checked-in layout is for the confirmed 8 MiB module
 and provides two 4032 KiB OTA application slots. Secure Boot, Flash Encryption,
-authenticated updates, authenticated reset/power control, and a production
-credential lifecycle remain deferred.
+signed images and a production credential lifecycle remain deferred. Network
+OTA and reset/power control require an authenticated session.
 
 The firmware version is the single tag pointing directly at the built commit.
 When that commit has no tag, the version is its seven-character Git hash. A
@@ -477,7 +477,7 @@ V1 uses these payloads on TCP 3260:
 - `DAP_REQUEST` and `DAP_RESPONSE` carry raw CMSIS-DAP packets. Requests remain
   limited to 508 bytes and each DAP connection permits one in-flight request.
   The USB-development OTA vendor commands `0x80` through `0x85` are rejected;
-  authenticated network OTA remains deferred to its dedicated control slice.
+  authenticated network OTA uses CONTROL opcodes `0x30` through `0x35` below.
 - `KEEPALIVE` has an empty request and response and refreshes the authenticated
   owner idle deadline.
 
@@ -653,6 +653,70 @@ development profile does not enable Flash Encryption, so current values remain
 plaintext at rest and this store is not a product credential-security
 boundary. Do not use production credentials until the product key lifecycle,
 Flash Encryption, and provisioning process are approved and verified.
+
+## Authenticated network OTA
+
+TCP 3260 exposes OTA through the existing TLS 1.3 PSK-DHE, HELLO and AUTH
+lifecycle. TCP 3261 rejects OTA opcodes; network DAP packets still reject USB
+OTA vendor commands. The shared OTA manager serializes network and USB calls
+and binds each upload to its exact TLS connection and logical owner. USB
+disconnects and other connections cannot write or cancel that upload.
+Owner disconnect, credential revocation and idle expiry abort uncommitted
+uploads during connection teardown. Restart interrupted uploads at offset zero.
+
+All integers below use network byte order. CONTROL_RESPONSE echoes the opcode
+followed by a one-byte OTA status. Zero means success. Failure is exactly
+`opcode || status`: 1 invalid argument, 2 invalid state, 3 invalid size,
+4 invalid offset, 5 incomplete image, 6 write failure, 7 image validation
+failure, 8 boot activation failure, 9 internal error. Authentication and owner
+conflicts use frame ERROR `0x0021` and `0x0020`; malformed lengths use
+truncated `0x0001` or invalid argument `0x0023`.
+
+| Opcode | Request after opcode | Success data after opcode/status |
+| --- | --- | --- |
+| `0x30` QUERY | empty | `u8 protocol=1, u8 rollback_flags=1, u32 capacity, u32 running_address, u32 inactive_address, u8 confirmed, UTF-8 version` |
+| `0x31` BEGIN | `u32 image_size` | empty |
+| `0x32` WRITE | `u32 offset, 1..4091 bytes` | `u32 next_offset` |
+| `0x33` COMMIT | empty | empty |
+| `0x34` ABORT | empty | empty |
+| `0x35` REBOOT | empty | empty, sent before restart |
+
+QUERY's version occupies the remaining 1..32 bytes; confirmed is 1 only for
+an IDF VALID image. Header sequence/session rules remain unchanged. Offsets
+must equal the accepted byte count and writes cannot exceed the declared size.
+Bad offsets and incomplete commit leave the upload open; Flash or validation
+failures abort it. Duplicate COMMIT returns invalid state. COMMIT selects the
+inactive slot only after full validation and keeps DAP/UART suspended until
+reboot. Disconnect after commit preserves boot selection. A fresh authenticated
+connection or physical USB can reboot it if the original response was lost;
+ABORT cannot undo COMMIT.
+
+Before Flash writes, OTA releases DAP ownership and suspends UART TX ownership
+for both transports. An active DAP operation prevents BEGIN. UART entry waits
+at most 100 ms for its operation mutex and a further 100 ms to drain queued TX;
+failure prevents Flash entry. Acquire/configure/write return busy while
+suspended; bounded RX subscriptions remain live. Abort/failure restores
+admission, and clients must reacquire TX. The existing startup health check
+confirms PENDING_VERIFY after required local initialization, independently of
+Wi-Fi/DHCP. This does not provide signed-image validation, Secure Boot, Flash
+Encryption or anti-rollback.
+
+Reserve the selected device for the entire OTA acceptance run and wait for
+other hardware agents to release it before opening any connection. From the
+repository root on Windows:
+
+```powershell
+uv run python firmware/tools/airdap-network-update.py 192.0.2.10 --query `
+    --credential "$env:LOCALAPPDATA\AirDAP\ADP-001122334455.json"
+uv run python firmware/tools/airdap-network-update.py 192.0.2.10 firmware/build/airdap.bin `
+    --credential "$env:LOCALAPPDATA\AirDAP\ADP-001122334455.json"
+```
+
+The host checks every next offset and cancels failed uploads. After reconnect
+with the same credential/device ID, success requires the formerly inactive
+slot, the uploaded app descriptor's version, and startup confirmation.
+`--reboot` recovers a committed update; follow it with `--query`. See
+[network OTA HIL](test/hil/network_ota.md) for physical acceptance and rollback.
 
 ## Development USB OTA
 
@@ -920,7 +984,7 @@ for suite in \
     debug_shell_commands debug_shell_diagnostics debug_shell_config_status \
     debug_shell_identity debug_shell_input debug_shell_wifi debug_shell_button \
     debug_shell_swd_probe \
-    debug_shell_tx_state airdap_shell airdap_update \
+    debug_shell_tx_state airdap_shell airdap_update airdap_network_update \
     airdap_provision airdap_pair airdap_tls_probe airdap_dap_probe airdap_uart_probe wired_hil; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
     cmake --build "build-host/$suite"

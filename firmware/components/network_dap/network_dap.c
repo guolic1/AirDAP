@@ -23,6 +23,7 @@
 #include "airdap_network_dap.h"
 #include "airdap_network_dap_internal.h"
 #include "airdap_network_uart.h"
+#include "airdap_network_ota.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_tls.h"
@@ -507,7 +508,9 @@ static void unregister_connection(network_connection_t *connection)
 
 static void release_connection(network_connection_t *connection)
 {
+    const uint32_t ota_session = atomic_load(&connection->auth_session_id);
     unregister_connection(connection);
+    airdap_network_ota_disconnect(connection->auth_connection, ota_session);
     atomic_store(&connection->pending_response_token, 0U);
 
     airdap_dap_session_id_t dap_session = 0U;
@@ -1081,7 +1084,13 @@ static void run_connection(network_connection_t *connection)
             }
             uint8_t response[AIRDAP_NETWORK_UART_MAX_RESPONSE];
             size_t response_size = 0U;
-            const airdap_frame_error_code_t error = connection->uart
+            const bool ota = !connection->uart && request.payload_length > 0U &&
+                payload[0] >= AIRDAP_CONTROL_OTA_QUERY && payload[0] <= AIRDAP_CONTROL_OTA_REBOOT;
+            const airdap_frame_error_code_t error = ota
+                ? airdap_network_ota_dispatch(connection->auth_connection,
+                    atomic_load(&connection->auth_session_id), payload,
+                    request.payload_length, response, sizeof(response), &response_size)
+                : connection->uart
                 ? airdap_network_uart_dispatch(
                     connection->auth_connection,
                     atomic_load(&connection->auth_session_id),
@@ -1099,6 +1108,12 @@ static void run_connection(network_connection_t *connection)
             } else if (!validate_bound_session(connection) ||
                 !send_frame(connection, &request,
                     AIRDAP_FRAME_TYPE_CONTROL_RESPONSE, response, response_size)) {
+                return;
+            }
+            if (ota && payload[0] == AIRDAP_CONTROL_OTA_REBOOT &&
+                error == AIRDAP_FRAME_ERROR_NONE && response_size == 2U && response[1] == 0U) {
+                airdap_network_ota_reboot(connection->auth_connection,
+                    atomic_load(&connection->auth_session_id));
                 return;
             }
             break;

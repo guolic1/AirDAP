@@ -23,6 +23,7 @@
 #include "airdap_network_auth.h"
 #include "airdap_network_dap.h"
 #include "airdap_network_uart.h"
+#include "airdap_network_ota.h"
 #include "airdap_network_dap_internal.h"
 #include "esp_tls.h"
 #include "freertos/queue.h"
@@ -184,13 +185,43 @@ esp_err_t airdap_target_power_get_active(bool *active)
     return board_operation(0x22U, false);
 }
 
+static unsigned int ota_dispatch_calls, ota_disconnect_calls, ota_reboot_calls;
 static unsigned int uart_open_calls, uart_close_calls, uart_write_calls;
+
+airdap_frame_error_code_t airdap_network_ota_dispatch(
+    airdap_network_auth_connection_t *connection, uint32_t session,
+    const uint8_t *request, size_t request_size,
+    uint8_t *response, size_t capacity, size_t *size)
+{
+    assert(connection == &auth_connection && session == 77);
+    assert(request_size > 0 && capacity >= AIRDAP_NETWORK_OTA_MAX_RESPONSE);
+    ++ota_dispatch_calls;
+    response[0] = request[0]; response[1] = 0; *size = 2;
+    return AIRDAP_FRAME_ERROR_NONE;
+}
+void airdap_network_ota_disconnect(airdap_network_auth_connection_t *connection, uint32_t session)
+{
+    if (connection && session) {
+        assert(connection == &auth_connection && session == 77);
+        assert(auth_close_calls == 0);
+        ++ota_disconnect_calls;
+    }
+}
+void airdap_network_ota_reboot(airdap_network_auth_connection_t *connection, uint32_t session)
+{
+    assert(connection == &auth_connection && session == 77);
+    assert(tls_output_size >= 2 && tls_output[tls_output_size - 2] == 0x35 &&
+        tls_output[tls_output_size - 1] == 0);
+    ++ota_reboot_calls;
+}
+
 static bool uart_live;
 static unsigned int fail_validation_at;
 static size_t block_write_after;
 
 static void reset_connection_fakes(void)
 {
+    ota_dispatch_calls = ota_disconnect_calls = ota_reboot_calls = 0;
     uart_open_calls = uart_close_calls = uart_write_calls = 0;
     uart_live = false;
     fail_validation_at = 0;
@@ -1548,6 +1579,31 @@ static void test_control_opcodes_are_scoped_to_their_port(void)
     }
 }
 
+static void test_ota_routes_auth_port_disconnect_and_reboot_ack(void)
+{
+    for (uint8_t opcode = 0x30; opcode <= 0x35; ++opcode) {
+        for (unsigned lane = 0; lane < 3; ++lane) {
+            reset_connection_fakes();
+            append_request(AIRDAP_FRAME_TYPE_HELLO, 9, 1, NULL, 0);
+            if (lane != 0) append_request(AIRDAP_FRAME_TYPE_AUTH, 9, 2, NULL, 0);
+            append_request(AIRDAP_FRAME_TYPE_CONTROL_REQUEST, 9, lane ? 3 : 2, &opcode, 1);
+            if (lane == 2) airdap_network_uart_handle_socket(TEST_CLIENT_FD);
+            else airdap_network_dap_handle_socket(TEST_CLIENT_FD);
+            assert(ota_dispatch_calls == (lane == 1 ? 1U : 0U));
+            assert(ota_disconnect_calls == (lane != 0 ? 1U : 0U));
+            assert(ota_reboot_calls == (lane == 1 && opcode == 0x35 ? 1U : 0U));
+            size_t offset = 0; const uint8_t *payload;
+            (void) next_response(&offset, &payload);
+            if (lane) (void) next_response(&offset, &payload);
+            airdap_frame_header_t response = next_response(&offset, &payload);
+            if (lane == 1) {
+                assert(response.type == AIRDAP_FRAME_TYPE_CONTROL_RESPONSE && payload[0] == opcode);
+            } else assert_error_payload(payload, response.payload_length,
+                lane == 0 ? AIRDAP_FRAME_ERROR_UNAUTHENTICATED : AIRDAP_FRAME_ERROR_UNSUPPORTED_TYPE);
+        }
+    }
+}
+
 int main(int argument_count, char **arguments)
 {
     if (argument_count == 2 &&
@@ -1581,6 +1637,7 @@ int main(int argument_count, char **arguments)
     test_control_errors_and_power_responses();
     test_control_revoked_before_output_suppresses_success();
     test_control_opcodes_are_scoped_to_their_port();
+    test_ota_routes_auth_port_disconnect_and_reboot_ack();
     assert_network_dap_status(true, 0U, 0U, 0U, 0U);
     puts("Network DAP transport tests passed");
     return 0;

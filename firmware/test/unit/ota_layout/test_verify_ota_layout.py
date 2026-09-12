@@ -34,6 +34,17 @@ CONFIG_LOG_MAXIMUM_LEVEL=3
 
 
 class OtaLayoutTests(unittest.TestCase):
+    def test_runtime_query_matches_both_slot_directions(self) -> None:
+        for running, inactive in ((0x20000, 0x410000), (0x410000, 0x20000)):
+            verify_ota_layout.validate_runtime_slots(0x3F0000, running, inactive)
+        for capacity, running, inactive in (
+            (0x200000, 0x20000, 0x410000),
+            (0x3F0000, 0x20000, 0x20000),
+            (0x3F0000, 0x20000, 0x420000),
+        ):
+            with self.assertRaises(verify_ota_layout.VerificationError):
+                verify_ota_layout.validate_runtime_slots(capacity, running, inactive)
+
     def test_accepts_exact_8mb_ab_layout_and_config(self) -> None:
         verify_ota_layout.validate_config(
             verify_ota_layout.parse_sdkconfig(VALID_CONFIG)

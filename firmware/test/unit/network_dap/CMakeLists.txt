@@ -25,6 +25,7 @@ target_include_directories(network_dap_test PRIVATE
     ../../../components/network_uart/include
     ../../../components/target_uart/include
     ../../../components/network_control/include
+    ../../../components/network_ota/include
     ../../../components/board/include
     ../../../components/dap_ownership/include
 )
