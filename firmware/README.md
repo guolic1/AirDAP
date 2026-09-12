@@ -325,6 +325,39 @@ unit test or firmware build.
 
 ## BLE Security 2 provisioning
 
+The BOOT_KEY recognizer polls every 20 ms. Its internal states are:
+
+| State | Meaning |
+| --- | --- |
+| `IDLE` | No active press or pending click |
+| `PRESS_DEBOUNCE` | Confirming the first press for 40 ms |
+| `PRESSED` | First press confirmed, held for less than 3 seconds |
+| `RELEASE_DEBOUNCE` | Confirming release; 40 ms for clicks, 200 ms for long holds |
+| `WAIT_SECOND_PRESS` | First click released, waiting for a second press |
+| `SECOND_PRESS_DEBOUNCE` | Confirming a candidate second press for 40 ms |
+| `SECOND_PRESSED` | Second press confirmed, held for less than 3 seconds |
+| `LONG_3S` | Provisioning threshold reached; green indicator, waiting for release |
+| `LONG_10S` | Clear threshold reached; red indicator, waiting for release |
+
+A single click is reported 300 ms after the first release begins, including
+release confirmation. A second press beginning before that deadline forms a
+double click if it passes press confirmation and is then released. A rejected
+second-press bounce retains the first click and its original deadline. A
+confirmed second press may finish after the deadline; holding it to 3 seconds
+or longer cancels pending clicks and selects the long-hold action instead.
+Double clicks never also emit single clicks. Triple clicks form a double click
+followed by a pending single click; there is no repeat or triple-click action.
+
+Single and double clicks currently only emit `BOOT_KEY single click (unassigned)`
+or `BOOT_KEY double click (unassigned)` info logs. They do not reset either MCU,
+change power or DAP ownership, open BLE, or clear configuration. Long-hold
+threshold events are each emitted once; no long-hold action runs until release
+has remained stable for 200 ms. A brief release bounce preserves the current
+hold and does not repeat its indicator event. Press duration includes the
+confirmed initial press debounce and excludes sampled release gaps. Recognition
+precision is limited by polling and task scheduling; thresholds are not hardware
+timing guarantees.
+
 BLE is disabled during normal operation. Hold `BOOT_KEY` (GPIO0) until the
 green network LED turns on at three seconds, then release it to open a
 120-second provisioning window. The button never starts BLE while it remains
@@ -906,8 +939,9 @@ extending a single global command table. Available commands are:
   reconnect backoff, and reconnect immediately;
 - `wifi clear` — remove stored Wi-Fi credentials and stop reconnect attempts;
 - `button press|release|status` — set or inspect a RAM-only simulated
-  `BOOT_KEY`; physical and simulated presses pass through the same 3-second,
-  10-second, and release-confirmation behavior;
+  `BOOT_KEY`; physical and simulated presses pass through the same single-click,
+  double-click, 3-second, 10-second, and release-confirmation behavior. `status`
+  reports the simulated input level, not an internal recognizer-state snapshot;
 - `swd-idcode [clock_khz]` — reset the SWD line, select SWD, and read the
   target DP IDCODE at 100 kHz by default; accepted clocks are 100–10,000 kHz;
 - `restart` — wait for the acknowledgement transfer to complete, then restart

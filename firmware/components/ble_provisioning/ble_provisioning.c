@@ -27,13 +27,13 @@
 ESP_EVENT_DEFINE_BASE(AIRDAP_PROVISIONING_INTERNAL_EVENT);
 
 enum {
-    BUTTON_POLL_MS = 100,
+    BUTTON_POLL_MS = 20,
     PROVISIONING_WINDOW_US = 120000000,
     BUTTON_TASK_STACK_SIZE = 3072,
     BUTTON_TASK_PRIORITY = 4,
     PROVISIONING_WIFI_ATTEMPTS = 3,
     INTERNAL_EVENT_TIMEOUT = 100,
-    TIMEOUT_RETRY_US = BUTTON_POLL_MS * 1000,
+    TIMEOUT_RETRY_US = 100000,
 };
 
 static const char *PAIRING_ENDPOINT = "airdap-pair";
@@ -493,6 +493,12 @@ static esp_err_t handle_button_action(
         maybe_restart_after_clear();
         return ESP_OK;
     }
+    case AIRDAP_PROVISIONING_BUTTON_SINGLE_CLICK:
+        ESP_LOGI(TAG, "BOOT_KEY single click (unassigned)");
+        return ESP_OK;
+    case AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK:
+        ESP_LOGI(TAG, "BOOT_KEY double click (unassigned)");
+        return ESP_OK;
     case AIRDAP_PROVISIONING_BUTTON_NONE:
         return ESP_OK;
     }

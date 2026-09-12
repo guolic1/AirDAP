@@ -385,6 +385,14 @@ int main(void)
     assert(manager_init_count == 0U && manager_start_count == 0U);
 
     assert(airdap_ble_provisioning_test_button_action(
+        AIRDAP_PROVISIONING_BUTTON_SINGLE_CLICK) == ESP_OK);
+    assert(airdap_ble_provisioning_test_button_action(
+        AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK) == ESP_OK);
+    assert(manager_init_count == 0U && manager_start_count == 0U);
+    assert(clear_count == 0U && restart_count == 0U && led_change_count == 0U);
+    assert(!airdap_ble_provisioning_test_window_active());
+
+    assert(airdap_ble_provisioning_test_button_action(
         AIRDAP_PROVISIONING_BUTTON_TOGGLE_READY) == ESP_OK);
     assert(led_change_count == 1U && !status_led_on && network_led_on);
     assert(manager_init_count == 0U && manager_start_count == 0U);

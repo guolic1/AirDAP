@@ -22,6 +22,14 @@ target_compile_features(ble_provisioning_test PRIVATE c_std_11)
 target_compile_options(ble_provisioning_test PRIVATE -Wall -Wextra -Werror -pedantic)
 
 add_test(NAME ble_provisioning_contract COMMAND ble_provisioning_test)
+add_executable(button_state_machine_test
+    test_button_state_machine.c
+    ../../../components/ble_provisioning/provisioning_button.c)
+target_include_directories(button_state_machine_test PRIVATE
+    ../../../components/ble_provisioning/private_include)
+target_compile_features(button_state_machine_test PRIVATE c_std_11)
+target_compile_options(button_state_machine_test PRIVATE -Wall -Wextra -Werror -pedantic)
+add_test(NAME button_state_machine COMMAND button_state_machine_test)
 add_test(
     NAME ble_provisioning_public_security2_credential
     COMMAND ${Python3_EXECUTABLE}
