@@ -965,6 +965,19 @@ slot, the uploaded app descriptor's version, and startup confirmation.
 `--reboot` recovers a committed update; follow it with `--query`. See
 [network OTA HIL](test/hil/network_ota.md) for physical acceptance and rollback.
 
+## Local USB/IP bridge (Windows and Linux)
+
+`tools/airdap-usbip.py` converts authenticated network DAP on TCP 3260 and
+target UART on TCP 3261 into a local USB/IP CMSIS-DAP v2 + CDC ACM device.
+With a USB/IP virtual host controller, existing USB debug tools and serial
+applications can use the network device. It listens only on `127.0.0.1:3240`;
+it does not provide a DAPLink drag-and-drop storage volume.
+
+See [the bridge guide](../docs/usbip-bridge.md) for driver prerequisites,
+pairing, attach/detach, the Windows background task, the Linux systemd user
+service, and protocol limitations. Actual target programming over the virtual
+USB device still requires hardware acceptance on each OS.
+
 ## Development USB OTA
 
 The first rollout from the former single-`factory` layout requires one complete
@@ -1245,7 +1258,7 @@ for suite in \
     debug_shell_identity debug_shell_input debug_shell_wifi debug_shell_button \
     debug_shell_swd_probe \
     debug_shell_tx_state airdap_shell airdap_update airdap_network_update \
-    airdap_provision airdap_pair airdap_tls_probe airdap_dap_probe airdap_uart_probe wired_hil wireless_pyocd; do
+    airdap_provision airdap_pair airdap_tls_probe airdap_dap_probe airdap_uart_probe airdap_usbip wired_hil wireless_pyocd; do
     cmake -S "test/unit/$suite" -B "build-host/$suite"
     cmake --build "build-host/$suite"
     ctest --test-dir "build-host/$suite" --output-on-failure
