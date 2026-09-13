@@ -16,5 +16,6 @@ foreach(debug_shell 0 1)
         ../../../components/dap_protocol/include ../../../components/dap_service/include
         ../../../components/device_identity/include ../../../components/mode_state/include
         ../../../components/dap_ownership/include ../network_dap/fake_include)
+    target_include_directories(${target} PRIVATE ../../../components/board/include)
     add_test(NAME ${target} COMMAND ${target})
 endforeach()

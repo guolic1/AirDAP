@@ -121,6 +121,8 @@ static void attach(void)
 int main(void)
 {
     assert(airdap_usb_init() == ESP_OK);
+    assert(config.phy.self_powered);
+    assert(config.phy.vbus_monitor_io == 8);
     assert(config.descriptor.device->idProduct == 0x4021);
     attach();
     assert(airdap_usb_data_ready() && opened == 1);

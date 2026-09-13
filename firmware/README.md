@@ -256,6 +256,8 @@ scope; the wired composite profile uses function subsets for its Vendor interfac
 USB profile changes are polled every 50 ms; network UART listener changes every
 100 ms. These are scheduling intervals, not real-time guarantees. `AUTO` uses
 host enumeration, not USB power alone, to decide whether a computer is connected.
+The USB PHY monitors the existing GPIO8 VBUS divider so unplugging USB also
+clears enumeration state while the board remains independently powered.
 
 USB attach conditionally revokes an idle NETWORK DAP owner unless NETWORK was
 explicitly selected. Selection changes require no DAP owner and no OTA; they

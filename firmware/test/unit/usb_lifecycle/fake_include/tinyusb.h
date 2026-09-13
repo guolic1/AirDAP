@@ -6,6 +6,7 @@
 #define TINYUSB_EVENT_DETACHED 2
 typedef struct { int id; } tinyusb_event_t;
 typedef struct {
+    struct { bool self_powered; int vbus_monitor_io; } phy;
     struct {
         const tusb_desc_device_t *device;
         const char **string;

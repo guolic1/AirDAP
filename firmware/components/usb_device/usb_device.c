@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "airdap_board_pins.h"
 #include "airdap_dap_protocol.h"
 #include "airdap_dap_service.h"
 #include "airdap_dap_stream.h"
@@ -378,6 +379,10 @@ esp_err_t airdap_usb_init(void)
     tinyusb_config_t usb_config = TINYUSB_DEFAULT_CONFIG(
         usb_event_callback,
         NULL);
+    /* External power keeps the S3 alive after unplug; monitor the board's
+     * VBUS divider so the PHY reports detach instead of only bus suspend. */
+    usb_config.phy.self_powered = true;
+    usb_config.phy.vbus_monitor_io = AIRDAP_PIN_USB_VBUS_SENSE;
     usb_config.descriptor.device = airdap_usb_device_descriptor();
     usb_config.descriptor.string = airdap_usb_string_descriptors();
     usb_config.descriptor.string_count =
