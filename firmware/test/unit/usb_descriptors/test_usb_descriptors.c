@@ -382,6 +382,9 @@ static void test_network_profile(void)
     assert(airdap_usb_device_descriptor() == device);
 #if CONFIG_AIRDAP_DEBUG_SHELL
     assert(device->idProduct == 0x4022U);
+    assert(device->bDeviceClass == 0U);
+    assert(device->bDeviceSubClass == 0U);
+    assert(device->bDeviceProtocol == 0U);
     assert(configuration[4] == 1U);
     assert(read_u16(configuration + 2) == 32U);
     assert(configuration[9 + 2] == 0U);
@@ -393,10 +396,16 @@ static void test_network_profile(void)
     tusb_control_request_t request = make_ms_request();
     reset_control_capture();
     assert(tud_vendor_control_xfer_cb(0U, CONTROL_STAGE_SETUP, &request));
-    assert(control_length == 178U);
-    assert(control_data[22] == 0U);
-    assert_utf16le_ascii(control_data + 98, 80, expected_debug_device_interface_guid, 2);
-    assert(read_u16(tud_descriptor_bos_cb() + 29) == 178U);
+    /* A non-composite device needs device-scoped WinUSB properties. */
+    assert(control_length == 162U);
+    assert(read_u16(control_data + 8) == 162U);
+    assert(read_u16(control_data + 10) == 20U);
+    assert(read_u16(control_data + 12) == MS_OS_20_FEATURE_COMPATBLE_ID);
+    assert(memcmp(control_data + 14, "WINUSB\0\0", 8) == 0);
+    assert(read_u16(control_data + 30) == 132U);
+    assert(read_u16(control_data + 32) == MS_OS_20_FEATURE_REG_PROPERTY);
+    assert_utf16le_ascii(control_data + 82, 80, expected_debug_device_interface_guid, 2);
+    assert(read_u16(tud_descriptor_bos_cb() + 29) == 162U);
 #else
     assert(configuration[4] == 0U);
 #endif

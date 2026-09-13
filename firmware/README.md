@@ -251,6 +251,8 @@ disconnected in `NETWORK`. Returning to `USB` or `AUTO` restores the original
 wired interfaces and PID. An active shell disconnects during either profile
 change; rerun `airdap-shell.py` after enumeration to reconnect. The host tool
 recognizes both profiles and retains the same device serial and debug GUID.
+The single-interface shell declares its MS OS 2.0 WinUSB ID and GUID at device
+scope; the wired composite profile uses function subsets for its Vendor interfaces.
 USB profile changes are polled every 50 ms; network UART listener changes every
 100 ms. These are scheduling intervals, not real-time guarantees. `AUTO` uses
 host enumeration, not USB power alone, to decide whether a computer is connected.

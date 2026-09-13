@@ -228,12 +228,20 @@ void airdap_usb_descriptors_set_network(bool network)
     memcpy(ms_os_20_descriptor, wired_ms_os_20_descriptor, sizeof(ms_os_20_descriptor));
     ms_os_20_length = sizeof(ms_os_20_descriptor);
     device_descriptor.idProduct = USB_PRODUCT_ID;
+    device_descriptor.bcdDevice = 0x0102;
+    device_descriptor.bDeviceClass = TUSB_CLASS_MISC;
+    device_descriptor.bDeviceSubClass = MISC_SUBCLASS_COMMON;
+    device_descriptor.bDeviceProtocol = MISC_PROTOCOL_IAD;
     strcpy(usb_product, "AirDAP CMSIS-DAP v2");
     if (!network) return;
 
     /* A distinct development PID avoids Windows reusing the wired composite
      * topology/WinUSB interface cache for the shell-only device. */
     device_descriptor.idProduct = 0x4022;
+    device_descriptor.bcdDevice = 0x0103;
+    device_descriptor.bDeviceClass = 0;
+    device_descriptor.bDeviceSubClass = 0;
+    device_descriptor.bDeviceProtocol = 0;
     strcpy(usb_product, "AirDAP Debug Shell");
 #if CONFIG_AIRDAP_DEBUG_SHELL
     const uint8_t network_configuration[] = {
@@ -242,16 +250,14 @@ void airdap_usb_descriptors_set_network(bool network)
             USB_DEBUG_OUT_ENDPOINT, USB_DEBUG_IN_ENDPOINT, USB_FULL_SPEED_MAX_PACKET),
     };
     memcpy(configuration_descriptor, network_configuration, sizeof(network_configuration));
-    /* Retain the debug function's GUID but renumber its interface to zero. */
-    memcpy(ms_os_20_descriptor + 18, wired_ms_os_20_descriptor + 178,
-        MS_OS_20_DEBUG_FUNCTION_LENGTH);
-    ms_os_20_descriptor[22] = 0;
-    ms_os_20_length = 178;
-    ms_os_20_descriptor[8] = 178;
+    /* Windows binds this non-composite device directly to WinUSB. Function
+     * subsets require Usbccgp, so put the debug ID/GUID at device scope. */
+    memcpy(ms_os_20_descriptor + 10, wired_ms_os_20_descriptor + 186,
+        MS_OS_20_DEBUG_FUNCTION_LENGTH - 8);
+    ms_os_20_length = 162;
+    ms_os_20_descriptor[8] = 162;
     ms_os_20_descriptor[9] = 0;
-    ms_os_20_descriptor[16] = 168;
-    ms_os_20_descriptor[17] = 0;
-    bos_descriptor[29] = 178;
+    bos_descriptor[29] = 162;
     bos_descriptor[30] = 0;
 #else
     /* No functions remain; the transport keeps the pull-up disconnected. */
