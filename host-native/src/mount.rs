@@ -57,7 +57,13 @@ impl Mount {
     }
     pub async fn detach(&mut self) -> Result<()> {
         for number in self.matching().await? {
-            self.run(&["detach", "-p", &number.to_string()]).await?;
+            if let Err(error) = self.run(&["detach", "-p", &number.to_string()]).await {
+                // Closing the export can make VHCI remove it before the detach command.
+                // Only accept the failed command after proving this export is gone.
+                if self.matching().await?.contains(&number) {
+                    return Err(error);
+                }
+            }
         }
         self.number = None;
         Ok(())
@@ -101,6 +107,34 @@ fn matching_ports(text: &str, port: u16) -> Vec<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn detach_accepts_already_removed_port_but_preserves_real_failures() {
+        use std::os::unix::fs::PermissionsExt;
+        for removed in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let executable = dir.path().join("usbip");
+            std::fs::write(
+                &executable,
+                format!(
+                    r##"#!/bin/sh
+state="$(dirname "$0")/removed"
+case "$1" in
+port) if [ ! -f "$state" ]; then printf 'Port 01: active\n -> usbip://127.0.0.1:3242/1-1\n'; fi;;
+detach) {} ; exit 1;;
+esac
+"##,
+                    if removed { "touch \"$state\"" } else { ":" }
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let mut mount = Mount::new(3242, Some(executable));
+            mount.number = Some(1);
+            assert_eq!(mount.detach().await.is_ok(), removed);
+            assert_eq!(mount.number, if removed { None } else { Some(1) });
+        }
+    }
     #[test]
     fn detach_only_exact_export() {
         let text = "Port 1: active\n -> usbip://127.0.0.1:3242/1-1\nPort 2: active\n -> usbip://127.0.0.1:3243/1-1\nPort 3: active\n -> usbip://127.0.0.1:3242/1-10\n";
