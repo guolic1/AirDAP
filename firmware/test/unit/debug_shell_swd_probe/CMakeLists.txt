@@ -9,6 +9,7 @@ add_executable(
     test_debug_shell_swd_probe.c
     ../../../components/dap_ownership/dap_ownership.c
     ../../../components/mode_state/mode_state.c
+    ../mode_state/fake_mode_storage.c
     ../../../components/usb_device/debug_shell_swd_probe.c
 )
 
@@ -16,6 +17,7 @@ target_include_directories(
     debug_shell_swd_probe_test
     PRIVATE
         ../../../components/dap_ownership/include
+        ../../../components/mode_state/private_include
         ../../../components/mode_state/include
         ../../../components/usb_device/private_include
 )

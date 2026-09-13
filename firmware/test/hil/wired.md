@@ -224,7 +224,7 @@ be assigned to a gesture using `button bind` (record and restore its old binding
    is rejected and network UART closes. A power-only cable must not select USB.
 5. Repeat both directions, including removal during re-enumeration. Verify no
    shell bytes reach DAP endpoints, no stale UART data/ownership survives, and
-   reboot restores `AUTO`. Repeat with debug shell disabled if that build is used.
+   reboot restores the last saved mode (test both `NETWORK` and `AUTO`). Repeat with debug shell disabled if that build is used.
 
 Host tests and builds do not establish these enumeration, electrical, cable,
 operating-system driver, and live TLS outcomes.

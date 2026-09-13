@@ -374,7 +374,8 @@ esp_err_t airdap_usb_init(void)
 
     usb_io_mutex = xSemaphoreCreateMutex();
     if (usb_io_mutex == NULL) return ESP_ERR_NO_MEM;
-    airdap_usb_descriptors_set_network(false);
+    network_profile = !airdap_mode_state_usb_data_enabled();
+    airdap_usb_descriptors_set_network(network_profile);
     airdap_usb_descriptors_set_serial(identity->usb_serial);
     tinyusb_config_t usb_config = TINYUSB_DEFAULT_CONFIG(
         usb_event_callback,
@@ -395,6 +396,8 @@ esp_err_t airdap_usb_init(void)
         return error;
     }
 
+    if (network_profile && !CONFIG_AIRDAP_DEBUG_SHELL) (void) tud_disconnect();
+
     error = airdap_usb_uart_bridge_start();
     if (error != ESP_OK) {
         return error;
@@ -405,16 +408,13 @@ esp_err_t airdap_usb_init(void)
     if (error != ESP_OK) {
         return error;
     }
-    ESP_LOGI(
-        TAG,
-        "USB CMSIS-DAP v2 + target CDC + debug Vendor Bulk initialized, serial %s",
-        identity->usb_serial);
-#else
-    ESP_LOGI(
-        TAG,
-        "USB CMSIS-DAP v2 + CDC initialized, serial %s",
-        identity->usb_serial);
 #endif
+    ESP_LOGI(
+        TAG,
+        "USB initialized: profile=%s, debug-shell=%s, serial %s",
+        network_profile ? "network" : "DAP + UART",
+        CONFIG_AIRDAP_DEBUG_SHELL ? "enabled" : "disabled",
+        identity->usb_serial);
     if (xTaskCreate(usb_mode_worker, "usb_mode", 2048, NULL, 4, NULL) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }

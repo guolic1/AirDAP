@@ -35,6 +35,7 @@ void app_main(void)
     ESP_ERROR_CHECK(airdap_board_init_safe());
     ESP_ERROR_CHECK(airdap_device_identity_init());
     ESP_ERROR_CHECK(airdap_config_store_init());
+    ESP_ERROR_CHECK(airdap_mode_state_restore_dap_route() == AIRDAP_MODE_STATE_OK ? ESP_OK : ESP_FAIL);
     ESP_ERROR_CHECK(airdap_network_auth_init());
     ESP_ERROR_CHECK(airdap_voltage_monitor_init());
     ESP_ERROR_CHECK(airdap_swd_init(AIRDAP_SWD_DEFAULT_CLOCK_HZ));

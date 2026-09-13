@@ -2,6 +2,7 @@
 #include <stdatomic.h>
 
 #include "airdap_mode_state.h"
+#include "airdap_mode_storage.h"
 
 enum {
     MODE_USB_PRESENT = 1U << 0,
@@ -416,9 +417,20 @@ bool airdap_mode_state_network_data_enabled(void)
          (route == AIRDAP_DAP_ROUTE_AUTO && (control & MODE_USB_PRESENT) == 0U));
 }
 
+airdap_mode_state_result_t airdap_mode_state_restore_dap_route(void)
+{
+    unsigned int expected = MODE_INITIALIZED;
+    if (atomic_load(&mode_control) != expected) return AIRDAP_MODE_STATE_INVALID_STATE;
+    airdap_dap_route_t route;
+    if (!airdap_mode_storage_load(&route)) return AIRDAP_MODE_STATE_STORAGE_ERROR;
+    return atomic_compare_exchange_strong(&mode_control, &expected,
+        replace_field(expected, MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT, route))
+        ? AIRDAP_MODE_STATE_OK : AIRDAP_MODE_STATE_INVALID_STATE;
+}
+
 airdap_mode_dap_result_t airdap_mode_state_set_dap_route(airdap_dap_route_t route)
 {
-    if (route < AIRDAP_DAP_ROUTE_AUTO || route > AIRDAP_DAP_ROUTE_TOGGLE) {
+    if (route < AIRDAP_DAP_ROUTE_AUTO || route > AIRDAP_DAP_ROUTE_NETWORK_AUTO_TOGGLE) {
         return AIRDAP_MODE_DAP_INVALID_ARGUMENT;
     }
     airdap_dap_ownership_operation_t operation = {0};
@@ -430,7 +442,7 @@ airdap_mode_dap_result_t airdap_mode_state_set_dap_route(airdap_dap_route_t rout
         return AIRDAP_MODE_DAP_BUSY;
     }
     unsigned int current = atomic_load(&mode_control);
-    for (;;) {
+    do {
         if ((current & MODE_INITIALIZED) == 0U) {
             result = AIRDAP_MODE_DAP_INVALID_STATE;
             break;
@@ -446,13 +458,24 @@ airdap_mode_dap_result_t airdap_mode_state_set_dap_route(airdap_dap_route_t rout
             const bool usb = previous == AIRDAP_DAP_ROUTE_USB ||
                 (previous == AIRDAP_DAP_ROUTE_AUTO && (current & MODE_USB_PRESENT) != 0U);
             selected = usb ? AIRDAP_DAP_ROUTE_NETWORK : AIRDAP_DAP_ROUTE_USB;
+        } else if (route == AIRDAP_DAP_ROUTE_NETWORK_AUTO_TOGGLE) {
+            selected = field_value(current, MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT) ==
+                AIRDAP_DAP_ROUTE_NETWORK ? AIRDAP_DAP_ROUTE_AUTO : AIRDAP_DAP_ROUTE_NETWORK;
         }
-        unsigned int next = replace_field(current,
-            MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT, selected);
-        if (next == current) break;
-        next = increment_field(next, MODE_USB_OTA_EPOCH_MASK, MODE_USB_OTA_EPOCH_SHIFT);
-        if (atomic_compare_exchange_weak(&mode_control, &current, next)) break;
-    }
+        if (selected == field_value(current, MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT)) break;
+        if (!airdap_mode_storage_save((airdap_dap_route_t) selected)) {
+            result = AIRDAP_MODE_DAP_STORAGE_ERROR;
+            break;
+        }
+        /* The reservation blocks other route commands and OTA suspension.
+         * Preserve events arriving during NVS I/O without saving again. */
+        for (;;) {
+            unsigned int next = replace_field(current,
+                MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT, selected);
+            next = increment_field(next, MODE_USB_OTA_EPOCH_MASK, MODE_USB_OTA_EPOCH_SHIFT);
+            if (atomic_compare_exchange_weak(&mode_control, &current, next)) break;
+        }
+    } while (false);
     airdap_dap_ownership_operation_end(&operation);
     return result;
 }

@@ -42,9 +42,11 @@ add_executable(network_indicator_test
     test_network_indicator.c
     ../../../components/ble_provisioning/network_indicator.c
     ../../../components/mode_state/mode_state.c
+    ../mode_state/fake_mode_storage.c
     ../../../components/dap_ownership/dap_ownership.c)
 target_include_directories(network_indicator_test PRIVATE
     ../../../components/ble_provisioning/private_include
+    ../../../components/mode_state/private_include
     ../../../components/mode_state/include
     ../../../components/dap_ownership/include)
 target_compile_features(network_indicator_test PRIVATE c_std_11)
@@ -92,11 +94,13 @@ add_executable(button_device_commands_test test_button_device_commands.c
     ../../../components/ble_provisioning/button_device_commands.c
     ../../../components/board/board.c
     ../../../components/mode_state/mode_state.c
+    ../mode_state/fake_mode_storage.c
     ../../../components/dap_ownership/dap_ownership.c)
 target_include_directories(button_device_commands_test PRIVATE
     ../../../components/ble_provisioning/private_include
     ../../../components/button_config/include
     ../../../components/board/include
+    ../../../components/mode_state/private_include
     ../../../components/mode_state/include
     ../../../components/dap_ownership/include
     ../../../components/wifi_manager/include

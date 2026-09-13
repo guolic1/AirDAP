@@ -6,6 +6,7 @@ add_executable(network_control_test
     test_network_control.c
     ../../../components/network_control/network_control.c
     ../../../components/mode_state/mode_state.c
+    ../mode_state/fake_mode_storage.c
     ../../../components/dap_ownership/dap_ownership.c
 )
 target_include_directories(network_control_test PRIVATE
@@ -14,6 +15,7 @@ target_include_directories(network_control_test PRIVATE
     ../../../components/network_auth/include
     ../../../components/board/include
     ../../../components/airdap_frame/include
+    ../../../components/mode_state/private_include
     ../../../components/mode_state/include
     ../../../components/dap_ownership/include
 )

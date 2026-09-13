@@ -11,6 +11,7 @@ add_executable(
     ../../../components/network_ota/network_ota.c
     ../../../components/dap_ownership/dap_ownership.c
     ../../../components/mode_state/mode_state.c
+    ../mode_state/fake_mode_storage.c
     ../../../components/ota_manager/ota_manager.c
 )
 target_include_directories(
@@ -23,6 +24,7 @@ target_include_directories(
         ../target_uart/fake_include
         ../../../components/target_uart/include
         ../../../components/dap_ownership/include
+        ../../../components/mode_state/private_include
         ../../../components/mode_state/include
         ../../../components/ota_manager/include
 )

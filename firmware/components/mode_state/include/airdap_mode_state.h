@@ -53,6 +53,7 @@ typedef enum {
     AIRDAP_MODE_STATE_INVALID_ARGUMENT,
     AIRDAP_MODE_STATE_INVALID_STATE,
     AIRDAP_MODE_STATE_INVALID_TRANSITION,
+    AIRDAP_MODE_STATE_STORAGE_ERROR,
 } airdap_mode_state_result_t;
 
 typedef enum {
@@ -62,6 +63,7 @@ typedef enum {
     AIRDAP_MODE_DAP_UNAUTHENTICATED,
     AIRDAP_MODE_DAP_INVALID_ARGUMENT,
     AIRDAP_MODE_DAP_INVALID_STATE,
+    AIRDAP_MODE_DAP_STORAGE_ERROR,
 } airdap_mode_dap_result_t;
 
 typedef struct {
@@ -72,17 +74,22 @@ typedef struct {
     airdap_dap_owner_t dap_owner;
 } airdap_mode_snapshot_t;
 
+/* AUTO/USB/NETWORK numeric values are persisted; do not reorder them. */
 typedef enum {
     AIRDAP_DAP_ROUTE_AUTO = 0,
     AIRDAP_DAP_ROUTE_USB,
     AIRDAP_DAP_ROUTE_NETWORK,
     AIRDAP_DAP_ROUTE_TOGGLE,
+    AIRDAP_DAP_ROUTE_NETWORK_AUTO_TOGGLE,
 } airdap_dap_route_t;
 
-/* Volatile DAP/UART selection; AUTO uses USB when attached, NETWORK otherwise.
- * Selection requires an idle owner and no OTA. Physical USB state is preserved. */
+/* Persistent DAP/UART selection; AUTO uses USB when attached, NETWORK otherwise.
+ * Selection requires an idle owner and no OTA. Save failure leaves RAM unchanged. */
 airdap_mode_dap_result_t airdap_mode_state_set_dap_route(airdap_dap_route_t route);
 airdap_dap_route_t airdap_mode_state_get_dap_route(void);
+
+/* Boot only: call after NVS initialization, before starting any transports. */
+airdap_mode_state_result_t airdap_mode_state_restore_dap_route(void);
 
 /* Transport policy only: USB remains available for enumeration in AUTO.
  * Network management/OTA and the independent debug shell are not data ports. */

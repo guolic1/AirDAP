@@ -29,7 +29,7 @@ static const airdap_debug_shell_command_t core_commands[] = {
         .details =
             "Simulate a complete BOOT_KEY gesture with automatic release, or show "
             "the queued/running gesture with status. commands lists the allowlist; bindings lists saved "
-            "single/double/hold2/hold6/hold10 commands and the volatile DAP route. "
+            "single/double/hold2/hold6/hold10 commands and the saved DAP route. "
             "bind <gesture> <command> saves immediately; defaults saves the "
             "default bindings. Simulation takes real time, rejects overlapping requests, "
             "and is cancelled by physical input. Both use the same state machine.",

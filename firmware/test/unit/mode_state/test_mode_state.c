@@ -592,6 +592,62 @@ static void test_data_transport_policy(void)
     assert(airdap_mode_state_network_data_enabled());
 }
 
+extern airdap_dap_route_t fake_saved_route;
+extern bool fake_mode_save_error, fake_mode_load_error;
+extern unsigned fake_mode_writes;
+extern void (*fake_mode_save_hook)(void);
+
+static void attach_during_save(void)
+{
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED) == AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_USB) == AIRDAP_MODE_DAP_BUSY);
+}
+
+static void test_persistent_routes(void)
+{
+    reset_state();
+    fake_saved_route = AIRDAP_DAP_ROUTE_NETWORK;
+    fake_mode_writes = 0;
+    fake_mode_load_error = true;
+    assert(airdap_mode_state_restore_dap_route() == AIRDAP_MODE_STATE_STORAGE_ERROR);
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_AUTO);
+    fake_mode_load_error = false;
+    assert(airdap_mode_state_restore_dap_route() == AIRDAP_MODE_STATE_OK);
+    assert(!airdap_mode_state_usb_data_enabled());
+    assert(airdap_mode_state_network_data_enabled());
+    assert(fake_mode_writes == 0);
+    current_owner = AIRDAP_DAP_OWNER_NETWORK;
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_NETWORK_AUTO_TOGGLE) == AIRDAP_MODE_DAP_BUSY);
+    current_owner = AIRDAP_DAP_OWNER_NONE;
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_STARTED) == AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_NETWORK_AUTO_TOGGLE) == AIRDAP_MODE_DAP_BUSY);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_ABORTED) == AIRDAP_MODE_STATE_OK);
+    assert(fake_mode_writes == 0 && fake_saved_route == AIRDAP_DAP_ROUTE_NETWORK);
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_NETWORK) == AIRDAP_MODE_DAP_ALLOWED);
+    assert(fake_mode_writes == 0);
+    fake_mode_save_error = true;
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_NETWORK_AUTO_TOGGLE) == AIRDAP_MODE_DAP_STORAGE_ERROR);
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_NETWORK);
+    assert(fake_saved_route == AIRDAP_DAP_ROUTE_NETWORK && !operation_active);
+    fake_mode_save_error = false;
+    fake_mode_save_hook = attach_during_save;
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_NETWORK_AUTO_TOGGLE) == AIRDAP_MODE_DAP_ALLOWED);
+    fake_mode_save_hook = NULL;
+    assert(fake_mode_writes == 2 && fake_saved_route == AIRDAP_DAP_ROUTE_AUTO);
+    assert(airdap_mode_state_usb_data_enabled() && !airdap_mode_state_network_data_enabled());
+    assert(airdap_mode_state_restore_dap_route() == AIRDAP_MODE_STATE_INVALID_STATE);
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_DETACHED) == AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_network_data_enabled() && fake_mode_writes == 2);
+    for (int route = AIRDAP_DAP_ROUTE_AUTO; route <= AIRDAP_DAP_ROUTE_NETWORK; ++route) {
+        assert(airdap_mode_state_set_dap_route((airdap_dap_route_t) route) == AIRDAP_MODE_DAP_ALLOWED);
+        airdap_mode_state_init();
+        assert(airdap_mode_state_restore_dap_route() == AIRDAP_MODE_STATE_OK);
+        assert(airdap_mode_state_get_dap_route() == (airdap_dap_route_t) route);
+        assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_NETWORK_AUTO_TOGGLE) == AIRDAP_MODE_DAP_ALLOWED);
+        assert(fake_saved_route == (route == AIRDAP_DAP_ROUTE_NETWORK ? AIRDAP_DAP_ROUTE_AUTO : AIRDAP_DAP_ROUTE_NETWORK));
+    }
+}
+
 int main(void)
 {
     test_initial_state_and_authentication_boundary();
@@ -607,6 +663,7 @@ int main(void)
     test_control_allows_idle_usb_and_tracks_shell_sessions();
     test_manual_route_selection();
     test_data_transport_policy();
+    test_persistent_routes();
     puts("Mode state tests passed");
     return 0;
 }

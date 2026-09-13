@@ -9,6 +9,7 @@ add_executable(
     test_dap_backend.c
     ../../../components/dap_ownership/dap_ownership.c
     ../../../components/mode_state/mode_state.c
+    ../mode_state/fake_mode_storage.c
     ../../../components/dap_protocol/dap_backend.c
     ../../../components/dap_protocol/dap_protocol.c
 )
@@ -17,6 +18,7 @@ target_include_directories(
     PRIVATE
         fake_include
         ../../../components/dap_ownership/include
+        ../../../components/mode_state/private_include
         ../../../components/mode_state/include
         ../../../components/dap_protocol/include
 )

@@ -224,16 +224,17 @@ owner fields. USB attach/detach, Wi-Fi station, BLE provisioning, and OTA
 lifecycle events are wired today. USB DAP admission ignores Wi-Fi state.
 By default, authenticated NETWORK DAP admission requires USB to be absent and Wi-Fi to be
 online. A button command can explicitly select NETWORK even with USB attached;
-that selection removes USB DAP and target UART until changed or rebooted. USB presence does not disable independent network status,
+that selection removes USB DAP and target UART until changed, including across
+reboot. USB presence does not disable independent network status,
 configuration, or OTA paths.
 
-DAP and target UART share the volatile route selection:
+DAP and target UART share the persistent route selection:
 
 | Route | USB DAP / target CDC | Network DAP / target UART |
 | --- | --- | --- |
 | `USB` | Enabled when enumerated | Disabled |
 | `NETWORK` | Removed from USB enumeration | Enabled |
-| `AUTO` (boot default) | Enabled when enumerated | Enabled only while USB is not enumerated |
+| `AUTO` (factory default) | Enabled when enumerated | Enabled only while USB is not enumerated |
 
 Network data still requires Wi-Fi and authenticated sessions. Disabling network
 UART closes TCP 3261 and terminates existing UART connections, including pending
@@ -472,9 +473,17 @@ commands may be bound to any of the five gestures:
 | `target-power-cycle` | Disable target power permission for 500 ms, then allow power |
 
 For example, `button bind hold6 dap-auto` replaces the six-second no-op.
-`button bindings` prints all bindings and the current volatile DAP route.
+`button bindings` prints all bindings and the current saved DAP route.
 Commands are a fixed allowlist, not arbitrary shell text. Firmware flashing is
 not a button command. The default five bindings remain unchanged.
+
+All manual route commands save the selected USB, NETWORK, or AUTO mode to
+`airdap_mode/dap_route` before applying it. Restart restores that selection before
+USB initialization; a saved NETWORK mode starts without wired DAP/target CDC.
+Missing mode storage selects AUTO. Failed reads are logged and abort startup;
+failed saves reject the switch and retain the previous route. Selecting the same
+mode does not write again. AUTO cable events only change the active transport,
+without rewriting the saved AUTO selection.
 
 The five device commands added above reject active provisioning, any DAP owner,
 in-flight physical control, and OTA. USB CDC/debug shell may remain connected.

@@ -49,7 +49,7 @@ int airdap_debug_shell_button_command(
         }
         const airdap_dap_route_t route = airdap_mode_state_get_dap_route();
         airdap_debug_shell_printf(invocation, AIRDAP_DEBUG_SHELL_STYLE_DEFAULT,
-            "dap-route=%s (volatile)\n", route == AIRDAP_DAP_ROUTE_USB ? "usb" :
+            "dap-route=%s (saved)\n", route == AIRDAP_DAP_ROUTE_USB ? "usb" :
                 route == AIRDAP_DAP_ROUTE_NETWORK ? "network" : "auto");
         return 0;
     }

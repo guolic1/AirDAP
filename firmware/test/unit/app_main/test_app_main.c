@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "airdap_config_store.h"
+#include "airdap_mode_state.h"
 #include "airdap_device_identity.h"
 #include "airdap_voltage_monitor.h"
 #include "esp_err.h"
@@ -14,6 +15,7 @@ typedef enum {
     CALL_BOARD_INITIALIZE,
     CALL_DEVICE_IDENTITY_INITIALIZE,
     CALL_CONFIG_STORE_INITIALIZE,
+    CALL_MODE_RESTORE,
     CALL_NETWORK_AUTH_INITIALIZE,
     CALL_VOLTAGE_INITIALIZE,
     CALL_SWD_INITIALIZE,
@@ -67,6 +69,12 @@ esp_err_t airdap_config_store_init(void)
 {
     record(CALL_CONFIG_STORE_INITIALIZE);
     return ESP_OK;
+}
+
+airdap_mode_state_result_t airdap_mode_state_restore_dap_route(void)
+{
+    record(CALL_MODE_RESTORE);
+    return AIRDAP_MODE_STATE_OK;
 }
 
 esp_err_t airdap_network_auth_init(void)
@@ -155,6 +163,7 @@ static void test_wifi_failure_does_not_start_discovery(void)
         CALL_BOARD_INITIALIZE,
         CALL_DEVICE_IDENTITY_INITIALIZE,
         CALL_CONFIG_STORE_INITIALIZE,
+        CALL_MODE_RESTORE,
         CALL_NETWORK_AUTH_INITIALIZE,
         CALL_VOLTAGE_INITIALIZE,
         CALL_SWD_INITIALIZE,
@@ -186,6 +195,7 @@ static void test_network_listener_failure_does_not_publish_discovery(void)
         CALL_BOARD_INITIALIZE,
         CALL_DEVICE_IDENTITY_INITIALIZE,
         CALL_CONFIG_STORE_INITIALIZE,
+        CALL_MODE_RESTORE,
         CALL_NETWORK_AUTH_INITIALIZE,
         CALL_VOLTAGE_INITIALIZE,
         CALL_SWD_INITIALIZE,
@@ -218,6 +228,7 @@ static void test_discovery_starts_after_network_listener(void)
         CALL_BOARD_INITIALIZE,
         CALL_DEVICE_IDENTITY_INITIALIZE,
         CALL_CONFIG_STORE_INITIALIZE,
+        CALL_MODE_RESTORE,
         CALL_NETWORK_AUTH_INITIALIZE,
         CALL_VOLTAGE_INITIALIZE,
         CALL_SWD_INITIALIZE,
