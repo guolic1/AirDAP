@@ -285,6 +285,12 @@ persisted value. The ten-second network reset also purges ESP-IDF's Wi-Fi NVS
 namespace so credentials left by older firmware cannot survive the reset. This
 does not affect AirDAP's compiled Security 2 credential.
 
+Normal station connections use `WIFI_FAST_SCAN`: connect to the first matching
+AP that meets the existing security criteria instead of finishing an all-channel
+scan to rank every AP by signal. This can shorten association, but does not
+guarantee selection of the strongest AP when an SSID has multiple access points.
+DHCP and authentication still determine when the device is usable.
+
 A station link is still reported as `connecting`. Only
 `IP_EVENT_STA_GOT_IP`, after DHCP succeeds, publishes `online`. Authentication
 and handshake failures are reported separately from AP loss and other temporary

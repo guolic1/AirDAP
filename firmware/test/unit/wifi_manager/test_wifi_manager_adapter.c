@@ -404,6 +404,10 @@ esp_err_t esp_wifi_set_config(int interface, const wifi_config_t *config)
 {
     assert(interface == WIFI_IF_STA);
     assert(config != NULL);
+    if (config->sta.ssid[0] != 0) {
+        assert(config->sta.scan_method == WIFI_FAST_SCAN);
+        assert(config->sta.pmf_cfg.capable && !config->sta.pmf_cfg.required);
+    }
     last_wifi_config = *config;
     ++wifi_set_config_count;
     return ESP_OK;

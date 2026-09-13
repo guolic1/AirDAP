@@ -213,7 +213,8 @@ static esp_err_t configure_station_from_store(void)
         config.sta.password,
         credentials.password,
         credentials.password_length);
-    config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    /* Connect when a matching AP is found instead of ranking every channel. */
+    config.sta.scan_method = WIFI_FAST_SCAN;
     config.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
     config.sta.failure_retry_cnt = 0U;
     config.sta.pmf_cfg.capable = true;
