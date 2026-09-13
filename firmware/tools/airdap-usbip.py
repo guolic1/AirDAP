@@ -26,12 +26,13 @@ async def serve(args, credential):
     logging.info("Listening on 127.0.0.1:%d, bus 1-1, device %s; upstream %s:%d/%d",
                  args.port, credential.device_id, args.host, args.dap_port, args.uart_port)
     try:
-        async with server:
-            await stop.wait()
+        await stop.wait()
     finally:
         server.close()
-        await server.wait_closed()
+        # On Python 3.13+, wait_closed also waits for accepted transports.
+        # Close the imported session before waiting for listener shutdown.
         await bridge.close()
+        await server.wait_closed()
         for sig, handler in previous.items():
             signal.signal(sig, handler)
 
