@@ -386,7 +386,6 @@ class Service:
 
     async def stage_image(self, image):
         self.idle()
-        self.stopped()
         self.no_provisioning()
         if not 80 <= len(image) <= MAX_IMAGE:
             raise ServiceError('应用镜像大小无效。')

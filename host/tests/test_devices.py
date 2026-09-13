@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import asyncio
+import json
 import os
 from pathlib import Path
 import struct
@@ -10,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from airdap_service_devices import Devices, ServiceError, usb_wifi, wifi_fields, usb_update, net_update, BleProvisioning, UsbProvisioning
 from airdap_service import Service, Store
+from airdap_network_credential import NetworkCredential
 import tempfile
 
 DEVICE = 'ADP-001122334455'
@@ -191,6 +193,35 @@ def image_bytes():
 
 
 class OtaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bridge_allows_image_inspection_but_blocks_flash(self):
+        with tempfile.TemporaryDirectory() as folder:
+            devices = Devices()
+            devices.ota = AsyncMock()
+            service = Service(Store(Path(folder)), devices=devices, usbip_port=0)
+            service.mount = MagicMock(executable=None)
+            try:
+                credential = NetworkCredential.create(DEVICE, bytes(range(32)))
+                await service.command('profile', {'device_id':DEVICE, 'host':'localhost',
+                    'auto_attach':False, 'credential':json.loads(credential.to_json())})
+                await service.start_bridge()
+                meta = await service.stage_image(image_bytes())
+                self.assertEqual(meta['version'], 'vtest')
+                self.assertTrue((await service.state())['bridge']['listening'])
+                with self.assertRaisesRegex(ServiceError, '停止 USB 桥接'):
+                    await service.command('ota', {'device_id':DEVICE, 'transport':'usb',
+                        'confirm':True, 'sha256':meta['sha256']})
+                devices.ota.assert_not_awaited()
+                release = asyncio.Event()
+                service.start_job('等待操作', release.wait)
+                try:
+                    with self.assertRaisesRegex(ServiceError, '当前操作尚未结束'):
+                        await service.stage_image(image_bytes())
+                    self.assertEqual(service.image_meta, meta)
+                finally:
+                    release.set()
+            finally:
+                await service.close()
+
     async def test_uploaded_image_never_writes_until_matching_confirmation(self):
         with tempfile.TemporaryDirectory() as folder:
             devices = Devices()

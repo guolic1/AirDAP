@@ -52,9 +52,14 @@ function render() {
   $('credentialStatus').textContent = state.credential_present ? '已保存该设备的网络凭据。' : '未保存网络凭据，请导入或在配网窗口建立凭据。';
   $('startBridge').disabled = busy || configuring || b.listening || !state.credential_present;
   $('stopBridge').disabled = busy || (!b.listening && !p.bridge_enabled && !b.error);
-  for (const id of ['scanUsb','scanBle','infoNetwork','infoUsb','stageImage']) $(id).disabled = busy || configuring || (['infoUsb','stageImage'].includes(id) && b.listening);
+  for (const id of ['scanUsb','scanBle','infoNetwork','infoUsb','stageImage']) $(id).disabled = busy || configuring || (id === 'infoUsb' && b.listening);
   for (const form of ['profileForm']) for (const el of $(form).elements) el.disabled = busy || configuring || b.listening;
   $('runOta').disabled = busy || configuring || b.listening || !state.image;
+  $('otaStatus').textContent = busy ? '当前操作进行中，请等待完成后上传或升级。'
+    : configuring ? '请先在配网窗口点击“取消配网”，再上传或升级。'
+    : b.listening ? '可以上传并检查镜像；实际升级前，请停止 USB 桥接并关闭烧录器和串口工具。'
+    : !state.image ? '请选择文件，再点击“上传并检查镜像”。'
+    : '镜像已暂存，请核对设备和镜像信息，再点击“确认设备并升级”。';
   if (lastDiscovered !== JSON.stringify(state.discovered)) {
     lastDiscovered = JSON.stringify(state.discovered);
     $('discovered').replaceChildren();

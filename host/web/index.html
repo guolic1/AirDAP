@@ -36,6 +36,6 @@
 </dialog>
 <section id="firmware" class="panel"><div class="panel-title"><div><div class="eyebrow">03 / FIRMWARE</div><h2>OTA 固件升级</h2></div><span class="badge neutral">应用镜像 · ESP32-S3</span></div>
 <div class="grid"><div><label>传输方式<select id="otaTransport"><option value="network">加密网络 · TCP 3260</option><option value="usb">USB · CMSIS-DAP</option></select></label><label class="upload">选择应用镜像<input id="imageFile" type="file" accept=".bin,application/octet-stream"><small>airdap.bin · 上传后先核对信息，不会立即烧录</small></label><button id="stageImage" class="secondary">上传并检查镜像</button></div>
-<div><dl id="imageInfo"><dt>待升级镜像</dt><dd>尚未上传</dd></dl><button id="runOta" disabled>确认设备并升级</button><p class="hint">只写入非活动 OTA 分区，设备验证镜像后重启。网络升级核对槽位、版本及启动确认；USB 升级核对重连版本。请关闭烧录器和串口工具。</p></div></div></section>
+<div><dl id="imageInfo"><dt>待升级镜像</dt><dd>尚未上传</dd></dl><button id="runOta" disabled>确认设备并升级</button><p id="otaStatus" class="hint" role="status">请选择文件，再点击“上传并检查镜像”。</p><p class="hint">只写入非活动 OTA 分区，设备验证镜像后重启。网络升级核对槽位、版本及启动确认；USB 升级核对重连版本。请关闭烧录器和串口工具。</p></div></div></section>
 <section class="operation panel"><div><h2>最近操作</h2><p id="jobMessage">暂无操作</p></div><progress id="progress" max="100" value="0" aria-label="操作进度"></progress><pre id="jobResult" hidden></pre></section>
 <footer>AirDAP Host Service <span>本机管理 · 网络 DAP + 目标 UART</span></footer></main></body></html>
