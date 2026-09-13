@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="api-token" content="__AIRDAP_TOKEN__"><title>AirDAP · 设备管理</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<aside><a class="brand" href="/">◈ <span>AirDAP</span></a><div class="eyebrow">DEVICE CONSOLE</div>
+<nav><a href="#overview">概览与连接</a><a href="#network">网络配置</a><a href="#firmware">固件升级</a></nav>
+<div class="local"><span class="dot"></span> 仅本机访问<small>USB/IP · BLE · OTA</small></div></aside>
+<main><header><div><div class="eyebrow">设备管理 / LOCAL SERVICE</div><h1>连接你的调试工作台</h1><p>把网络上的 AirDAP 接入本机 USB，集中管理连接、配网和固件。</p></div><span id="serviceBadge" class="badge">连接服务中</span></header>
+<div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+<section id="overview"><div class="metrics"><article><span>USB 桥接</span><strong id="bridgeState">—</strong><small id="bridgePort">等待服务状态</small></article><article><span>当前设备</span><strong id="deviceName">尚未选择</strong><small id="deviceHost">保存设备后即可连接</small></article><article><span>当前固件</span><strong id="firmwareVersion">尚未读取</strong><small id="infoSource">点击读取设备信息</small></article></div>
+<div class="grid"><article class="panel"><div class="panel-title"><h2>设备连接</h2><span class="step">01 / CONNECT</span></div>
+<div class="row"><button id="scanUsb" class="secondary">查找 USB 设备</button><button id="scanBle" class="secondary">扫描蓝牙</button></div><div id="discovered" class="discovered"></div>
+<form id="profileForm"><label>设备编号<input id="deviceId" required pattern="ADP-[0-9A-F]{12}" placeholder="ADP-001122334455" autocomplete="off"></label>
+<label>设备 IP / mDNS 主机名<input id="host" required placeholder="192.168.1.100" autocomplete="off"></label>
+<label>导入已有网络凭据 <span class="muted">可选 · JSON</span><input id="credential" type="file" accept=".json,application/json"></label>
+<label class="check"><input id="autoAttach" type="checkbox" checked> 桥接启动后自动挂载；掉线后重新连接</label><button type="submit">保存连接信息</button></form>
+<p class="hint" id="credentialStatus">网络连接需要该设备的配对凭据。</p>
+<div class="row"><button id="startBridge">启动 USB 桥接</button><button id="stopBridge" class="secondary">停止桥接</button></div><p class="hint">已启动的桥接会在服务重启后恢复。系统识别为 CMSIS-DAP 和 COM / ttyACM；实际烧录请使用现有烧录软件。</p>
+</article><article class="panel"><div class="panel-title"><h2>设备信息</h2><span class="step">LIVE STATUS</span></div><div class="row"><button id="infoNetwork" class="secondary">通过网络读取</button><button id="infoUsb" class="secondary">通过 USB 读取</button></div>
+<div id="deviceInfo" class="information"><div class="empty">◈<p>还没有设备信息</p><small>选择设备后，通过 USB 或加密网络读取。</small></div></div>
+<div class="callout">USB 配网和详细诊断需要固件启用独立 debug shell 接口。管理页只提供固定操作，不开放网络 shell。</div></article></div></section>
+<section id="network" class="panel"><div class="panel-title"><div><div class="eyebrow">02 / NETWORK</div><h2>Wi-Fi 与蓝牙配对</h2></div><span class="badge neutral">停止桥接后操作</span></div>
+<div class="grid"><form id="wifiForm"><label>配网方式<select id="wifiTransport"><option value="ble">蓝牙 · Security 2</option><option value="usb">USB · 物理连接</option></select></label>
+<label>Wi-Fi 名称<input id="ssid" required autocomplete="off" placeholder="输入 SSID"></label><label>Wi-Fi 密码<input id="password" type="password" autocomplete="new-password" placeholder="开放网络留空"></label>
+<p class="hint">密码仅用于本次操作，不存入主机配置或日志。仅在设备取得 IP 后报告联网成功。</p><button type="submit">应用 Wi-Fi 配置</button></form>
+<div class="pairing"><h3>建立网络连接凭据</h3><p>首次使用网络功能时，先在设备上开启蓝牙配网窗口，再点击配对。服务会生成并保存本机凭据；重复配对复用同一份凭据。</p><button id="pairBle" class="secondary">通过蓝牙配对</button><p class="hint">配对会替换设备当前网络凭据，其他主机的旧凭据将失效。已配对的设备可在上方直接导入已有凭据。</p><p class="hint">USB 配网只更新 Wi-Fi，不生成网络凭据。中文 SSID 请使用蓝牙；当前 USB shell 输入仅支持 ASCII。</p></div></div></section>
+<section id="firmware" class="panel"><div class="panel-title"><div><div class="eyebrow">03 / FIRMWARE</div><h2>OTA 固件升级</h2></div><span class="badge neutral">应用镜像 · ESP32-S3</span></div>
+<div class="grid"><div><label>传输方式<select id="otaTransport"><option value="network">加密网络 · TCP 3260</option><option value="usb">USB · CMSIS-DAP</option></select></label><label class="upload">选择应用镜像<input id="imageFile" type="file" accept=".bin,application/octet-stream"><small>airdap.bin · 上传后先核对信息，不会立即烧录</small></label><button id="stageImage" class="secondary">上传并检查镜像</button></div>
+<div><dl id="imageInfo"><dt>待升级镜像</dt><dd>尚未上传</dd></dl><button id="runOta" disabled>确认设备并升级</button><p class="hint">只写入非活动 OTA 分区，设备验证镜像后重启。网络升级核对槽位、版本及启动确认；USB 升级核对重连版本。请关闭烧录器和串口工具。</p></div></div></section>
+<section class="operation panel"><div><h2>最近操作</h2><p id="jobMessage">暂无操作</p></div><progress id="progress" max="100" value="0" aria-label="操作进度"></progress><pre id="jobResult" hidden></pre></section>
+<footer>AirDAP Host Service <span>本机管理 · 网络 DAP + 目标 UART</span></footer></main></body></html>
