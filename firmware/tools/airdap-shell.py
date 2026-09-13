@@ -17,6 +17,7 @@ from typing import Any, BinaryIO, Protocol
 
 USB_VID = 0x303A
 USB_PID = 0x4021
+USB_NETWORK_PID = 0x4022
 DEBUG_INTERFACE = 3
 DEBUG_OUT_ENDPOINT = 0x04
 DEBUG_IN_ENDPOINT = 0x84
@@ -46,6 +47,10 @@ def _windows_usb_backend() -> Any | None:
     except ImportError:
         return None
     return libusb_package.get_libusb1_backend()
+
+
+def is_airdap_product(device: Any) -> bool:
+    return device.idProduct in (USB_PID, USB_NETWORK_PID)
 
 
 class ShellError(RuntimeError):
@@ -82,6 +87,7 @@ class VendorShellTransport:
         timeout_ms: int = 100,
     ):
         self.device = device
+        self.interface_number = DEBUG_INTERFACE
         self.usb_util = usb_util
         self.usb_core = usb_core
         self.timeout_ms = timeout_ms
@@ -99,8 +105,11 @@ class VendorShellTransport:
         except Exception as error:
             raise ShellError(f"cannot read active USB configuration: {error}") from error
 
+        self.interface_number = (
+            0 if self.device.idProduct == USB_NETWORK_PID else DEBUG_INTERFACE
+        )
         try:
-            interface = configuration[(DEBUG_INTERFACE, 0)]
+            interface = configuration[(self.interface_number, 0)]
         except (KeyError, IndexError) as error:
             raise ShellError(
                 "AirDAP debug interface is absent; rebuild the default firmware "
@@ -130,19 +139,19 @@ class VendorShellTransport:
             raise ShellError("debug endpoints must use 64-byte full-speed packets")
 
         try:
-            if self.device.is_kernel_driver_active(DEBUG_INTERFACE):
-                self.device.detach_kernel_driver(DEBUG_INTERFACE)
+            if self.device.is_kernel_driver_active(self.interface_number):
+                self.device.detach_kernel_driver(self.interface_number)
                 self.detached_kernel_driver = True
         except Exception as error:
             if not isinstance(error, NotImplementedError) and not self._is_usb_error(error):
                 raise ShellError(f"cannot detach debug-interface driver: {error}") from error
 
         try:
-            self.usb_util.claim_interface(self.device, DEBUG_INTERFACE)
+            self.usb_util.claim_interface(self.device, self.interface_number)
         except Exception as error:
             if self.detached_kernel_driver:
                 with contextlib.suppress(Exception):
-                    self.device.attach_kernel_driver(DEBUG_INTERFACE)
+                    self.device.attach_kernel_driver(self.interface_number)
                 self.detached_kernel_driver = False
             raise ShellError(f"cannot claim AirDAP debug interface: {error}") from error
 
@@ -186,11 +195,11 @@ class VendorShellTransport:
             with contextlib.suppress(Exception):
                 self.write(SESSION_END)
             with contextlib.suppress(Exception):
-                self.usb_util.release_interface(self.device, DEBUG_INTERFACE)
+                self.usb_util.release_interface(self.device, self.interface_number)
             self.claimed = False
         if self.detached_kernel_driver:
             with contextlib.suppress(Exception):
-                self.device.attach_kernel_driver(DEBUG_INTERFACE)
+                self.device.attach_kernel_driver(self.interface_number)
             self.detached_kernel_driver = False
         try:
             self.usb_util.dispose_resources(self.device)
@@ -523,7 +532,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             find_all=True,
             backend=_windows_usb_backend(),
             idVendor=USB_VID,
-            idProduct=USB_PID,
+            custom_match=is_airdap_product,
         )
         or []
     )

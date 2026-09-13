@@ -373,14 +373,49 @@ static void test_ms_os_20_control_request(void)
     assert(!control_called);
 }
 
+static void test_network_profile(void)
+{
+    const uint8_t *configuration = airdap_usb_configuration_descriptor();
+    const tusb_desc_device_t *device = airdap_usb_device_descriptor();
+    airdap_usb_descriptors_set_network(true);
+    assert(airdap_usb_configuration_descriptor() == configuration);
+    assert(airdap_usb_device_descriptor() == device);
+#if CONFIG_AIRDAP_DEBUG_SHELL
+    assert(device->idProduct == 0x4022U);
+    assert(configuration[4] == 1U);
+    assert(read_u16(configuration + 2) == 32U);
+    assert(configuration[9 + 2] == 0U);
+    assert(configuration[9 + 5] == TUSB_CLASS_VENDOR_SPECIFIC);
+    assert(configuration[9 + 8] == 6U);
+    assert(configuration[18 + 2] == 0x04U);
+    assert(configuration[25 + 2] == 0x84U);
+    assert(strstr(airdap_usb_string_descriptors()[2], "CMSIS-DAP") == NULL);
+    tusb_control_request_t request = make_ms_request();
+    reset_control_capture();
+    assert(tud_vendor_control_xfer_cb(0U, CONTROL_STAGE_SETUP, &request));
+    assert(control_length == 178U);
+    assert(control_data[22] == 0U);
+    assert_utf16le_ascii(control_data + 98, 80, expected_debug_device_interface_guid, 2);
+    assert(read_u16(tud_descriptor_bos_cb() + 29) == 178U);
+#else
+    assert(configuration[4] == 0U);
+#endif
+    airdap_usb_descriptors_set_network(false);
+    test_device_descriptor();
+    test_configuration_descriptor();
+    test_ms_os_20_control_request();
+}
+
 int main(void)
 {
+    airdap_usb_descriptors_set_network(false);
     test_device_descriptor();
     test_configuration_descriptor();
     test_strings_and_stable_serial();
     test_bos_descriptor();
     test_ms_os_20_control_request();
 
+    test_network_profile();
     puts("USB descriptor tests passed");
     return 0;
 }

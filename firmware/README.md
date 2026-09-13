@@ -224,8 +224,37 @@ owner fields. USB attach/detach, Wi-Fi station, BLE provisioning, and OTA
 lifecycle events are wired today. USB DAP admission ignores Wi-Fi state.
 By default, authenticated NETWORK DAP admission requires USB to be absent and Wi-Fi to be
 online. A button command can explicitly select NETWORK even with USB attached;
-that selection rejects USB DAP until changed or rebooted. USB presence does not disable independent network status,
+that selection removes USB DAP and target UART until changed or rebooted. USB presence does not disable independent network status,
 configuration, or OTA paths.
+
+DAP and target UART share the volatile route selection:
+
+| Route | USB DAP / target CDC | Network DAP / target UART |
+| --- | --- | --- |
+| `USB` | Enabled when enumerated | Disabled |
+| `NETWORK` | Removed from USB enumeration | Enabled |
+| `AUTO` (boot default) | Enabled when enumerated | Enabled only while USB is not enumerated |
+
+Network data still requires Wi-Fi and authenticated sessions. Disabling network
+UART closes TCP 3261 and terminates existing UART connections, including pending
+TLS handshakes. TCP 3260 is shared by DAP, management, and OTA: it remains open,
+but every DAP request returns `busy` while network data is disabled. Independent
+management/OTA operations keep their existing authentication and ownership checks.
+Wi-Fi association and BLE provisioning are unaffected by route selection.
+
+Selecting `NETWORK` soft-disconnects USB, releases its DAP/UART sessions, and
+re-enumerates after a 250 ms disconnect interval with only the optional debug
+shell (Vendor interface 0, endpoints 0x04/0x84). This shell-only development
+profile uses VID/PID `303A:4022` so Windows does not reuse the wired `303A:4021`
+composite descriptor cache. Without the debug-shell build option, USB remains
+disconnected in `NETWORK`. Returning to `USB` or `AUTO` restores the original
+wired interfaces and PID. An active shell disconnects during either profile
+change; rerun `airdap-shell.py` after enumeration to reconnect. The host tool
+recognizes both profiles and retains the same device serial and debug GUID.
+USB profile changes are polled every 50 ms; network UART listener changes every
+100 ms. These are scheduling intervals, not real-time guarantees. `AUTO` uses
+host enumeration, not USB power alone, to decide whether a computer is connected.
+
 USB attach conditionally revokes an idle NETWORK DAP owner unless NETWORK was
 explicitly selected. Selection changes require no DAP owner and no OTA; they
 retain physical USB presence and use the same policy epoch and ownership
@@ -451,8 +480,8 @@ treated as saved. If a corrupt record prevents the button monitor from starting,
 use `button defaults` over USB and restart to recover just the binding record.
 Clearing network configuration preserves the bindings.
 `button defaults` restores bindings; it does not change the current DAP route.
-Bindings survive reboot; DAP selection resets to `auto`. Selection preserves USB
-enumeration and CDC/debug-shell interfaces, and never bypasses network authentication.
+Bindings survive reboot; DAP/UART selection resets to `auto`. Selection changes
+the data interfaces as described above and never bypasses network authentication.
 
 The binding snapshot is taken at the start of a gesture. Changes during a press
 apply to the next gesture. Clear/restart additionally waits for 200 ms of stable
@@ -1174,7 +1203,7 @@ for suite in \
     bootloader_artifact ota_layout setup_env board config_store device_identity voltage_monitor swd_protocol \
     dap_ownership mode_state dap_backend dap_protocol dap_service airdap_frame discovery \
     dap_ota dap_stream ota_manager app_main wifi_manager ble_provisioning button_config network_auth network_dap network_control \
-    target_uart network_uart usb_uart_bridge usb_descriptors project_version \
+    target_uart network_uart usb_uart_bridge usb_descriptors usb_lifecycle project_version \
     debug_shell_commands debug_shell_diagnostics debug_shell_config_status \
     debug_shell_identity debug_shell_input debug_shell_wifi debug_shell_button \
     debug_shell_swd_probe \
@@ -1214,7 +1243,7 @@ stale-session response suppression, bounded queue failures, host update
 ordering, automatic AirDAP BLE discovery and public-credential command
 construction, UART line-coding mapping, independent bounded UART RX fan-out
 and overflow accounting, exact-session TX ownership and USB CDC session
-cleanup, both compile-time USB descriptor variants, bounded shell input, the
+cleanup, both compile-time USB descriptor variants and runtime profile transitions, bounded shell input, the
 bounded BOOT_KEY gesture simulation and physical-input cancellation, bounded SWD IDCODE command flow, debug
 TX completion state, host tools, and
 wired HIL helper's protocol checks. They do not prove USB enumeration, real NVS

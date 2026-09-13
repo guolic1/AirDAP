@@ -5,6 +5,7 @@
 
 #include "airdap_target_uart.h"
 #include "airdap_usb_uart_bridge.h"
+#include "airdap_usb_runtime.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -29,6 +30,7 @@ static cdc_line_coding_t current_line_coding = {
 
 static airdap_target_uart_session_id_t open_usb_uart_session(void)
 {
+    if (!airdap_usb_data_ready()) return 0U;
     airdap_target_uart_session_id_t session =
         atomic_load(&usb_uart_session);
     if (session != 0U) {
@@ -226,6 +228,10 @@ static void cdc_line_coding_callback(
 
 bool airdap_usb_uart_bridge_process_once(void)
 {
+    if (!airdap_usb_data_ready()) {
+        close_usb_uart_session();
+        return false;
+    }
     const airdap_target_uart_session_id_t session =
         atomic_load(&usb_uart_session);
     if (session == 0U || !tud_cdc_n_connected(0U)) {

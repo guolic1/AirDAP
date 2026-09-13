@@ -25,6 +25,8 @@ static unsigned int task_create_calls;
 static TickType_t last_delay;
 static jmp_buf worker_yield;
 static bool cdc_connected;
+static bool data_ready = true;
+bool airdap_usb_data_ready(void) { return data_ready; }
 static uint8_t cdc_input[32];
 static size_t cdc_input_length;
 static unsigned int cdc_read_calls;
@@ -388,12 +390,33 @@ static void test_closed_line_coding_preserves_network_owner_and_reopens(void)
     assert(live_session == 0U && owner_session == 0U);
 }
 
+static void test_network_mode_closes_and_blocks_usb_uart(void)
+{
+    send_line_state(true);
+    assert(live_session != 0U && owner_session == live_session);
+    data_ready = false;
+    assert(!airdap_usb_uart_bridge_process_once());
+    assert(live_session == 0U && owner_session == 0U);
+    const unsigned int opened = open_calls;
+    const unsigned int writes = service_write_calls;
+    send_line_state(true);
+    cdc_input[0] = 42U;
+    cdc_input_length = 1U;
+    cdc_config.callback_rx(0, NULL);
+    assert(open_calls == opened && service_write_calls == writes);
+    data_ready = true;
+    send_line_state(true);
+    assert(live_session != 0U);
+    send_line_state(false);
+}
+
 int main(void)
 {
     test_start_and_cdc_to_uart_lifecycle();
     test_uart_to_cdc_and_disconnect_cleanup();
     test_busy_writer_drops_cdc_input_without_driver_access();
     test_closed_line_coding_preserves_network_owner_and_reopens();
+    test_network_mode_closes_and_blocks_usb_uart();
     /* Production uses 100 Hz ticks; a 1 ms poll must still block the worker
      * so the CPU idle task can run and feed its watchdog. */
     if (setjmp(worker_yield) == 0) {

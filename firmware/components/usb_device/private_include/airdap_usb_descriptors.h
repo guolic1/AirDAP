@@ -17,6 +17,9 @@ enum {
 #endif
 };
 
+/* Call only while USB is disconnected and descriptor transfers are idle.
+ * Descriptor addresses remain stable for esp_tinyusb's descriptor map. */
+void airdap_usb_descriptors_set_network(bool network);
 void airdap_usb_descriptors_set_serial(const char *serial_number);
 const tusb_desc_device_t *airdap_usb_device_descriptor(void);
 const uint8_t *airdap_usb_configuration_descriptor(void);

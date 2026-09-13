@@ -49,7 +49,7 @@ enum {
     BOS_TOTAL_LENGTH = TUD_BOS_DESC_LEN + TUD_BOS_MICROSOFT_OS_DESC_LEN,
 };
 
-static const tusb_desc_device_t device_descriptor = {
+static tusb_desc_device_t device_descriptor = {
     .bLength = sizeof(tusb_desc_device_t),
     .bDescriptorType = TUSB_DESC_DEVICE,
     .bcdUSB = 0x0210,
@@ -66,7 +66,7 @@ static const tusb_desc_device_t device_descriptor = {
     .bNumConfigurations = 1,
 };
 
-static const uint8_t configuration_descriptor[] = {
+static const uint8_t wired_configuration_descriptor[] = {
     TUD_CONFIG_DESCRIPTOR(
         1,
         AIRDAP_USB_INTERFACE_COUNT,
@@ -102,11 +102,12 @@ static const uint8_t configuration_descriptor[] = {
 #endif
 };
 
+static char usb_product[32] = "AirDAP CMSIS-DAP v2";
 static char usb_serial[17] = "ADP-000000000000";
 static const char *string_descriptors[] = {
     (const char[]) {0x09, 0x04},
     "AirDAP",
-    "AirDAP CMSIS-DAP v2",
+    usb_product,
     usb_serial,
     "CMSIS-DAP v2",
     "AirDAP Target UART",
@@ -115,14 +116,14 @@ static const char *string_descriptors[] = {
 #endif
 };
 
-static const uint8_t bos_descriptor[] = {
+static const uint8_t wired_bos_descriptor[] = {
     TUD_BOS_DESCRIPTOR(BOS_TOTAL_LENGTH, 1),
     TUD_BOS_MS_OS_20_DESCRIPTOR(
         MS_OS_20_DESCRIPTOR_LENGTH,
         USB_MS_OS_VENDOR_CODE),
 };
 
-static const uint8_t ms_os_20_descriptor[] = {
+static const uint8_t wired_ms_os_20_descriptor[] = {
     U16_TO_U8S_LE(0x000A),
     U16_TO_U8S_LE(MS_OS_20_SET_HEADER_DESCRIPTOR),
     U32_TO_U8S_LE(0x06030000),
@@ -206,14 +207,59 @@ static const uint8_t ms_os_20_descriptor[] = {
 };
 
 _Static_assert(
-    sizeof(configuration_descriptor) == CONFIGURATION_TOTAL_LENGTH,
+    sizeof(wired_configuration_descriptor) == CONFIGURATION_TOTAL_LENGTH,
     "USB configuration descriptor length mismatch");
 _Static_assert(
-    sizeof(bos_descriptor) == BOS_TOTAL_LENGTH,
+    sizeof(wired_bos_descriptor) == BOS_TOTAL_LENGTH,
     "USB BOS descriptor length mismatch");
 _Static_assert(
-    sizeof(ms_os_20_descriptor) == MS_OS_20_DESCRIPTOR_LENGTH,
+    sizeof(wired_ms_os_20_descriptor) == MS_OS_20_DESCRIPTOR_LENGTH,
     "Microsoft OS 2.0 descriptor length mismatch");
+
+static uint8_t configuration_descriptor[CONFIGURATION_TOTAL_LENGTH];
+static uint8_t bos_descriptor[BOS_TOTAL_LENGTH];
+static uint8_t ms_os_20_descriptor[MS_OS_20_DESCRIPTOR_LENGTH];
+static uint16_t ms_os_20_length;
+
+void airdap_usb_descriptors_set_network(bool network)
+{
+    memcpy(configuration_descriptor, wired_configuration_descriptor, sizeof(configuration_descriptor));
+    memcpy(bos_descriptor, wired_bos_descriptor, sizeof(bos_descriptor));
+    memcpy(ms_os_20_descriptor, wired_ms_os_20_descriptor, sizeof(ms_os_20_descriptor));
+    ms_os_20_length = sizeof(ms_os_20_descriptor);
+    device_descriptor.idProduct = USB_PRODUCT_ID;
+    strcpy(usb_product, "AirDAP CMSIS-DAP v2");
+    if (!network) return;
+
+    /* A distinct development PID avoids Windows reusing the wired composite
+     * topology/WinUSB interface cache for the shell-only device. */
+    device_descriptor.idProduct = 0x4022;
+    strcpy(usb_product, "AirDAP Debug Shell");
+#if CONFIG_AIRDAP_DEBUG_SHELL
+    const uint8_t network_configuration[] = {
+        TUD_CONFIG_DESCRIPTOR(1, 1, 0, TUD_CONFIG_DESC_LEN + TUD_VENDOR_DESC_LEN, 0, 100),
+        TUD_VENDOR_DESCRIPTOR(0, STRING_DEBUG_INTERFACE,
+            USB_DEBUG_OUT_ENDPOINT, USB_DEBUG_IN_ENDPOINT, USB_FULL_SPEED_MAX_PACKET),
+    };
+    memcpy(configuration_descriptor, network_configuration, sizeof(network_configuration));
+    /* Retain the debug function's GUID but renumber its interface to zero. */
+    memcpy(ms_os_20_descriptor + 18, wired_ms_os_20_descriptor + 178,
+        MS_OS_20_DEBUG_FUNCTION_LENGTH);
+    ms_os_20_descriptor[22] = 0;
+    ms_os_20_length = 178;
+    ms_os_20_descriptor[8] = 178;
+    ms_os_20_descriptor[9] = 0;
+    ms_os_20_descriptor[16] = 168;
+    ms_os_20_descriptor[17] = 0;
+    bos_descriptor[29] = 178;
+    bos_descriptor[30] = 0;
+#else
+    /* No functions remain; the transport keeps the pull-up disconnected. */
+    configuration_descriptor[2] = TUD_CONFIG_DESC_LEN;
+    configuration_descriptor[3] = 0;
+    configuration_descriptor[4] = 0;
+#endif
+}
 
 void airdap_usb_descriptors_set_serial(const char *serial_number)
 {
@@ -266,9 +312,9 @@ bool tud_vendor_control_xfer_cb(
         return false;
     }
 
-    const uint16_t length = request->wLength < sizeof(ms_os_20_descriptor)
+    const uint16_t length = request->wLength < ms_os_20_length
         ? request->wLength
-        : sizeof(ms_os_20_descriptor);
+        : ms_os_20_length;
     return tud_control_xfer(
         rhport,
         request,

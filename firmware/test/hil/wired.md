@@ -199,3 +199,32 @@ pages.
 Store USB descriptor captures, oscilloscope traces, voltage measurements,
 pyOCD logs, programmed image hash, UART results, and the 100-cycle result with
 the tested board revision. Only then may roadmap Stage 1 be marked complete.
+
+
+## DAP/UART transport selection
+
+After an authorized firmware update on the identified board, verify with a paired
+Wi-Fi client and a USB host. Stop active DAP operations before selecting a route.
+The default BOOT_KEY double click toggles USB/NETWORK; other route commands can
+be assigned to a gesture using `button bind` (record and restore its old binding).
+
+1. In `USB`, verify CMSIS-DAP and target CDC enumerate, TCP 3261 rejects new
+   connections, and authenticated DAP requests on 3260 return `busy`. Verify
+   authenticated management/OTA query still works on 3260.
+2. Select `NETWORK`. Verify the active CMSIS-DAP and target COM device disappear
+   from the host, and an open CDC handle no longer forwards target data. Windows
+   may retain hidden historical devices; check currently present devices.
+   Confirm only `303A:4022` debug shell remains and reconnect `airdap-shell.py`.
+   Verify authenticated network DAP and UART work.
+3. Select `USB` again with a network UART connection open. Verify that connection
+   closes and releases TX ownership, 3261 stops listening, and `303A:4021` DAP/CDC
+   return. Verify shell reconnects on its original interface and target CDC works.
+4. Select `AUTO`: unplug the USB data cable while keeping independent board power
+   and verify network data becomes usable. Reconnect USB and verify network DAP
+   is rejected and network UART closes. A power-only cable must not select USB.
+5. Repeat both directions, including removal during re-enumeration. Verify no
+   shell bytes reach DAP endpoints, no stale UART data/ownership survives, and
+   reboot restores `AUTO`. Repeat with debug shell disabled if that build is used.
+
+Host tests and builds do not establish these enumeration, electrical, cable,
+operating-system driver, and live TLS outcomes.

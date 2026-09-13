@@ -16,11 +16,14 @@
 #include "airdap_usb.h"
 #include "airdap_usb_descriptors.h"
 #include "airdap_usb_status.h"
+#include "airdap_usb_runtime.h"
 #include "airdap_usb_uart_bridge.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
+#include "device/usbd_pvt.h"
 #include "tinyusb.h"
 #include "tinyusb_cdc_acm.h"
 #include "tinyusb_default_config.h"
@@ -31,6 +34,62 @@ static airdap_dap_stream_t dap_stream;
 static uint8_t dap_usb_read_buffer[AIRDAP_DAP_BUFFER_SIZE];
 static atomic_uint usb_session;
 static atomic_uintptr_t next_response_token = 1U;
+static atomic_bool usb_ready;
+static atomic_bool mode_poll_pending;
+static atomic_bool network_profile;
+static bool reconnect_pending;
+static int64_t reconnect_at;
+static int64_t enumeration_deadline;
+static SemaphoreHandle_t usb_io_mutex;
+
+bool airdap_usb_data_ready(void)
+{
+    return atomic_load(&usb_ready) && !atomic_load(&network_profile) &&
+        airdap_mode_state_usb_data_enabled();
+}
+
+#if CONFIG_AIRDAP_DEBUG_SHELL
+/* The sole Vendor instance becomes instance zero in the shell-only profile.
+ * Serialize each I/O with profile changes to prevent a stale instance from
+ * sending shell bytes to the DAP endpoints after a switch back to USB. */
+static uint8_t debug_instance(void) { return network_profile ? 0U : 1U; }
+
+bool airdap_usb_debug_mounted(void)
+{
+    if (usb_io_mutex == NULL || xSemaphoreTake(usb_io_mutex, portMAX_DELAY) != pdTRUE) return false;
+    const bool mounted = atomic_load(&usb_ready) && tud_vendor_n_mounted(debug_instance());
+    xSemaphoreGive(usb_io_mutex);
+    return mounted;
+}
+
+uint32_t airdap_usb_debug_read(void *buffer, uint32_t size)
+{
+    if (xSemaphoreTake(usb_io_mutex, portMAX_DELAY) != pdTRUE) return 0;
+    const uint32_t count = atomic_load(&usb_ready)
+        ? tud_vendor_n_read(debug_instance(), buffer, size) : 0U;
+    xSemaphoreGive(usb_io_mutex);
+    return count;
+}
+
+uint32_t airdap_usb_debug_write(const void *buffer, uint32_t size)
+{
+    if (xSemaphoreTake(usb_io_mutex, portMAX_DELAY) != pdTRUE) return 0;
+    const uint32_t count = atomic_load(&usb_ready)
+        ? tud_vendor_n_write(debug_instance(), buffer, size) : 0U;
+    xSemaphoreGive(usb_io_mutex);
+    return count;
+}
+
+uint32_t airdap_usb_debug_flush(void)
+{
+    if (xSemaphoreTake(usb_io_mutex, portMAX_DELAY) != pdTRUE) return 0;
+    const uint32_t count = atomic_load(&usb_ready)
+        ? tud_vendor_n_write_flush(debug_instance()) : 0U;
+    xSemaphoreGive(usb_io_mutex);
+    return count;
+}
+#endif
+
 
 void airdap_usb_get_status(airdap_usb_status_t *status)
 {
@@ -38,12 +97,12 @@ void airdap_usb_get_status(airdap_usb_status_t *status)
         return;
     }
     *status = (airdap_usb_status_t) {
-        .bus_mounted = tud_mounted(),
+        .bus_mounted = atomic_load(&usb_ready) && tud_mounted(),
         .suspended = tud_suspended(),
-        .dap_vendor_mounted = tud_vendor_n_mounted(0U),
-        .target_cdc_connected = tud_cdc_n_connected(0U),
+        .dap_vendor_mounted = airdap_usb_data_ready() && tud_vendor_n_mounted(0U),
+        .target_cdc_connected = airdap_usb_data_ready() && tud_cdc_n_connected(0U),
 #if CONFIG_AIRDAP_DEBUG_SHELL
-        .debug_vendor_mounted = tud_vendor_n_mounted(1U),
+        .debug_vendor_mounted = airdap_usb_debug_mounted(),
 #else
         .debug_vendor_mounted = false,
 #endif
@@ -61,7 +120,7 @@ static bool send_usb_response(
 {
     (void) context;
     (void) token;
-    if (transport != AIRDAP_DAP_TRANSPORT_USB ||
+    if (!airdap_usb_data_ready() || transport != AIRDAP_DAP_TRANSPORT_USB ||
         session != atomic_load(&usb_session) ||
         !tud_vendor_mounted()) {
         return false;
@@ -77,7 +136,7 @@ static bool send_usb_response(
 
 static void open_usb_session(void)
 {
-    if (atomic_load(&usb_session) != 0U) {
+    if (!airdap_usb_data_ready() || atomic_load(&usb_session) != 0U) {
         return;
     }
     airdap_dap_session_id_t session = 0U;
@@ -123,6 +182,9 @@ static void usb_event_callback(tinyusb_event_t *event, void *argument)
 {
     (void) argument;
     if (event->id == TINYUSB_EVENT_ATTACHED) {
+        if (reconnect_pending) return;
+        atomic_store(&usb_ready, true);
+        enumeration_deadline = 0;
         const airdap_mode_state_result_t result =
             airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED);
         if (result != AIRDAP_MODE_STATE_OK) {
@@ -131,10 +193,12 @@ static void usb_event_callback(tinyusb_event_t *event, void *argument)
         }
         open_usb_session();
     } else if (event->id == TINYUSB_EVENT_DETACHED) {
+        atomic_store(&usb_ready, false);
         airdap_dap_stream_init(&dap_stream);
         close_usb_session();
         airdap_usb_uart_bridge_disconnected();
         const airdap_mode_state_result_t result =
+            reconnect_pending ? AIRDAP_MODE_STATE_OK :
             airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_DETACHED);
         if (result != AIRDAP_MODE_STATE_OK) {
             ESP_LOGE(TAG, "Unable to publish USB detach: %u", (unsigned) result);
@@ -188,7 +252,7 @@ void tud_vendor_rx_cb(
 {
     (void) buffer;
     (void) buffer_size;
-    if (interface_number != 0U) {
+    if (!airdap_usb_data_ready() || interface_number != 0U) {
         return;
     }
 
@@ -228,13 +292,67 @@ void tud_vendor_rx_cb(
 void tud_vendor_tx_cb(uint8_t interface_number, uint32_t sent_bytes)
 {
 #if CONFIG_AIRDAP_DEBUG_SHELL
-    if (interface_number == 1U) {
+    if (atomic_load(&usb_ready) && interface_number == debug_instance()) {
         airdap_debug_shell_tx_complete(sent_bytes);
     }
 #else
     (void) interface_number;
     (void) sent_bytes;
 #endif
+}
+
+void airdap_usb_reconcile_mode(void *argument)
+{
+    (void) argument;
+    const bool desired_network = !airdap_mode_state_usb_data_enabled();
+    const int64_t now = esp_timer_get_time();
+    if (!reconnect_pending && desired_network != network_profile) {
+        /* This callback runs on TinyUSB's task, so no class callback or
+         * descriptor request can overlap the disconnect/profile update. */
+        if (xSemaphoreTake(usb_io_mutex, 0) != pdTRUE) goto done;
+        atomic_store(&usb_ready, false);
+        (void) tud_disconnect();
+        reconnect_pending = true;
+        reconnect_at = now + 250000;
+        xSemaphoreGive(usb_io_mutex);
+        close_usb_session();
+        airdap_dap_stream_init(&dap_stream);
+        airdap_usb_uart_bridge_disconnected();
+#if CONFIG_AIRDAP_DEBUG_SHELL
+        airdap_debug_shell_disconnected();
+#endif
+    }
+    if (reconnect_pending && now >= reconnect_at) {
+        if (xSemaphoreTake(usb_io_mutex, 0) != pdTRUE) goto done;
+        network_profile = desired_network;
+        airdap_usb_descriptors_set_network(network_profile);
+        reconnect_pending = false;
+        enumeration_deadline = now + 1000000;
+        if (!network_profile || CONFIG_AIRDAP_DEBUG_SHELL) (void) tud_connect();
+        xSemaphoreGive(usb_io_mutex);
+        ESP_LOGI(TAG, "USB profile: %s", network_profile ? "network (debug only)" : "DAP + UART");
+    }
+    /* A cable removed during soft disconnect may not produce a second bus
+     * event. Clear the stale mounted state if the host never enumerates. */
+    if (enumeration_deadline != 0 && now >= enumeration_deadline && !atomic_load(&usb_ready)) {
+        const airdap_mode_state_result_t result =
+            airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_DETACHED);
+        if (result != AIRDAP_MODE_STATE_OK) ESP_LOGE(TAG, "Unable to publish USB enumeration timeout: %u", result);
+        enumeration_deadline = 0;
+    }
+done:
+    atomic_store(&mode_poll_pending, false);
+}
+
+static void usb_mode_worker(void *argument)
+{
+    (void) argument;
+    for (;;) {
+        if (!atomic_exchange(&mode_poll_pending, true)) {
+            usbd_defer_func(airdap_usb_reconcile_mode, NULL, false);
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
 }
 
 esp_err_t airdap_usb_init(void)
@@ -253,6 +371,9 @@ esp_err_t airdap_usb_init(void)
 
     airdap_dap_stream_init(&dap_stream);
 
+    usb_io_mutex = xSemaphoreCreateMutex();
+    if (usb_io_mutex == NULL) return ESP_ERR_NO_MEM;
+    airdap_usb_descriptors_set_network(false);
     airdap_usb_descriptors_set_serial(identity->usb_serial);
     tinyusb_config_t usb_config = TINYUSB_DEFAULT_CONFIG(
         usb_event_callback,
@@ -289,5 +410,8 @@ esp_err_t airdap_usb_init(void)
         "USB CMSIS-DAP v2 + CDC initialized, serial %s",
         identity->usb_serial);
 #endif
+    if (xTaskCreate(usb_mode_worker, "usb_mode", 2048, NULL, 4, NULL) != pdPASS) {
+        return ESP_ERR_NO_MEM;
+    }
     return ESP_OK;
 }

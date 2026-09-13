@@ -54,15 +54,17 @@ class FakeInterface:
 class FakeConfiguration:
     def __init__(self, interface: FakeInterface):
         self.interface = interface
+        self.interface_number = airdap_shell.DEBUG_INTERFACE
 
     def __getitem__(self, key: tuple[int, int]) -> FakeInterface:
-        if key != (airdap_shell.DEBUG_INTERFACE, 0):
+        if key != (self.interface_number, 0):
             raise KeyError(key)
         return self.interface
 
 
 class FakeDevice:
     iSerialNumber = 3
+    idProduct = airdap_shell.USB_PID
 
     def __init__(self, interface: FakeInterface):
         self.configuration = FakeConfiguration(interface)
@@ -189,7 +191,7 @@ class AirDapShellTests(unittest.TestCase):
             find_all=True,
             backend=backend,
             idVendor=airdap_shell.USB_VID,
-            idProduct=airdap_shell.USB_PID,
+            custom_match=airdap_shell.is_airdap_product,
         )
 
     def make_transport(self) -> tuple[object, FakeEndpoint, FakeEndpoint, FakeDevice, FakeUsbUtil]:
@@ -199,6 +201,21 @@ class AirDapShellTests(unittest.TestCase):
         usb_util = FakeUsbUtil()
         transport = airdap_shell.VendorShellTransport(device, usb_util, timeout_ms=250)
         return transport, endpoint_out, endpoint_in, device, usb_util
+
+    def test_network_profile_claims_shell_interface_zero(self) -> None:
+        _, endpoint_out, endpoint_in, device, usb_util = self.make_transport()
+        device.idProduct = airdap_shell.USB_NETWORK_PID
+        device.configuration.interface_number = 0
+        transport = airdap_shell.VendorShellTransport(device, usb_util)
+        transport.open()
+        transport.start_session()
+        self.assertEqual(usb_util.claimed, [(device, 0)])
+        self.assertEqual(endpoint_out.writes, [airdap_shell.SESSION_START])
+        transport.close()
+        self.assertEqual(usb_util.released, [(device, 0)])
+        for pid in (airdap_shell.USB_PID, airdap_shell.USB_NETWORK_PID):
+            self.assertTrue(airdap_shell.is_airdap_product(types.SimpleNamespace(idProduct=pid)))
+        self.assertFalse(airdap_shell.is_airdap_product(types.SimpleNamespace(idProduct=0)))
 
     def test_claims_only_debug_interface_and_frames_session(self) -> None:
         transport, endpoint_out, _, device, usb_util = self.make_transport()
@@ -337,7 +354,7 @@ class AirDapShellTests(unittest.TestCase):
         usb_core.find.assert_called_once_with(
             find_all=True,
             idVendor=airdap_shell.USB_VID,
-            idProduct=airdap_shell.USB_PID,
+            custom_match=airdap_shell.is_airdap_product,
             backend=mock.sentinel.usb_backend,
         )
         run_sequence.assert_called_once_with(

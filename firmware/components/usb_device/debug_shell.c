@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "airdap_debug_shell.h"
+#include "airdap_usb_runtime.h"
 #include "airdap_debug_shell_commands.h"
 #include "airdap_debug_shell_core_commands.h"
 #include "airdap_debug_shell_diagnostics.h"
@@ -28,7 +29,6 @@
 #include "tusb.h"
 
 enum {
-    DEBUG_VENDOR_INSTANCE = 1,
     SHELL_TASK_STACK_SIZE = 4096,
     SHELL_TASK_PRIORITY = 4,
     SHELL_READ_CHUNK = 64,
@@ -94,7 +94,7 @@ static size_t debug_write(const char *data, size_t length, TickType_t timeout)
 {
     if (data == NULL || length == 0U || output_mutex == NULL ||
         !atomic_load(&session_active) ||
-        !tud_vendor_n_mounted(DEBUG_VENDOR_INSTANCE)) {
+        !airdap_usb_debug_mounted()) {
         return 0U;
     }
     if (xSemaphoreTake(output_mutex, timeout) != pdTRUE) {
@@ -109,8 +109,7 @@ static size_t debug_write(const char *data, size_t length, TickType_t timeout)
         if (!reservation.valid) {
             break;
         }
-        const uint32_t written = tud_vendor_n_write(
-            DEBUG_VENDOR_INSTANCE,
+        const uint32_t written = airdap_usb_debug_write(
             data + offset,
             length - offset);
         const airdap_debug_shell_tx_ticket_t ticket =
@@ -120,7 +119,7 @@ static size_t debug_write(const char *data, size_t length, TickType_t timeout)
         }
         if (written > 0U) {
             offset += written;
-            (void) tud_vendor_n_write_flush(DEBUG_VENDOR_INSTANCE);
+            (void) airdap_usb_debug_flush();
             continue;
         }
         if (timeout == 0U || xTaskGetTickCount() - started >= timeout) {
@@ -173,7 +172,7 @@ static bool write_and_wait(const char *data, size_t length, TickType_t timeout)
 {
     if (data == NULL || length == 0U || output_mutex == NULL ||
         !atomic_load(&session_active) ||
-        !tud_vendor_n_mounted(DEBUG_VENDOR_INSTANCE) ||
+        !airdap_usb_debug_mounted() ||
         xSemaphoreTake(output_mutex, timeout) != pdTRUE) {
         return false;
     }
@@ -184,7 +183,7 @@ static bool write_and_wait(const char *data, size_t length, TickType_t timeout)
     bool completed = true;
     while (offset < length) {
         if (!atomic_load(&session_active) ||
-            !tud_vendor_n_mounted(DEBUG_VENDOR_INSTANCE)) {
+            !airdap_usb_debug_mounted()) {
             completed = false;
             break;
         }
@@ -194,8 +193,7 @@ static bool write_and_wait(const char *data, size_t length, TickType_t timeout)
             completed = false;
             break;
         }
-        const uint32_t written = tud_vendor_n_write(
-            DEBUG_VENDOR_INSTANCE,
+        const uint32_t written = airdap_usb_debug_write(
             data + offset,
             length - offset);
         const airdap_debug_shell_tx_ticket_t committed =
@@ -207,7 +205,7 @@ static bool write_and_wait(const char *data, size_t length, TickType_t timeout)
         if (written > 0U) {
             ticket = committed;
             offset += written;
-            (void) tud_vendor_n_write_flush(DEBUG_VENDOR_INSTANCE);
+            (void) airdap_usb_debug_flush();
             continue;
         }
         if (xTaskGetTickCount() - started >= timeout) {
@@ -223,7 +221,7 @@ static bool write_and_wait(const char *data, size_t length, TickType_t timeout)
     }
     if (completed) {
         completed = atomic_load(&session_active) &&
-            tud_vendor_n_mounted(DEBUG_VENDOR_INSTANCE);
+            airdap_usb_debug_mounted();
     }
     xSemaphoreGive(output_mutex);
     return completed;
@@ -571,7 +569,7 @@ static bool shell_swd_cancelled(void *context)
     (void) context;
     /* USB detach clears session_active asynchronously in usb_event_callback. */
     return !atomic_load(&session_active) ||
-        !tud_vendor_n_mounted(DEBUG_VENDOR_INSTANCE);
+        !airdap_usb_debug_mounted();
 }
 
 int airdap_debug_shell_swd_idcode_command(
@@ -729,7 +727,7 @@ int airdap_debug_shell_restart_command(
         return 1;
     }
     if (!atomic_load(&session_active) ||
-        !tud_vendor_n_mounted(DEBUG_VENDOR_INSTANCE)) {
+        !airdap_usb_debug_mounted()) {
         return 1;
     }
     esp_restart();
@@ -801,7 +799,7 @@ static void shell_task(void *argument)
     airdap_debug_shell_wifi_session_init(&session.wifi);
     airdap_debug_shell_input_init(&input);
     for (;;) {
-        if (!tud_vendor_n_mounted(DEBUG_VENDOR_INSTANCE)) {
+        if (!airdap_usb_debug_mounted()) {
             airdap_debug_shell_disconnected();
             airdap_debug_shell_wifi_cancel(&session.wifi);
             airdap_debug_shell_input_init(&input);
@@ -813,8 +811,7 @@ static void shell_task(void *argument)
             drain_log_queue(&input, &callbacks);
         }
 
-        const uint32_t received = tud_vendor_n_read(
-            DEBUG_VENDOR_INSTANCE,
+        const uint32_t received = airdap_usb_debug_read(
             data,
             sizeof(data));
         if (received == 0U) {
