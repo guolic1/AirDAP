@@ -15,6 +15,7 @@ set(usb_device_private_requires
     dap_service
     device_identity
     discovery
+    esp_wifi
     esp_system
     esp_tinyusb
     esp_timer
@@ -49,6 +50,7 @@ if(CONFIG_AIRDAP_DEBUG_SHELL)
         "debug_shell_swd_probe.c"
         "debug_shell_tx_state.c"
         "debug_shell_wifi.c"
+        "debug_shell_wifi_scan.c"
     )
 endif()
 

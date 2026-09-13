@@ -28,3 +28,5 @@ add_test(
     NAME network_auth_uninitialized_status
     COMMAND network_auth_test --uninitialized-status
 )
+
+add_test(NAME network_auth_usb_pair COMMAND network_auth_test --usb-pair)

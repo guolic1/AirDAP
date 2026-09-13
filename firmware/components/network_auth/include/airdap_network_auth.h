@@ -92,6 +92,12 @@ airdap_network_auth_result_t airdap_network_auth_pair(
     size_t request_size,
     uint8_t fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE]);
 
+/* Physical USB debug-shell only. Uses the same atomic commit and fingerprint
+ * verification without opening the BLE pairing gate. Never expose over TCP. */
+airdap_network_auth_result_t airdap_network_auth_pair_usb(
+    const uint8_t *request, size_t request_size,
+    uint8_t fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE]);
+
 /* Completes a TLS 1.3 PSK-DHE handshake before returning. The accepted socket
  * is temporarily made non-blocking and the asynchronous ESP-TLS handshake is
  * driven by poll() against an absolute timeout; its original flags are then

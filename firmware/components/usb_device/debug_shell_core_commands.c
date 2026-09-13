@@ -15,11 +15,11 @@ static const airdap_debug_shell_command_t core_commands[] = {
     },
     {
         .name = "wifi",
-        .usage = "wifi status|set|clear",
+        .usage = "wifi status|set|clear|capabilities|scan|ap <index>|pair",
         .summary = "Manage Wi-Fi credentials and show state",
         .details =
             "Status is read-only. Set prompts for an SSID and hidden password; "
-            "clear removes stored Wi-Fi credentials.",
+            "clear removes stored Wi-Fi credentials. Scan snapshots visible APs; ap reads one entry. Pair prompts for a hidden network key over physical USB.",
         .handler = airdap_debug_shell_wifi_command,
     },
     {

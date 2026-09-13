@@ -950,8 +950,29 @@ static void test_uninitialized_status_fails_closed(void)
     assert(memcmp(&status, &empty, sizeof(status)) == 0);
 }
 
+static void test_usb_pair_does_not_open_ble_gate(void)
+{
+    assert(airdap_network_auth_init() == ESP_OK);
+    uint8_t request[AIRDAP_NETWORK_AUTH_PAIR_REQUEST_SIZE];
+    uint8_t fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE];
+    make_pair_request(0, request);
+    assert(airdap_network_auth_pair(request, sizeof(request), fingerprint) == AIRDAP_NETWORK_AUTH_INVALID_STATE);
+    assert(airdap_network_auth_pair_usb(request, sizeof(request), fingerprint) == AIRDAP_NETWORK_AUTH_OK);
+    assert(store_writes == 1);
+    assert(airdap_network_auth_pair_usb(request, sizeof(request), fingerprint) == AIRDAP_NETWORK_AUTH_OK);
+    assert(store_writes == 1);
+    assert(airdap_network_auth_pair(request, sizeof(request), fingerprint) == AIRDAP_NETWORK_AUTH_INVALID_STATE);
+    request[0] = 2;
+    assert(airdap_network_auth_pair_usb(request, sizeof(request), fingerprint) == AIRDAP_NETWORK_AUTH_UNSUPPORTED_VERSION);
+    assert(store_writes == 1);
+}
+
 int main(int argument_count, char **arguments)
 {
+    if (argument_count == 2 && strcmp(arguments[1], "--usb-pair") == 0) {
+        test_usb_pair_does_not_open_ble_gate();
+        return 0;
+    }
     if (argument_count == 2 && strcmp(arguments[1], "--loaded-init") == 0) {
         test_persisted_record_load();
         puts("Persisted network credential test passed");

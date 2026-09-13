@@ -20,6 +20,8 @@ typedef struct {
     uint8_t ssid[AIRDAP_WIFI_SSID_MAX_LENGTH];
     uint8_t ssid_length;
     uint8_t input_stage;
+    void *scan_records;
+    uint16_t scan_count;
 } airdap_debug_shell_wifi_session_t;
 
 void airdap_debug_shell_wifi_session_init(

@@ -3,10 +3,13 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "airdap_debug_shell_wifi.h"
 #include "airdap_mode_state.h"
+#include "airdap_network_auth.h"
+#include "airdap_debug_shell_wifi_scan.h"
 
 static airdap_mode_state_result_t mode_result;
 static airdap_wifi_state_t wifi_state;
@@ -42,6 +45,28 @@ esp_err_t airdap_wifi_manager_clear_credentials(void)
 const char *esp_err_to_name(esp_err_t error)
 {
     return error == ESP_FAIL ? "ESP_FAIL" : "ESP_UNKNOWN";
+}
+
+static unsigned pair_calls;
+airdap_network_auth_result_t airdap_network_auth_pair_usb(const uint8_t *request,
+    size_t size, uint8_t fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE])
+{
+    assert(size == 33 && request[0] == 1);
+    for (unsigned i = 1; i < size; ++i) assert(request[i] == 0xaa);
+    ++pair_calls;
+    memset(fingerprint, 0xbb, 32);
+    return AIRDAP_NETWORK_AUTH_OK;
+}
+esp_err_t airdap_debug_shell_wifi_scan(void **records, uint16_t *count)
+{
+    *records = malloc(1);
+    *count = 1;
+    return ESP_OK;
+}
+bool airdap_debug_shell_wifi_scan_format(const void *records, unsigned index, char *output, size_t size)
+{
+    assert(records != NULL && index == 0);
+    return snprintf(output, size, "ap=41,001122334455,6,-42,3\n") > 0;
 }
 
 static void reset_fakes(void)
@@ -245,13 +270,34 @@ static void test_clear_and_usage_are_observable(void)
     assert(style == AIRDAP_DEBUG_SHELL_WIFI_STYLE_RED);
 
     assert(execute(&session, "", output, &style) == 1);
-    assert(strcmp(output, "usage: wifi status|set|clear\n") == 0);
+    assert(strcmp(output, "usage: wifi status|set|clear|capabilities|scan|ap <index>|pair\n") == 0);
     assert(execute(&session, "set extra", output, &style) == 1);
     assert(set_calls == 0U);
 }
 
 int main(void)
 {
+    airdap_debug_shell_wifi_session_t session;
+    char output[AIRDAP_DEBUG_SHELL_WIFI_OUTPUT_SIZE];
+    airdap_debug_shell_wifi_style_t style;
+    airdap_debug_shell_wifi_session_init(&session);
+    assert(execute(&session, "capabilities", output, &style) == 0);
+    assert(strstr(output, "wifi-provision=1") != NULL);
+    assert(execute(&session, "pair", output, &style) == 0);
+    assert(airdap_debug_shell_wifi_input_is_secret(&session));
+    assert(strcmp(airdap_debug_shell_wifi_input_prompt(&session), "Network key: ") == 0);
+    assert(submit(&session, "invalid", output, &style) == 1);
+    assert(pair_calls == 0);
+    assert(submit(&session, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", output, &style) == 0);
+    assert(pair_calls == 1 && strstr(output, "fingerprint=bbbb") != NULL);
+    assert(!airdap_debug_shell_wifi_input_pending(&session));
+    assert(execute(&session, "scan", output, &style) == 0);
+    assert(strcmp(output, "wifi-scan=1\n") == 0);
+    assert(execute(&session, "ap 0", output, &style) == 0);
+    assert(strstr(output, ",6,-42,3") != NULL);
+    assert(execute(&session, "ap 1", output, &style) == 1);
+    airdap_debug_shell_wifi_cancel(&session);
+    assert(session.scan_records == NULL && session.scan_count == 0);
     test_status_reports_each_runtime_state();
     test_set_collects_credentials_without_outputting_them();
     test_empty_password_is_supported();

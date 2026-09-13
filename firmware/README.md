@@ -1171,6 +1171,15 @@ extending a single global command table. Available commands are:
   `online` without displaying credentials;
 - `wifi set` — interactively replace the stored SSID and password, reset
   reconnect backoff, and reconnect immediately;
+- `wifi capabilities` — report `wifi-provision=1` for the host session workflow;
+- `wifi scan` — scan on the device and snapshot all returned APs (fails explicitly
+  above 1024 records or on allocation/driver failure); reports `wifi-scan=count`;
+- `wifi ap <index>` — read `ap=ssid_hex,bssid_hex,channel,rssi,authmode` from the
+  snapshot; SSIDs are hex encoded to avoid interpreting AP text as shell output;
+- `wifi pair` — prompt for a hidden 64-digit network PSK over physical USB,
+  atomically commit it and return its fingerprint. No command-line key, key echo
+  or history entry is accepted. This does not open the BLE pairing gate and must
+  never be exposed over a network shell;
 - `wifi clear` — remove stored Wi-Fi credentials and stop reconnect attempts;
 - `button simulate <single|double|hold2|hold6|hold10>` — queue one complete
   RAM-only BOOT_KEY gesture, including automatic release. Simulation passes

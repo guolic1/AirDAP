@@ -442,10 +442,11 @@ esp_err_t airdap_network_auth_set_pairing_window_active(bool active)
     return ESP_OK;
 }
 
-airdap_network_auth_result_t airdap_network_auth_pair(
+static airdap_network_auth_result_t pair_credential(
     const uint8_t *request,
     size_t request_size,
-    uint8_t fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE])
+    uint8_t fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE],
+    bool physical_usb)
 {
     if (request == NULL || fingerprint == NULL ||
         request_size != AIRDAP_NETWORK_AUTH_PAIR_REQUEST_SIZE) {
@@ -460,7 +461,7 @@ airdap_network_auth_result_t airdap_network_auth_pair(
     if (!lock_auth()) {
         return AIRDAP_NETWORK_AUTH_INVALID_STATE;
     }
-    if (!pairing_window_active) {
+    if (!physical_usb && !pairing_window_active) {
         unlock_auth();
         return AIRDAP_NETWORK_AUTH_INVALID_STATE;
     }
@@ -514,6 +515,20 @@ airdap_network_auth_result_t airdap_network_auth_pair(
     unlock_auth();
     invoke_revoke(&pending);
     return AIRDAP_NETWORK_AUTH_OK;
+}
+
+airdap_network_auth_result_t airdap_network_auth_pair(
+    const uint8_t *request, size_t request_size,
+    uint8_t fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE])
+{
+    return pair_credential(request, request_size, fingerprint, false);
+}
+
+airdap_network_auth_result_t airdap_network_auth_pair_usb(
+    const uint8_t *request, size_t request_size,
+    uint8_t fingerprint[AIRDAP_NETWORK_AUTH_FINGERPRINT_SIZE])
+{
+    return pair_credential(request, request_size, fingerprint, true);
 }
 
 static void release_handshake_slot(void)

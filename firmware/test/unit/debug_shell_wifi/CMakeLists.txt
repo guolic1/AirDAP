@@ -13,6 +13,7 @@ target_include_directories(
     debug_shell_wifi_test
     PRIVATE
         fake_include
+        ../../../components/network_auth/include
         ../../../components/wifi_manager/include
         ../../../components/usb_device/private_include
 )
@@ -23,3 +24,11 @@ target_compile_options(
 )
 
 add_test(NAME debug_shell_wifi COMMAND debug_shell_wifi_test)
+
+add_executable(debug_shell_wifi_scan_test test_debug_shell_wifi_scan.c
+    ../../../components/usb_device/debug_shell_wifi_scan.c)
+target_include_directories(debug_shell_wifi_scan_test PRIVATE fake_include
+    ../../../components/wifi_manager/include ../../../components/usb_device/private_include)
+target_compile_features(debug_shell_wifi_scan_test PRIVATE c_std_11)
+target_compile_options(debug_shell_wifi_scan_test PRIVATE -Wall -Wextra -Werror -pedantic)
+add_test(NAME debug_shell_wifi_scan COMMAND debug_shell_wifi_scan_test)
