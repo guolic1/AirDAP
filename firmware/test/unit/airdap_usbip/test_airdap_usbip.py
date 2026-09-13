@@ -268,8 +268,49 @@ class USBIPTest(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
         self.assertIn("keepalive", self.backends[0].calls)
 
+    async def test_idle_upstream_failure_promptly_closes_usbip_peer(self):
+        from unittest.mock import AsyncMock
+        reader, _ = await self.open()
+        self.backends[0].keepalive = AsyncMock(side_effect=TimeoutError("peer lost"))
+        self.assertEqual(await asyncio.wait_for(reader.read(), 1.5), b"")
+        self.assertFalse(self.bridge.imported)
+        self.assertTrue(self.backends[0].closed)
+
 
 class BackendTest(unittest.IsolatedAsyncioTestCase):
+    async def test_silent_peer_heartbeat_times_out_without_shortening_dap_timeout(self):
+        import socket
+        import time
+        from unittest.mock import MagicMock
+        connection, peer = socket.socketpair()
+        connection.settimeout(5)
+        client = MagicMock(connection=connection)
+        client.request.side_effect = lambda *_: connection.recv(1)
+        backend = bridge.NetworkBackend("airdap.test", "credential")
+        backend.clients = [client, client]
+        started = time.monotonic()
+        try:
+            with self.assertRaises(TimeoutError):
+                await backend.keepalive()
+            self.assertLess(time.monotonic() - started, 2.5)
+            self.assertEqual(connection.gettimeout(), 5)
+        finally:
+            connection.close()
+            peer.close()
+
+    async def test_heartbeat_probes_idle_uart_while_dap_is_busy(self):
+        from unittest.mock import MagicMock
+        backend = bridge.NetworkBackend("airdap.test", "credential")
+        clients = [MagicMock(), MagicMock()]
+        for client in clients:
+            client.connection.gettimeout.return_value = 5
+            client.request.return_value = b""
+        backend.clients = clients
+        async with backend.locks[0]:
+            await asyncio.wait_for(backend.keepalive(), .5)
+        clients[0].request.assert_not_called()
+        clients[1].request.assert_called_once_with(7, b"", 7)
+
     async def test_shared_token_ports_and_cdc_network_translation(self):
         clients = []
         class Client:
@@ -278,7 +319,12 @@ class BackendTest(unittest.IsolatedAsyncioTestCase):
                 self.owner_session, self.token, self.firmware = 7, b"t" * 32, "445088b"
                 self.calls = []
                 self.connection = self
+                self.timeout = kwargs['timeout']
                 clients.append(self)
+            def gettimeout(self):
+                return self.timeout
+            def settimeout(self, timeout):
+                self.timeout = timeout
             def shutdown(self, how):
                 self.calls.append("shutdown")
             def close(self):

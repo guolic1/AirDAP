@@ -54,7 +54,9 @@ python3 firmware/tools/airdap-usbip.py AIRDAP_HOST --credential "$HOME/.config/a
 
 程序默认监听 `127.0.0.1:3240`，bus ID 固定为 `1-1`，一次只允许一个导入者。
 `--port` 可改变本机 USB/IP 端口，`--dap-port` / `--uart-port` 可覆盖设备端口，
-`--timeout` 设置网络操作超时（默认 5 秒）。使用非默认 USB/IP 端口时，还需按客户端
+`--timeout` 设置网络操作超时（默认 5 秒）。空闲通道每 0.5 秒检查心跳，心跳超时上限为
+1.5 秒（不会延长更短的 `--timeout`），失败即关闭 USB/IP 连接；正在执行的 DAP/UART
+操作保留原超时，不重放请求。使用非默认 USB/IP 端口时，还需按客户端
 自身选项设置同一端口；以下命令均使用默认 3240。
 
 Windows 若已运行 `usbipd`，它可能占用 3240。保留该服务，给桥接指定其他空闲端口，

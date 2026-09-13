@@ -215,9 +215,10 @@ class Service:
             await asyncio.to_thread(self.mount.detach)
             await asyncio.to_thread(self.mount.attach)
             self.bridge_error = None
+            self.retry_at = 0
         except Exception as error:
             self.bridge_error = str(error) if isinstance(error, ServiceError) else 'USB/IP 挂载失败，请检查驱动和权限。'
-            self.retry_at = time.monotonic() + 15
+            self.retry_at = time.monotonic() + 1
             raise ServiceError(self.bridge_error) from None
 
     async def stop_bridge(self):
@@ -242,7 +243,7 @@ class Service:
     async def maintain(self):
         """Reconnect virtual USB; never replay OTA/Wi-Fi writes or old DAP URBs."""
         while not self.closing:
-            await asyncio.sleep(2)
+            await asyncio.sleep(.25)
             if (self.listener and self.store.profile.get('auto_attach') and not self.bridge.imported
                     and not (self.job_task and not self.job_task.done()) and time.monotonic() >= self.retry_at):
                 self.start_job('重新挂载 USB', self.attach)

@@ -29,6 +29,8 @@ MAX_TRANSFER = 65536
 MAX_PENDING = 128
 DAP_PACKET_SIZE = 508
 DAP_PACKET_COUNT = 4
+KEEPALIVE_INTERVAL = 0.5
+KEEPALIVE_TIMEOUT = 1.5
 # USB/IP status values are Linux errno values, including on Windows.
 STALL = -32
 NO_MEMORY = -12
@@ -120,8 +122,19 @@ class NetworkBackend:
         return data
 
     async def keepalive(self):
+        def ping(client):
+            previous = client.connection.gettimeout()
+            client.connection.settimeout(min(previous, KEEPALIVE_TIMEOUT) if previous is not None else KEEPALIVE_TIMEOUT)
+            try:
+                return client.request(7, b"", 7)
+            finally:
+                client.connection.settimeout(previous)
         for index in range(2):
-            response = await self._call(index, lambda c: c.request(7, b"", 7))
+            # Active traffic has its own deadline. Never queue an idle UART probe
+            # behind a long DAP command, or alter that command's socket timeout.
+            if self.locks[index].locked():
+                continue
+            response = await self._call(index, ping)
             if response:
                 raise ProtocolError("AirDAP KEEPALIVE response must be empty")
 
@@ -383,7 +396,7 @@ class Session:
 
     async def keepalive(self):
         while True:
-            await asyncio.sleep(2)
+            await asyncio.sleep(KEEPALIVE_INTERVAL)
             await self.backend.keepalive()
 
     async def run(self):

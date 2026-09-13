@@ -118,6 +118,29 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                               'Port 03: used\n -> usbip://127.0.0.1:3243/1-1\n')
         self.assertEqual(mount.matching_ports(), [2])
 
+    async def test_failed_mount_retries_within_two_seconds(self):
+        credential = NetworkCredential.create(DEVICE, bytes(range(32)))
+        await self.service.command('profile', {'device_id':DEVICE, 'host':'localhost',
+            'auto_attach':False, 'credential':json.loads(credential.to_json())})
+        self.service.mount.executable = None
+        self.service.mount.detach = MagicMock()
+        self.service.mount.attach = MagicMock(side_effect=ServiceError('offline'))
+        await self.service.start_bridge()
+        with self.assertRaises(ServiceError):
+            await self.service.attach()
+        attached = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        self.service.mount.attach.side_effect = lambda: loop.call_soon_threadsafe(attached.set)
+        self.store.profile['auto_attach'] = True
+        maintenance = asyncio.create_task(self.service.maintain())
+        try:
+            await asyncio.wait_for(attached.wait(), 2)
+            await self.service.job_task
+            self.assertEqual(self.service.job['state'], 'succeeded')
+        finally:
+            maintenance.cancel()
+            await asyncio.gather(maintenance, return_exceptions=True)
+
     async def test_stop_closes_connected_client_before_waiting_for_listener(self):
         credential = NetworkCredential.create(DEVICE, bytes(range(32)))
         await self.service.command('profile', {'device_id':DEVICE, 'host':'localhost',
