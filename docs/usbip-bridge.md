@@ -5,6 +5,9 @@ USB/IP 客户端将它挂入操作系统后，调试软件使用 CMSIS-DAP v2，
 Windows `COMx` 或 Linux `/dev/ttyACM*`。这里的烧录指通过 CMSIS-DAP/SWD
 给目标芯片烧录；不提供 DAPLink Mass Storage 拖拽烧录磁盘。
 
+需要本机 Web 管理、USB/BLE 配网、OTA，以及 Windows Service / Linux systemd
+开机自启时，使用仓库根目录的 [`host/`](../host/README.md)。下文的命令行桥接和旧后台入口仍保留。
+
 ## 当前固件网络功能
 
 | 入口 | 功能 | 协议 |

@@ -975,7 +975,9 @@ it does not provide a DAPLink drag-and-drop storage volume.
 
 See [the bridge guide](../docs/usbip-bridge.md) for driver prerequisites,
 pairing, attach/detach, the Windows background task, the Linux systemd user
-service, and protocol limitations. Actual target programming over the virtual
+service, and protocol limitations. For the complete Windows Service/systemd host
+with local Web management, USB/BLE provisioning and OTA, see
+[`host/README.md`](../host/README.md). Actual target programming over the virtual
 USB device still requires hardware acceptance on each OS.
 
 ## Development USB OTA
