@@ -419,8 +419,12 @@ bool airdap_mode_state_network_data_enabled(void)
 
 airdap_mode_state_result_t airdap_mode_state_restore_dap_route(void)
 {
-    unsigned int expected = MODE_INITIALIZED;
-    if (atomic_load(&mode_control) != expected) return AIRDAP_MODE_STATE_INVALID_STATE;
+    unsigned int expected = atomic_load(&mode_control);
+    /* OTA initialization emits OTA_RESET before this boot-only call. Its
+     * policy epoch is metadata, not an active transport or OTA session. */
+    if ((expected & ~MODE_USB_OTA_EPOCH_MASK) != MODE_INITIALIZED) {
+        return AIRDAP_MODE_STATE_INVALID_STATE;
+    }
     airdap_dap_route_t route;
     if (!airdap_mode_storage_load(&route)) return AIRDAP_MODE_STATE_STORAGE_ERROR;
     return atomic_compare_exchange_strong(&mode_control, &expected,

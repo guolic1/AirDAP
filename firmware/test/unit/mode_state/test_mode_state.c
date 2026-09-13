@@ -606,6 +606,8 @@ static void attach_during_save(void)
 static void test_persistent_routes(void)
 {
     reset_state();
+    /* app_main initializes OTA before restoring the persisted route. */
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_RESET) == AIRDAP_MODE_STATE_OK);
     fake_saved_route = AIRDAP_DAP_ROUTE_NETWORK;
     fake_mode_writes = 0;
     fake_mode_load_error = true;
@@ -621,6 +623,7 @@ static void test_persistent_routes(void)
     current_owner = AIRDAP_DAP_OWNER_NONE;
     assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_STARTED) == AIRDAP_MODE_STATE_OK);
     assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_NETWORK_AUTO_TOGGLE) == AIRDAP_MODE_DAP_BUSY);
+    assert(airdap_mode_state_restore_dap_route() == AIRDAP_MODE_STATE_INVALID_STATE);
     assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_ABORTED) == AIRDAP_MODE_STATE_OK);
     assert(fake_mode_writes == 0 && fake_saved_route == AIRDAP_DAP_ROUTE_NETWORK);
     assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_NETWORK) == AIRDAP_MODE_DAP_ALLOWED);

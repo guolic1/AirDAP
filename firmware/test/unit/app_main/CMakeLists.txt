@@ -8,8 +8,14 @@ add_executable(
     app_main_test
     test_app_main.c
     ../../../main/app_main.c
+    ../../../components/mode_state/mode_state.c
+    ../../../components/dap_ownership/dap_ownership.c
+    ../mode_state/fake_mode_storage.c
 )
-target_include_directories(app_main_test PRIVATE fake_include)
+target_include_directories(app_main_test PRIVATE fake_include
+    ../../../components/mode_state/include
+    ../../../components/mode_state/private_include
+    ../../../components/dap_ownership/include)
 target_compile_features(app_main_test PRIVATE c_std_11)
 target_compile_options(app_main_test PRIVATE -Wall -Wextra -Werror -pedantic)
 

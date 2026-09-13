@@ -10,12 +10,10 @@
 #include "esp_err.h"
 
 typedef enum {
-    CALL_MODE_STATE_INITIALIZE,
     CALL_OTA_INITIALIZE,
     CALL_BOARD_INITIALIZE,
     CALL_DEVICE_IDENTITY_INITIALIZE,
     CALL_CONFIG_STORE_INITIALIZE,
-    CALL_MODE_RESTORE,
     CALL_NETWORK_AUTH_INITIALIZE,
     CALL_VOLTAGE_INITIALIZE,
     CALL_SWD_INITIALIZE,
@@ -30,6 +28,10 @@ typedef enum {
     CALL_BLE_PROVISIONING_START,
 } call_t;
 
+extern airdap_dap_route_t fake_saved_route;
+extern bool fake_mode_load_error;
+extern unsigned fake_mode_writes;
+
 static call_t calls[18];
 static size_t call_count;
 static esp_err_t wifi_start_result = ESP_OK;
@@ -42,14 +44,14 @@ static void record(call_t call)
     calls[call_count++] = call;
 }
 
-void airdap_mode_state_init(void)
-{
-    record(CALL_MODE_STATE_INITIALIZE);
-}
-
 esp_err_t airdap_ota_initialize(void)
 {
     record(CALL_OTA_INITIALIZE);
+    airdap_mode_snapshot_t mode;
+    assert(airdap_mode_state_get(&mode) == AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_AUTO);
+    /* Match the real OTA initialization event before mode restoration. */
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_RESET) == AIRDAP_MODE_STATE_OK);
     return ESP_OK;
 }
 
@@ -68,18 +70,16 @@ esp_err_t airdap_device_identity_init(void)
 esp_err_t airdap_config_store_init(void)
 {
     record(CALL_CONFIG_STORE_INITIALIZE);
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_AUTO);
+    fake_mode_load_error = false;
     return ESP_OK;
-}
-
-airdap_mode_state_result_t airdap_mode_state_restore_dap_route(void)
-{
-    record(CALL_MODE_RESTORE);
-    return AIRDAP_MODE_STATE_OK;
 }
 
 esp_err_t airdap_network_auth_init(void)
 {
     record(CALL_NETWORK_AUTH_INITIALIZE);
+    assert(airdap_mode_state_get_dap_route() == fake_saved_route);
+    assert(fake_mode_writes == 0);
     return ESP_OK;
 }
 
@@ -108,6 +108,7 @@ esp_err_t airdap_voltage_monitor_read(airdap_voltage_reading_t *reading)
 esp_err_t airdap_usb_init(void)
 {
     record(CALL_USB_INITIALIZE);
+    assert(airdap_mode_state_usb_data_enabled() == (fake_saved_route != AIRDAP_DAP_ROUTE_NETWORK));
     return ESP_OK;
 }
 
@@ -158,12 +159,10 @@ void app_main(void);
 static void test_wifi_failure_does_not_start_discovery(void)
 {
     static const call_t expected[] = {
-        CALL_MODE_STATE_INITIALIZE,
         CALL_OTA_INITIALIZE,
         CALL_BOARD_INITIALIZE,
         CALL_DEVICE_IDENTITY_INITIALIZE,
         CALL_CONFIG_STORE_INITIALIZE,
-        CALL_MODE_RESTORE,
         CALL_NETWORK_AUTH_INITIALIZE,
         CALL_VOLTAGE_INITIALIZE,
         CALL_SWD_INITIALIZE,
@@ -179,6 +178,8 @@ static void test_wifi_failure_does_not_start_discovery(void)
     wifi_start_result = ESP_FAIL;
     network_dap_start_result = ESP_OK;
     discovery_start_result = ESP_OK;
+    call_count = 0U;
+    fake_mode_load_error = true;
     app_main();
 
     assert(call_count == sizeof(expected) / sizeof(expected[0]));
@@ -190,12 +191,10 @@ static void test_wifi_failure_does_not_start_discovery(void)
 static void test_network_listener_failure_does_not_publish_discovery(void)
 {
     static const call_t expected[] = {
-        CALL_MODE_STATE_INITIALIZE,
         CALL_OTA_INITIALIZE,
         CALL_BOARD_INITIALIZE,
         CALL_DEVICE_IDENTITY_INITIALIZE,
         CALL_CONFIG_STORE_INITIALIZE,
-        CALL_MODE_RESTORE,
         CALL_NETWORK_AUTH_INITIALIZE,
         CALL_VOLTAGE_INITIALIZE,
         CALL_SWD_INITIALIZE,
@@ -209,10 +208,11 @@ static void test_network_listener_failure_does_not_publish_discovery(void)
         CALL_BLE_PROVISIONING_START,
     };
 
-    call_count = 0U;
     wifi_start_result = ESP_OK;
     network_dap_start_result = ESP_FAIL;
     discovery_start_result = ESP_OK;
+    call_count = 0U;
+    fake_mode_load_error = true;
     app_main();
     assert(call_count == sizeof(expected) / sizeof(expected[0]));
     for (size_t index = 0U; index < call_count; ++index) {
@@ -223,12 +223,10 @@ static void test_network_listener_failure_does_not_publish_discovery(void)
 static void test_discovery_starts_after_network_listener(void)
 {
     static const call_t expected[] = {
-        CALL_MODE_STATE_INITIALIZE,
         CALL_OTA_INITIALIZE,
         CALL_BOARD_INITIALIZE,
         CALL_DEVICE_IDENTITY_INITIALIZE,
         CALL_CONFIG_STORE_INITIALIZE,
-        CALL_MODE_RESTORE,
         CALL_NETWORK_AUTH_INITIALIZE,
         CALL_VOLTAGE_INITIALIZE,
         CALL_SWD_INITIALIZE,
@@ -243,10 +241,11 @@ static void test_discovery_starts_after_network_listener(void)
         CALL_BLE_PROVISIONING_START,
     };
 
-    call_count = 0U;
     wifi_start_result = ESP_OK;
     network_dap_start_result = ESP_OK;
     discovery_start_result = ESP_FAIL;
+    call_count = 0U;
+    fake_mode_load_error = true;
     app_main();
     assert(call_count == sizeof(expected) / sizeof(expected[0]));
     for (size_t index = 0U; index < call_count; ++index) {
@@ -256,9 +255,12 @@ static void test_discovery_starts_after_network_listener(void)
 
 int main(void)
 {
-    test_wifi_failure_does_not_start_discovery();
-    test_network_listener_failure_does_not_publish_discovery();
-    test_discovery_starts_after_network_listener();
+    for (int route = AIRDAP_DAP_ROUTE_AUTO; route <= AIRDAP_DAP_ROUTE_NETWORK; ++route) {
+        fake_saved_route = (airdap_dap_route_t) route;
+        test_wifi_failure_does_not_start_discovery();
+        test_network_listener_failure_does_not_publish_discovery();
+        test_discovery_starts_after_network_listener();
+    }
     puts("app_main initialization-order test passed");
     return 0;
 }
