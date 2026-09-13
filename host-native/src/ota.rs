@@ -180,6 +180,28 @@ fn usb_query(link: &mut UsbLink) -> Result<(u32, String)> {
     ensure!(!version.is_empty(), "USB OTA 缺少版本");
     Ok((u32::from_le_bytes(data[2..6].try_into()?), version))
 }
+#[derive(Default)]
+struct UsbReconnect {
+    disconnected: bool,
+    last_error: Option<String>,
+}
+impl UsbReconnect {
+    fn observe(&mut self, observation: Result<Option<String>>, expected: &str) -> Result<bool> {
+        match observation {
+            Ok(None) => self.disconnected = true,
+            Ok(Some(version)) if self.disconnected => {
+                ensure!(
+                    version == expected,
+                    "USB 重连后的版本与镜像不符，可能发生回滚"
+                );
+                return Ok(true);
+            }
+            Ok(Some(_)) => {}
+            Err(error) => self.last_error = Some(error.to_string()),
+        }
+        Ok(false)
+    }
+}
 pub fn usb_upload(serial: &str, image: &[u8], progress: Progress) -> Result<Value> {
     let meta = inspect(image)?;
     let mut link = UsbLink::open(serial, false)?;
@@ -223,38 +245,66 @@ pub fn usb_upload(serial: &str, image: &[u8], progress: Progress) -> Result<Valu
         }));
     }
     progress(92, "镜像已提交，等待 USB 重新枚举");
-    link.write(&[0x85])?;
+    // Reset can interrupt the host's transfer completion. Never replay it: prove
+    // a real disappearance followed by a successful QUERY for the same serial.
+    let reboot_error = link.write(&[0x85]).err();
     drop(link);
     let end = Instant::now() + Duration::from_secs(45);
-    let mut disconnected = false;
+    let mut reconnect = UsbReconnect::default();
     while Instant::now() < end {
-        let present = crate::usb::discover()?
-            .iter()
-            .any(|d| d["device_id"] == serial);
-        if !present {
-            disconnected = true;
-        }
-        match UsbLink::open(serial, false) {
-            Ok(mut link) if disconnected => {
-                let (_, version) = usb_query(&mut link)?;
-                ensure!(
-                    version == meta.version,
-                    "USB 重连后的版本与镜像不符，可能发生回滚"
-                );
-                return Ok(
-                    json!({"version":version,"verification":"USB 重连及版本已核对；USB QUERY 不提供槽位启动确认字段。"}),
-                );
+        let observation = (|| -> Result<Option<String>> {
+            if !crate::usb::discover()?
+                .iter()
+                .any(|d| d["device_id"] == serial)
+            {
+                return Ok(None);
             }
-            Ok(_) | Err(_) => {}
+            let mut link = UsbLink::open(serial, false)?;
+            Ok(Some(usb_query(&mut link)?.1))
+        })();
+        if reconnect.observe(observation, &meta.version)? {
+            return Ok(
+                json!({"version":meta.version,"verification":"USB 重连及版本已核对；USB QUERY 不提供槽位启动确认字段。"}),
+            );
         }
         std::thread::sleep(Duration::from_millis(250));
     }
-    anyhow::bail!("镜像已提交，但 USB 重连验证超时，请检查设备，不要重复写入")
+    anyhow::bail!(
+        "镜像已提交，但 USB 重连验证超时：{}；重启传输{}。请检查设备，不要重复写入",
+        reconnect
+            .last_error
+            .as_deref()
+            .unwrap_or("未观察到完整的断开、重连与版本确认"),
+        if reboot_error.is_some() {
+            "未获确认"
+        } else {
+            "已完成"
+        }
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn usb_reconnect_retries_enumeration_errors_without_faking_disconnect() {
+        let mut state = UsbReconnect::default();
+        assert!(!state.observe(Ok(Some("vtest".into())), "vtest").unwrap());
+        assert!(
+            !state
+                .observe(Err(anyhow::anyhow!("Pipe error")), "vtest")
+                .unwrap()
+        );
+        assert!(!state.observe(Ok(Some("vtest".into())), "vtest").unwrap());
+        assert!(!state.observe(Ok(None), "vtest").unwrap());
+        assert!(
+            !state
+                .observe(Err(anyhow::anyhow!("USB enumeration pending")), "vtest")
+                .unwrap()
+        );
+        assert!(state.observe(Ok(Some("wrong".into())), "vtest").is_err());
+        assert!(state.observe(Ok(Some("vtest".into())), "vtest").unwrap());
+    }
     #[test]
     fn validates_image_and_fixed_slot_boot_confirmation() {
         let mut image = vec![0; 80];
