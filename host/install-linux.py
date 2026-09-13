@@ -64,8 +64,15 @@ def main():
     extra = ''
     if idf and prov.is_dir():
         shutil.copytree(Path(idf) / 'components/protocomm/python', target / 'provisioning/idf/components/protocomm/python')
-        shutil.copytree(prov, target / 'provisioning/esp_prov')
-        extra = ' --idf-path /opt/airdap/provisioning/idf --provisioning-dir /opt/airdap/provisioning/esp_prov'
+        component = target / 'provisioning/network_provisioning'
+        shutil.copytree(prov, component / 'tool/esp_prov')
+        shutil.copytree(prov.parents[1] / 'python', component / 'python')
+        if (prov.parents[1] / 'LICENSE').exists():
+            shutil.copyfile(prov.parents[1] / 'LICENSE', component / 'LICENSE')
+        extra = ' --idf-path /opt/airdap/provisioning/idf --provisioning-dir /opt/airdap/provisioning/network_provisioning/tool/esp_prov'
+        run(str(target / '.venv/bin/python'), '-c',
+            'import sys; sys.path.insert(0,sys.argv[1]); from airdap_service_devices import Devices; Devices(idf_path=sys.argv[2],provisioning_dir=sys.argv[3]).ble_client()',
+            str(target / 'host'), str(target / 'provisioning/idf'), str(component / 'tool/esp_prov'))
     else:
         print('BLE provisioning components absent; USB provisioning and OTA remain available.')
     run('modprobe', 'vhci_hcd')

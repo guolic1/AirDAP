@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import importlib
 import importlib.util
 import io
+import os
 from pathlib import Path
 import re
 import secrets
@@ -132,12 +133,24 @@ class Devices:
                 pair.ESP_PROV_DIR = Path(self.provisioning_dir)
                 pair.ESP_PROV_SCRIPT = pair.ESP_PROV_DIR / 'esp_prov.py'
             try:
-                self.esp = pair.load_esp_prov(Path(self.idf_path) if self.idf_path else pair.resolve_idf_path())
+                idf = Path(self.idf_path) if self.idf_path else pair.resolve_idf_path()
+                previous = os.environ.get('IDF_PATH')
+                try:
+                    # Upstream proto/__init__.py reads the environment directly,
+                    # even when its parent loader received an explicit path.
+                    os.environ['IDF_PATH'] = str(idf)
+                    esp = pair.load_esp_prov(idf)
+                finally:
+                    if previous is None:
+                        os.environ.pop('IDF_PATH', None)
+                    else:
+                        os.environ['IDF_PATH'] = previous
+                from airdap_esp_prov import AirDapBleClient
+                importlib.import_module('transport.ble_cli').get_client = AirDapBleClient
             except (OSError, pair.PairingError, ImportError):
                 raise ServiceError('蓝牙配网组件未就绪：请配置 ESP-IDF 和 network_provisioning 客户端路径。') from None
-            from airdap_esp_prov import AirDapBleClient
-            importlib.import_module('transport.ble_cli').get_client = AirDapBleClient
-            self.esp.config_throw_except = True
+            esp.config_throw_except = True
+            self.esp = esp
         return self.esp
 
     async def discover(self, transport):

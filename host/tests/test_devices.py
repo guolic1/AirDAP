@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+import os
 from pathlib import Path
 import struct
 import sys
@@ -40,6 +41,18 @@ class UsbWifiTests(unittest.TestCase):
 
 
 class BleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_explicit_idf_path_is_visible_to_upstream_proto_loader(self):
+        from airdap_service_devices import pair
+        observed = []
+        def load(path):
+            observed.append(os.environ.get('IDF_PATH'))
+            raise ImportError('stop before hardware dependencies')
+        with patch.dict(os.environ, {}, clear=True), patch.object(pair, 'load_esp_prov', side_effect=load):
+            with self.assertRaises(ServiceError):
+                Devices(idf_path=Path('/configured/idf')).ble_client()
+            self.assertEqual(observed, [str(Path('/configured/idf'))])
+            self.assertNotIn('IDF_PATH', os.environ)
+
     async def test_wifi_session_disconnects_on_success_and_apply_failure(self):
         for accepted in (True, False):
             esp = MagicMock()

@@ -89,12 +89,23 @@ if ($idf -and (Test-Path -LiteralPath $prov)) {
     $proto = Join-Path $install 'provisioning/idf/components/protocomm'
     New-Item -ItemType Directory -Force -Path $proto | Out-Null
     Copy-Item -LiteralPath (Join-Path $idf 'components/protocomm/python') -Destination (Join-Path $proto 'python') -Recurse
-    Copy-Item -LiteralPath $prov -Destination (Join-Path $install 'provisioning/esp_prov') -Recurse
-    $extra = ' --idf-path "' + (Join-Path $install 'provisioning/idf') + '" --provisioning-dir "' + (Join-Path $install 'provisioning/esp_prov') + '"'
+    $component = Join-Path $install 'provisioning/network_provisioning'
+    New-Item -ItemType Directory -Force -Path (Join-Path $component 'tool') | Out-Null
+    Copy-Item -LiteralPath $prov -Destination (Join-Path $component 'tool/esp_prov') -Recurse
+    $componentSource = Split-Path (Split-Path $prov -Parent) -Parent
+    Copy-Item -LiteralPath (Join-Path $componentSource 'python') -Destination (Join-Path $component 'python') -Recurse
+    if (Test-Path -LiteralPath (Join-Path $componentSource 'LICENSE')) {
+        Copy-Item -LiteralPath (Join-Path $componentSource 'LICENSE') -Destination $component
+    }
+    $extra = ' --idf-path "' + (Join-Path $install 'provisioning/idf') + '" --provisioning-dir "' + (Join-Path $component 'tool/esp_prov') + '"'
 } else { Write-Warning '未发现 ESP-IDF 配网组件。USB 配网、网络桥接和 OTA 可用；蓝牙配网需补齐组件。' }
 $python = Join-Path $install 'runtime/python.exe'
 & $python -c 'import ssl,bleak,cryptography,google.protobuf,usb.core,libusb_package; assert hasattr(ssl.SSLContext,"set_psk_client_callback")'
 if ($LASTEXITCODE -ne 0) { throw '复制的运行环境验证失败，未注册服务。' }
+if ($extra) {
+    & $python -c 'import sys; sys.path.insert(0,sys.argv[1]); from airdap_service_devices import Devices; Devices(idf_path=sys.argv[2],provisioning_dir=sys.argv[3]).ble_client()' $hostDir (Join-Path $install 'provisioning/idf') (Join-Path $component 'tool/esp_prov')
+    if ($LASTEXITCODE -ne 0) { throw '打包后的蓝牙配网组件验证失败，未注册服务。' }
+}
 $entry = Join-Path $hostDir 'airdap-service.py'
 $binary = '"' + $python + '" "' + $entry + '" --windows-service --service-name ' + $Name + ' --data-dir "' + $data + '" --http-port ' + $HttpPort + ' --usbip-port ' + $UsbipPort + $extra
 if ($NoHttp) { $binary += ' --no-http' }
