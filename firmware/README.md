@@ -447,20 +447,21 @@ The default command bindings are:
 | Gesture | Command |
 | --- | --- |
 | `single` | `none` |
-| `double` | `dap-toggle` |
+| `double` | `dap-network-auto-toggle` |
 | `hold2` | `provisioning` |
 | `hold6` | `none` |
 | `hold10` | `clear-network-restart` |
 
 USB debug shell supports `button commands`, `button bindings`,
 `button bind <gesture> <command>`, and `button defaults`. Each bind/defaults
-operation saves immediately, with no separate save command. All twelve supported
+operation saves immediately, with no separate save command. All thirteen supported
 commands may be bound to any of the five gestures:
 
 | Command | Behavior |
 | --- | --- |
 | `none` | No device operation |
-| `dap-toggle` | Switch between USB and NETWORK DAP |
+| `dap-toggle` | Switch between USB and NETWORK DAP (legacy command) |
+| `dap-network-auto-toggle` | Toggle NETWORK/AUTO; selecting from USB enters NETWORK |
 | `dap-usb` | Select USB DAP |
 | `dap-network` | Select authenticated NETWORK DAP, including while USB is attached |
 | `dap-auto` | Restore USB-when-attached, NETWORK-otherwise policy |
@@ -475,7 +476,7 @@ commands may be bound to any of the five gestures:
 For example, `button bind hold6 dap-auto` replaces the six-second no-op.
 `button bindings` prints all bindings and the current saved DAP route.
 Commands are a fixed allowlist, not arbitrary shell text. Firmware flashing is
-not a button command. The default five bindings remain unchanged.
+not a button command. The default double click uses `dap-network-auto-toggle`.
 
 All manual route commands save the selected USB, NETWORK, or AUTO mode to
 `airdap_mode/dap_route` before applying it. Restart restores that selection before
@@ -506,8 +507,12 @@ open-drain startup state on reboot.
 
 Bindings use a separate versioned six-byte NVS record (`airdap_btn/bindings`),
 without changing the existing network configuration record. Missing bindings
-use the defaults above. Writes are serialized and RAM changes only after a
-successful commit. Invalid records or storage failures are reported, never
+use the defaults above. Version 1 bindings are upgraded once to version 2:
+a double-click `dap-toggle` binding becomes `dap-network-auto-toggle`; all other
+bindings are preserved. Version 2 permits explicitly rebinding `dap-toggle`
+without changing it on the next boot. Migration is committed before publishing
+bindings and fails visibly on storage errors. Writes are serialized and RAM
+changes only after a successful commit. Invalid records or storage failures are reported, never
 treated as saved. If a corrupt record prevents the button monitor from starting,
 use `button defaults` over USB and restart to recover just the binding record.
 Clearing network configuration preserves the bindings.

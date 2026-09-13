@@ -32,7 +32,7 @@ static void finish_pulse(void *argument)
 
 esp_err_t airdap_button_device_command_execute(airdap_button_command_t command)
 {
-    if (command < AIRDAP_BUTTON_COMMAND_RESTART || command >= AIRDAP_BUTTON_COMMAND_COUNT) {
+    if (command < AIRDAP_BUTTON_COMMAND_RESTART || command > AIRDAP_BUTTON_COMMAND_TARGET_POWER_CYCLE) {
         return ESP_ERR_INVALID_ARG;
     }
     bool expected = false;

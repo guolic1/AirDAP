@@ -8,7 +8,7 @@
 #include "freertos/semphr.h"
 #include "nvs.h"
 
-enum { RECORD_VERSION = 1, RECORD_SIZE = 1 + AIRDAP_BUTTON_GESTURE_COUNT };
+enum { RECORD_VERSION = 2, RECORD_SIZE = 1 + AIRDAP_BUTTON_GESTURE_COUNT };
 static const unsigned int INITIALIZED = 1U << 31;
 static atomic_uint bindings;
 static atomic_bool storage_ready;
@@ -16,7 +16,7 @@ static StaticSemaphore_t mutex_storage;
 static SemaphoreHandle_t mutex;
 static const uint8_t defaults[AIRDAP_BUTTON_GESTURE_COUNT] = {
     AIRDAP_BUTTON_COMMAND_NONE,
-    AIRDAP_BUTTON_COMMAND_DAP_TOGGLE,
+    AIRDAP_BUTTON_COMMAND_DAP_NETWORK_AUTO_TOGGLE,
     AIRDAP_BUTTON_COMMAND_PROVISIONING,
     AIRDAP_BUTTON_COMMAND_NONE,
     AIRDAP_BUTTON_COMMAND_CLEAR_NETWORK_RESTART,
@@ -25,6 +25,7 @@ static const char *const command_names[] = {
     "none", "dap-toggle", "provisioning", "clear-network-restart",
     "dap-usb", "dap-network", "dap-auto",
     "restart", "target-reset", "wifi-toggle", "target-power-toggle", "target-power-cycle",
+    "dap-network-auto-toggle",
 };
 static const char *const gesture_names[] = {"single", "double", "hold2", "hold6", "hold10"};
 _Static_assert(AIRDAP_BUTTON_COMMAND_COUNT <= 16, "bindings use four bits per command");
@@ -79,18 +80,30 @@ esp_err_t airdap_button_config_init(void)
     uint8_t record[RECORD_SIZE] = {RECORD_VERSION};
     size_t size = sizeof(record);
     error = nvs_get_blob(handle, "bindings", record, &size);
-    nvs_close(handle);
     if (error == ESP_ERR_NVS_NOT_FOUND) {
         memcpy(record + 1, defaults, sizeof(defaults));
         error = ESP_OK;
     } else if (error == ESP_OK) {
         if (size != sizeof(record)) error = ESP_ERR_INVALID_SIZE;
-        else if (record[0] != RECORD_VERSION) error = ESP_ERR_INVALID_VERSION;
+        else if (record[0] != 1 && record[0] != RECORD_VERSION) error = ESP_ERR_INVALID_VERSION;
     }
+    if (error == ESP_OK) {
+        for (unsigned i = 1; i < sizeof(record); ++i) {
+            if (record[i] >= AIRDAP_BUTTON_COMMAND_COUNT) error = ESP_ERR_INVALID_ARG;
+        }
+    }
+    if (error == ESP_OK && record[0] == 1) {
+        /* Migrate the old default once; preserve all other bindings. Version 2
+         * lets users explicitly rebind the legacy toggle without re-migration. */
+        if (record[1 + AIRDAP_BUTTON_GESTURE_DOUBLE] == AIRDAP_BUTTON_COMMAND_DAP_TOGGLE) {
+            record[1 + AIRDAP_BUTTON_GESTURE_DOUBLE] = AIRDAP_BUTTON_COMMAND_DAP_NETWORK_AUTO_TOGGLE;
+        }
+        record[0] = RECORD_VERSION;
+        error = nvs_set_blob(handle, "bindings", record, sizeof(record));
+        if (error == ESP_OK) error = nvs_commit(handle);
+    }
+    nvs_close(handle);
     if (error != ESP_OK) return initialization_result(error);
-    for (unsigned i = 1; i < sizeof(record); ++i) {
-        if (record[i] >= AIRDAP_BUTTON_COMMAND_COUNT) return initialization_result(ESP_ERR_INVALID_ARG);
-    }
     atomic_store(&bindings, pack(record + 1));
     return initialization_result(ESP_OK);
 }

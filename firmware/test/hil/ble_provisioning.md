@@ -141,7 +141,7 @@ release begins, confirm one 100 ms flash and one single-click log. Repeat with
 two short presses separated by less than 300 ms: confirm two 100 ms flashes
 separated by 100 ms off, one double-click log, and no single-click log. Neither
 gesture should start BLE, reset either MCU, or change target power. NET follows
-the selected route (the default double click toggles USB/NETWORK).
+the selected route (the default double click toggles NETWORK/AUTO).
 Start another ordinary press during a completion flash and confirm its
 40 ms press confirmation cancels the remaining flash sequence.
 
@@ -154,21 +154,27 @@ host-test results; polling and task scheduling can affect real flash durations.
 
 ## 7. Persistent bindings and DAP selection
 
-Record `button commands` (twelve entries) and `button bindings` (five gestures).
-Set `button bind hold6 dap-auto`, restart and confirm the binding survives while
-`dap-route=auto`. Restore the defaults and confirm that this change survives a
-second restart. Invalid gestures/commands or trailing tokens must fail without
+Record `button commands` (thirteen entries) and `button bindings` (five gestures).
+Set `button bind hold6 dap-auto`, restart and confirm the binding and previously
+selected route both survive. Restore the defaults and confirm that this change
+survives a second restart. Invalid gestures/commands or trailing tokens must fail without
 changing the stored bindings. Save and restore any pre-test custom mappings.
 
-With USB data attached, Wi-Fi online, and DAP disconnected, double-click and
+Select AUTO first. With USB data attached, Wi-Fi online, and DAP disconnected, double-click and
 confirm `dap-route=network`. Verify authenticated pyOCD DAP access over TCP and
-verify that USB DAP cannot acquire the target. USB CDC and debug shell should
-remain enumerated. Unauthenticated network access must remain rejected.
-Disconnect DAP and double-click again; confirm `dap-route=usb`, wired DAP works,
+verify that wired DAP and target CDC disappear. Only the independent debug
+shell should remain enumerated. Unauthenticated network access must remain rejected.
+Disconnect DAP and double-click again; confirm `dap-route=auto`, wired DAP works,
 and network DAP is rejected. With a DAP owner or OTA active, verify the selection
 command reports busy and preserves the current route and transfer. Restart and
-confirm automatic selection is restored. Explicit NETWORK selection must survive
-USB detach/reattach until another command or reboot changes the selection.
+confirm the last selected mode is restored. Explicit NETWORK selection must
+survive USB detach/reattach and reboot until another route command changes it.
+Test both NETWORK and AUTO after a complete power cycle; confirm NETWORK never
+briefly enumerates wired DAP/CDC at startup and AUTO follows physical USB presence.
+Check version 1 migration with the old default double binding and another custom
+binding; only the double binding should change. Then explicitly bind double to
+`dap-toggle`, restart, and verify that this legacy choice is retained. Restore
+the user's original bindings and mode after testing.
 
 On a recoverable board only, map double-click to `clear-network-restart` and
 observe that restart cannot occur before 200 ms of stable release. A new press

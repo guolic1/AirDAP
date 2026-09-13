@@ -460,17 +460,19 @@ static esp_err_t execute_button_command(airdap_button_command_t command)
     case AIRDAP_BUTTON_COMMAND_NONE:
         return ESP_OK;
     case AIRDAP_BUTTON_COMMAND_DAP_TOGGLE:
+    case AIRDAP_BUTTON_COMMAND_DAP_NETWORK_AUTO_TOGGLE:
     case AIRDAP_BUTTON_COMMAND_DAP_USB:
     case AIRDAP_BUTTON_COMMAND_DAP_NETWORK:
     case AIRDAP_BUTTON_COMMAND_DAP_AUTO: {
-        const airdap_dap_route_t route = command == AIRDAP_BUTTON_COMMAND_DAP_TOGGLE
+        const airdap_dap_route_t route = command == AIRDAP_BUTTON_COMMAND_DAP_NETWORK_AUTO_TOGGLE
+            ? AIRDAP_DAP_ROUTE_NETWORK_AUTO_TOGGLE : command == AIRDAP_BUTTON_COMMAND_DAP_TOGGLE
             ? AIRDAP_DAP_ROUTE_TOGGLE : command == AIRDAP_BUTTON_COMMAND_DAP_USB
             ? AIRDAP_DAP_ROUTE_USB : command == AIRDAP_BUTTON_COMMAND_DAP_NETWORK
             ? AIRDAP_DAP_ROUTE_NETWORK : AIRDAP_DAP_ROUTE_AUTO;
         const airdap_mode_dap_result_t result = airdap_mode_state_set_dap_route(route);
         if (result != AIRDAP_MODE_DAP_ALLOWED) {
             ESP_LOGW(TAG, "BOOT_KEY DAP selection rejected: %d", result);
-            return ESP_ERR_INVALID_STATE;
+            return result == AIRDAP_MODE_DAP_STORAGE_ERROR ? ESP_FAIL : ESP_ERR_INVALID_STATE;
         }
         ESP_LOGI(TAG, "DAP route=%d (auto=0 usb=1 network=2)", airdap_mode_state_get_dap_route());
         return ESP_OK;

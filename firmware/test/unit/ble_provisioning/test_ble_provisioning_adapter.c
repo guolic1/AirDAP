@@ -352,7 +352,7 @@ esp_err_t esp_event_post(
         const uint8_t command = *(const uint8_t *) event_data;
         if (event_id == AIRDAP_PROVISIONING_BUTTON_SINGLE_CLICK) assert(command == AIRDAP_BUTTON_COMMAND_NONE);
         if (event_id == AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK) {
-            assert(command == (task_scenario == 3 ? (test_restart_binding ? AIRDAP_BUTTON_COMMAND_RESTART : AIRDAP_BUTTON_COMMAND_CLEAR_NETWORK_RESTART) : AIRDAP_BUTTON_COMMAND_DAP_TOGGLE));
+            assert(command == (task_scenario == 3 ? (test_restart_binding ? AIRDAP_BUTTON_COMMAND_RESTART : AIRDAP_BUTTON_COMMAND_CLEAR_NETWORK_RESTART) : AIRDAP_BUTTON_COMMAND_DAP_NETWORK_AUTO_TOGGLE));
             if (task_scenario == 3) assert(task_tick == 15);
         }
         if (event_id == AIRDAP_PROVISIONING_BUTTON_HOLD_6) assert(command == AIRDAP_BUTTON_COMMAND_NONE);
@@ -485,6 +485,10 @@ static void finish_window(void)
 static void test_route_commands(void)
 {
     assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_NETWORK);
+    assert(airdap_ble_provisioning_test_button_action(AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK) == ESP_OK);
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_AUTO);
+    assert(airdap_ble_provisioning_test_button_action(AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK) == ESP_OK);
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_NETWORK);
     assert(airdap_ble_provisioning_test_button_action(AIRDAP_PROVISIONING_BUTTON_HOLD_6) == ESP_OK);
     assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_NETWORK);
     const airdap_button_command_t route_commands[] = {
@@ -499,13 +503,16 @@ static void test_route_commands(void)
     fake_dap_route_result = AIRDAP_MODE_DAP_BUSY;
     assert(airdap_ble_provisioning_test_button_action(AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK) == ESP_ERR_INVALID_STATE);
     assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_AUTO);
+    fake_dap_route_result = AIRDAP_MODE_DAP_STORAGE_ERROR;
+    assert(airdap_ble_provisioning_test_button_action(AIRDAP_PROVISIONING_BUTTON_DOUBLE_CLICK) == ESP_FAIL);
+    assert(airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_AUTO);
     fake_dap_route_result = AIRDAP_MODE_DAP_ALLOWED;
     assert(airdap_button_config_defaults() == ESP_OK);
 }
 
 static void test_device_bindings(void)
 {
-    for (int c = AIRDAP_BUTTON_COMMAND_RESTART; c < AIRDAP_BUTTON_COMMAND_COUNT; ++c) {
+    for (int c = AIRDAP_BUTTON_COMMAND_RESTART; c <= AIRDAP_BUTTON_COMMAND_TARGET_POWER_CYCLE; ++c) {
         assert(airdap_button_config_set(AIRDAP_BUTTON_GESTURE_HOLD6, (airdap_button_command_t) c) == ESP_OK);
         last_device_command = AIRDAP_BUTTON_COMMAND_NONE;
         assert(airdap_ble_provisioning_test_button_action(AIRDAP_PROVISIONING_BUTTON_HOLD_6) == ESP_OK);

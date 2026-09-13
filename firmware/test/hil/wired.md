@@ -205,7 +205,7 @@ the tested board revision. Only then may roadmap Stage 1 be marked complete.
 
 After an authorized firmware update on the identified board, verify with a paired
 Wi-Fi client and a USB host. Stop active DAP operations before selecting a route.
-The default BOOT_KEY double click toggles USB/NETWORK; other route commands can
+The default BOOT_KEY double click toggles NETWORK/AUTO; other route commands can
 be assigned to a gesture using `button bind` (record and restore its old binding).
 
 1. In `USB`, verify CMSIS-DAP and target CDC enumerate, TCP 3261 rejects new

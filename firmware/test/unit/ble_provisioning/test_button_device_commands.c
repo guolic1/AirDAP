@@ -54,6 +54,9 @@ int main(void)
     assert(airdap_dap_ownership_initialize(&backend) == AIRDAP_DAP_OWNERSHIP_OK);
     airdap_mode_state_init();
     assert(airdap_board_init_safe() == ESP_OK);
+    const unsigned before_invalid = gpio_calls;
+    assert(run(AIRDAP_BUTTON_COMMAND_DAP_NETWORK_AUTO_TOGGLE) == ESP_ERR_INVALID_ARG);
+    assert(gpio_calls == before_invalid && !timer.active && !airdap_button_device_command_busy());
     assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED) == AIRDAP_MODE_STATE_OK);
     assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_DEBUG_SHELL_STARTED) == AIRDAP_MODE_STATE_OK);
     create_error = ESP_FAIL;
@@ -102,13 +105,13 @@ int main(void)
     key_pressed = false;
     assert(run(AIRDAP_BUTTON_COMMAND_RESTART) == ESP_OK && restarts == 1);
     assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_STARTED) == AIRDAP_MODE_STATE_OK);
-    for (int c = AIRDAP_BUTTON_COMMAND_RESTART; c < AIRDAP_BUTTON_COMMAND_COUNT; ++c) {
+    for (int c = AIRDAP_BUTTON_COMMAND_RESTART; c <= AIRDAP_BUTTON_COMMAND_TARGET_POWER_CYCLE; ++c) {
         assert(run((airdap_button_command_t) c) == ESP_ERR_INVALID_STATE);
     }
     assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_OTA_ABORTED) == AIRDAP_MODE_STATE_OK);
     assert(airdap_mode_state_dap_acquire(AIRDAP_DAP_OWNER_USB, false, &claim) == AIRDAP_MODE_DAP_ALLOWED);
     calls = gpio_calls;
-    for (int c = AIRDAP_BUTTON_COMMAND_RESTART; c < AIRDAP_BUTTON_COMMAND_COUNT; ++c) {
+    for (int c = AIRDAP_BUTTON_COMMAND_RESTART; c <= AIRDAP_BUTTON_COMMAND_TARGET_POWER_CYCLE; ++c) {
         assert(run((airdap_button_command_t) c) == ESP_ERR_INVALID_STATE);
     }
     assert(gpio_calls == calls && restarts == 1 && wifi_toggles == 2);
