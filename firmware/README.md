@@ -396,8 +396,7 @@ confirmed initial press debounce and excludes sampled release gaps. Recognition
 precision is limited by polling and task scheduling; thresholds are not hardware
 timing guarantees.
 
-The red STATUS LED (GPIO10, active low) uses these button indications. The
-previous green/red threshold indications are replaced; NET stays off.
+The red STATUS LED (GPIO10, active low) uses these button indications.
 
 | Button condition | STATUS indication |
 | --- | --- |
@@ -413,9 +412,29 @@ previous green/red threshold indications are replaced; NET stays off.
 Ordinary presses do not light STATUS. A confirmed new press cancels a pending
 completion flash. Blink timing runs in the existing 20 ms polling task without
 blocking delays; a GPIO write failure is logged and retried on the next poll.
-Only that task writes the button LED outputs, so delayed provisioning events
-cannot restore a stale indication. Flash durations are firmware constants in
+Only that task writes both LED outputs, so delayed provisioning events cannot
+restore a stale indication. STATUS flash durations are firmware constants in
 `components/ble_provisioning/button_indicator.c`, not persistent settings.
+
+The green NET LED (GPIO11, active low) shows the network DAP/UART route and
+Wi-Fi state. The first matching row wins:
+
+| Condition | NET indication |
+| --- | --- |
+| Provisioning active | Fast flash: 100 ms on, 100 ms off |
+| `USB`, or `AUTO` with USB enumerated | Off |
+| Wi-Fi stopped, disabled, or not configured | Off |
+| Network data enabled and Wi-Fi connecting/reconnecting (including retry backoff) | Slow flash: 500 ms on, 500 ms off |
+| Network data enabled and Wi-Fi has an IPv4 address | On |
+
+Provisioning indication overrides USB priority. When provisioning succeeds,
+times out, or is cancelled, NET resumes the current route/Wi-Fi indication.
+NET off under USB priority does not mean Wi-Fi management/OTA is disabled;
+NET on does not promise an authenticated client or exclusive target ownership.
+Button completion flashes and hold thresholds only affect STATUS. NET timing
+runs in the same 20 ms polling task, with constants in
+`components/ble_provisioning/network_indicator.c`. Pattern changes start lit;
+connection attempts and retry backoff share one continuous slow-flash phase.
 
 Only the highest reached hold threshold executes on release. For example,
 releasing after 6 seconds selects `hold6`; it does not first execute `hold2`.

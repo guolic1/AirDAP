@@ -27,7 +27,8 @@ Restart and monitor AirDAP. Record `button bindings`, then use `button defaults`
 The following steps assume the default mappings; restore custom bindings after
 acceptance. Confirm BLE is not advertising before a button
 press. Hold `BOOT_KEY` until the red STATUS LED starts its 500 ms on/off
-slow flash at two seconds. NET must remain off.
+slow flash at two seconds. With USB priority, NET must remain off until the
+provisioning window opens; during active provisioning it flashes 100 ms on/off.
 Before releasing it, confirm BLE has not initialized or started advertising
 and an attached debug-shell session remains connected. Release the button and
 confirm:
@@ -115,10 +116,10 @@ public fingerprint.
 With the device provisioned, hold `BOOT_KEY` continuously. Confirm STATUS stays
 off before two seconds, then flashes with 500 ms on/off without initializing
 BLE or disconnecting the debug shell. Continue holding until STATUS changes to
-200 ms on/off at six seconds, then 60 ms on/off at ten seconds. NET must remain
-off throughout. Keep it pressed briefly and confirm AirDAP
+200 ms on/off at six seconds, then 60 ms on/off at ten seconds. NET must keep
+its current network indication throughout the hold. Keep it pressed briefly and confirm AirDAP
 has not cleared configuration or restarted while GPIO0 remains low. Release the
-button and confirm both LEDs turn off before AirDAP clears configuration and
+button and confirm STATUS turns off before AirDAP clears configuration and
 restarts normally rather than entering the ROM download mode. The debug shell
 disconnect caused by that restart is expected. After restart:
 
@@ -139,8 +140,9 @@ must stay off while pressed and while waiting for a second press; 300 ms after
 release begins, confirm one 100 ms flash and one single-click log. Repeat with
 two short presses separated by less than 300 ms: confirm two 100 ms flashes
 separated by 100 ms off, one double-click log, and no single-click log. Neither
-gesture should start BLE, reset either MCU, or change target power. NET stays
-off. Start another ordinary press during a completion flash and confirm its
+gesture should start BLE, reset either MCU, or change target power. NET follows
+the selected route (the default double click toggles USB/NETWORK).
+Start another ordinary press during a completion flash and confirm its
 40 ms press confirmation cancels the remaining flash sequence.
 
 Observe long-hold release bounce if suitable test equipment is available: a
@@ -215,3 +217,28 @@ action does not execute and the physical press begins a fresh gesture. A
 simulation requested during a physical gesture must not alter that gesture.
 Restore the saved bindings after the test. Obtain separate authorization for
 commands that reboot, clear configuration, reset the target, or change power.
+
+## 10. NET route and connection indication
+
+On the selected board, record bindings, route, and Wi-Fi configuration before
+testing. Use the dedicated test AP for disconnect/reconnect checks.
+
+1. With Wi-Fi online, select `USB`: NET is off while network management remains
+   available. Select `NETWORK` with USB still attached: NET stays on, the wired
+   DAP/CDC disappear, and the independent debug shell can reconnect.
+2. Select `AUTO`. Keep independent board power and unplug only the USB data
+   cable: NET comes on while Wi-Fi remains online. Reconnect USB: NET turns
+   off. Compare `system-info` uptime before/after to exclude a reboot.
+3. In `NETWORK`, interrupt the test AP. Confirm 500 ms on/off continues across
+   reconnect attempts and retry backoff, then becomes steady on only after
+   an IP address is acquired. With Wi-Fi disabled or unconfigured, NET is off.
+4. Open provisioning with USB priority active. NET flashes 100 ms on/off even
+   with USB attached. Check success, cancellation, and timeout separately:
+   the subsequent indication must reflect the current route and Wi-Fi state.
+5. With NET steady on, use a harmless single-click binding and verify STATUS
+   completion flashes do not turn NET off. Observe both LEDs during hold
+   thresholds without binding those gestures to destructive commands.
+
+Restore bindings, route, AP availability, and Wi-Fi settings. Record visual
+observations and measured timings separately from host-test results; this
+procedure does not establish target UART loopback or DAP electrical timing.

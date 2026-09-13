@@ -38,6 +38,18 @@ target_include_directories(button_indicator_test PRIVATE
 target_compile_features(button_indicator_test PRIVATE c_std_11)
 target_compile_options(button_indicator_test PRIVATE -Wall -Wextra -Werror -pedantic)
 add_test(NAME button_indicator COMMAND button_indicator_test)
+add_executable(network_indicator_test
+    test_network_indicator.c
+    ../../../components/ble_provisioning/network_indicator.c
+    ../../../components/mode_state/mode_state.c
+    ../../../components/dap_ownership/dap_ownership.c)
+target_include_directories(network_indicator_test PRIVATE
+    ../../../components/ble_provisioning/private_include
+    ../../../components/mode_state/include
+    ../../../components/dap_ownership/include)
+target_compile_features(network_indicator_test PRIVATE c_std_11)
+target_compile_options(network_indicator_test PRIVATE -Wall -Wextra -Werror -pedantic)
+add_test(NAME network_indicator COMMAND network_indicator_test)
 add_test(
     NAME ble_provisioning_public_security2_credential
     COMMAND ${Python3_EXECUTABLE}
@@ -50,6 +62,7 @@ add_executable(
     ../debug_shell_button/fake_button_config.c
     ../../../components/ble_provisioning/button_indicator.c
     ../../../components/ble_provisioning/ble_provisioning.c
+    ../../../components/ble_provisioning/network_indicator.c
     ../../../components/ble_provisioning/button_simulation.c
     ../../../components/ble_provisioning/provisioning_button.c
 )

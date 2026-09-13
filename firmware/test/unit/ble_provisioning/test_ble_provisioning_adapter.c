@@ -80,6 +80,14 @@ static unsigned button_action_counts[9];
 extern airdap_mode_dap_result_t fake_dap_route_result;
 static airdap_button_command_t last_device_command;
 static bool device_command_busy;
+static airdap_mode_snapshot_t indicator_mode;
+static bool network_data_enabled;
+airdap_mode_state_result_t airdap_mode_state_get(airdap_mode_snapshot_t *snapshot)
+{
+    *snapshot = indicator_mode;
+    return AIRDAP_MODE_STATE_OK;
+}
+bool airdap_mode_state_network_data_enabled(void) { return network_data_enabled; }
 bool airdap_button_device_command_busy(void) { return device_command_busy; }
 esp_err_t airdap_button_device_command_execute(airdap_button_command_t command)
 {
@@ -398,7 +406,15 @@ void vTaskDelay(TickType_t ticks)
     /* The first threshold write fails; retry must succeed on the next tick. */
     if (task_scenario == 2 && task_tick == 99) expected_status = false;
     assert(status_led_on == expected_status);
-    assert(!network_led_on);
+    if (task_scenario == 7) {
+        assert(network_led_on == ((task_tick >= 10 && task_tick < 20) || task_tick >= 31));
+    } else if (task_scenario == 8) {
+        assert(network_led_on == (task_tick % 10 < 5));
+    } else if (task_scenario == 0) {
+        assert(network_led_on); /* STATUS completion flashes must not clear NET. */
+    } else {
+        assert(!network_led_on);
+    }
     ++task_tick;
     if (task_tick == (task_scenario == 2 ? 530U : task_scenario == 5 ? 320U : task_scenario == 6 ? 130U : 40U)) {
         longjmp(task_done, 1);
@@ -408,12 +424,25 @@ void vTaskDelay(TickType_t ticks)
 esp_err_t airdap_boot_key_get_pressed(bool *pressed)
 {
     assert(pressed != NULL);
+    if (task_scenario == 7 || task_scenario == 8) {
+        *pressed = false;
+        indicator_mode.wifi = task_tick < 10 ? AIRDAP_WIFI_STOPPED : AIRDAP_WIFI_ONLINE;
+        indicator_mode.provisioning = task_scenario == 8
+            ? AIRDAP_PROVISIONING_ACTIVE : AIRDAP_PROVISIONING_IDLE;
+        network_data_enabled = task_scenario == 7 && (task_tick < 20 || task_tick >= 30);
+        led_result = task_scenario == 7 && task_tick == 30 ? ESP_FAIL : ESP_OK;
+        return ESP_OK;
+    }
     if (task_scenario == 6) {
         *pressed = false;
         if (task_tick == 0) assert(airdap_button_simulate(AIRDAP_BUTTON_GESTURE_HOLD2) == ESP_OK);
         led_result = ESP_OK;
         return ESP_OK;
     }
+    indicator_mode = (airdap_mode_snapshot_t) {
+        .wifi = task_scenario == 0 ? AIRDAP_WIFI_ONLINE : AIRDAP_WIFI_STOPPED,
+    };
+    network_data_enabled = task_scenario == 0;
     *pressed = task_scenario == 2 ? task_tick < 510 : task_scenario == 5 ? task_tick < 300 :
         task_tick < 2 || ((task_scenario == 1 || task_scenario == 3 || task_scenario == 4) && task_tick >= 4 && task_tick < 6) ||
         (task_scenario == 4 && task_tick >= 10 && task_tick < 12);
@@ -754,6 +783,14 @@ int main(void)
     assert(button_action_counts[AIRDAP_PROVISIONING_BUTTON_HOLD_6_READY] == 0);
     airdap_button_gesture_t simulated;
     assert(airdap_button_simulation_get(&simulated) == ESP_OK && simulated == AIRDAP_BUTTON_GESTURE_COUNT);
+    task_scenario = 7;
+    task_tick = 0;
+    const unsigned led_writes_before_network = led_change_count;
+    if (setjmp(task_done) == 0) button_task_function(NULL);
+    assert(led_change_count - led_writes_before_network == 5);
+    task_scenario = 8;
+    task_tick = 0;
+    if (setjmp(task_done) == 0) button_task_function(NULL);
     puts("BLE provisioning adapter tests passed");
     return 0;
 }

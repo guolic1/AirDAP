@@ -15,6 +15,7 @@
 #include "airdap_device_identity.h"
 #include "airdap_mode_state.h"
 #include "airdap_network_auth.h"
+#include "airdap_network_indicator.h"
 #include "airdap_provisioning_button.h"
 #include "airdap_sec2_credentials.h"
 #include "airdap_wifi_manager.h"
@@ -579,8 +580,10 @@ static void button_task(void *argument)
     airdap_provisioning_button_t button;
     airdap_button_simulator_t simulator = {0};
     airdap_button_indicator_t indicator = {0};
+    airdap_network_indicator_t network_indicator = {0};
     bool indicator_valid = false;
     bool last_status_on = false;
+    bool last_network_on = false;
     uint8_t commands[AIRDAP_BUTTON_GESTURE_COUNT] = {0};
     uint32_t stable_release_ms = 0U;
     airdap_provisioning_button_action_t pending_clear = AIRDAP_PROVISIONING_BUTTON_NONE;
@@ -626,15 +629,26 @@ static void button_task(void *argument)
                 BUTTON_POLL_MS);
         }
         airdap_button_indicator_step(&indicator, &button, action, BUTTON_POLL_MS);
+        airdap_mode_snapshot_t mode = {0};
+        const airdap_mode_state_result_t mode_result = airdap_mode_state_get(&mode);
+        if (mode_result != AIRDAP_MODE_STATE_OK) {
+            ESP_LOGE(TAG, "NET indicator mode read failed: %d", mode_result);
+        }
+        airdap_network_indicator_step(&network_indicator, &mode,
+            mode_result == AIRDAP_MODE_STATE_OK && airdap_mode_state_network_data_enabled(),
+            BUTTON_POLL_MS);
         /* One task owns both LED outputs; event-loop actions cannot race the
          * pattern or leave the old provisioning indication latched. */
-        if (!indicator_valid || last_status_on != indicator.status_on) {
-            const esp_err_t led_error = airdap_board_leds_set(indicator.status_on, false);
+        if (!indicator_valid || last_status_on != indicator.status_on ||
+            last_network_on != network_indicator.network_on) {
+            const esp_err_t led_error = airdap_board_leds_set(
+                indicator.status_on, network_indicator.network_on);
             indicator_valid = led_error == ESP_OK;
             if (indicator_valid) {
                 last_status_on = indicator.status_on;
+                last_network_on = network_indicator.network_on;
             } else {
-                ESP_LOGE(TAG, "BOOT_KEY indicator update failed: %s",
+                ESP_LOGE(TAG, "LED indicator update failed: %s",
                     esp_err_to_name(led_error));
             }
         }

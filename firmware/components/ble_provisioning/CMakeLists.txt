@@ -3,6 +3,7 @@ idf_component_register(
         "ble_provisioning.c"
         "provisioning_button.c"
         "button_indicator.c"
+        "network_indicator.c"
         "button_device_commands.c"
         "button_simulation.c"
         "sec2_credentials.c"
