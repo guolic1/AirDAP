@@ -6,6 +6,23 @@
   --green:#167b65;
   --line:#dfe7e1
 }
+dialog {
+  width:min(720px, calc(100% - 32px));
+  max-height:90vh;
+  overflow:auto;
+  padding:28px;
+  border:1px solid var(--line);
+  border-radius:14px;
+  color:inherit;
+}
+dialog::backdrop { background:rgb(17 47 43 / 55%); }
+.dialog-footer { margin-top:24px; border-top:1px solid var(--line); padding-top:12px; }
+.wifi-list { display:grid; gap:8px; max-height:280px; overflow:auto; margin-bottom:20px; }
+.wifi-ap { text-align:left; overflow-wrap:anywhere; }
+.wifi-ap strong,.wifi-ap small { display:block; }
+.wifi-ap small { margin-top:8px; font-weight:400; }
+.wifi-ap[aria-pressed=true] { border-color:var(--green); background:#e7f4ed; }
+[hidden] { display:none !important; }
 * {
   box-sizing:border-box
 }

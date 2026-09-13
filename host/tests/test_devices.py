@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+import asyncio
 import os
 from pathlib import Path
 import struct
@@ -7,7 +8,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from airdap_service_devices import Devices, ServiceError, usb_wifi, wifi_fields, usb_update, net_update
+from airdap_service_devices import Devices, ServiceError, usb_wifi, wifi_fields, usb_update, net_update, BleProvisioning, UsbProvisioning
 from airdap_service import Service, Store
 import tempfile
 
@@ -41,6 +42,98 @@ class UsbWifiTests(unittest.TestCase):
 
 
 class BleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_control_waits_for_device_event_loop_and_rejects_failed_cancel(self):
+        session = BleProvisioning(DEVICE, MagicMock())
+        session.security = MagicMock()
+        session.security.encrypt_data.side_effect = lambda value: value
+        session.security.decrypt_data.side_effect = lambda value: value
+        session.link = MagicMock(send_data=AsyncMock(side_effect=[
+            bytes([2,1,1,0]), bytes([2,0,1,1]), bytes([2,0,4,0])]))
+        await session.control(1)
+        self.assertEqual([call.args[1].encode('latin-1') for call in session.link.send_data.call_args_list],
+                         [bytes([2,1]), bytes([2,0])])
+        with self.assertRaises(ServiceError):
+            await session.control(4)
+
+    async def test_usb_pair_checks_fingerprint_and_never_uses_command_arguments(self):
+        from airdap_network_credential import NetworkCredential
+        credential = NetworkCredential.create(DEVICE, bytes(range(32)))
+        session = UsbProvisioning(DEVICE)
+        session.link = MagicMock()
+        for fingerprint, accepted in [(credential.fingerprint, True), (bytes(32), False)]:
+            with patch('airdap_service_devices.shell.read_until'), \
+                 patch('airdap_service_devices.shell.read_until_prompt',
+                       return_value=b'fingerprint=' + fingerprint.hex().encode() + b'\n'):
+                if accepted:
+                    self.assertTrue((await session.pair(credential))['paired'])
+                else:
+                    with self.assertRaises(ServiceError):
+                        await session.pair(credential)
+        writes = [call.args[0] for call in session.link.write.call_args_list]
+        self.assertEqual(writes[:2], [b'wifi pair\n', credential.psk.hex().encode() + b'\n'])
+        self.assertEqual(writes[-1], b'\x03')
+
+    async def test_ble_open_preserves_safe_session_error(self):
+        esp = MagicMock(get_transport=AsyncMock(return_value=MagicMock()),
+            get_sec_patch_ver=AsyncMock(return_value=1),
+            establish_session=AsyncMock(return_value=True))
+        session = BleProvisioning(DEVICE, esp)
+        session.control = AsyncMock(side_effect=ServiceError('设备配网会话响应超时。'))
+        with self.assertRaisesRegex(ServiceError, '^设备配网会话响应超时。$'):
+            await session.open()
+        self.assertFalse(session.managed)
+        self.assertIsNone(session.heartbeat)
+
+    async def test_persistent_ble_scan_pair_wifi_retry_and_cancel(self):
+        from airdap_network_credential import NetworkCredential
+        credential = NetworkCredential.create(DEVICE, bytes(range(32)))
+        security = MagicMock()
+        security.encrypt_data.side_effect = lambda value: value
+        security.decrypt_data.side_effect = lambda value: value
+        control_commands = []
+        async def send(endpoint, data):
+            self.assertEqual(endpoint, 'airdap-pair')
+            request = data.encode('latin-1')
+            if request[0] == 2:
+                control_commands.append(request[1])
+                return bytes([2, 0, request[1], 1]).decode('latin-1')
+            self.assertEqual(request, b'\x01' + credential.psk)
+            return credential.fingerprint.decode('latin-1')
+        link = MagicMock(send_data=AsyncMock(side_effect=send), disconnect=AsyncMock())
+        esp = MagicMock(get_transport=AsyncMock(return_value=link),
+            get_sec_patch_ver=AsyncMock(return_value=1), get_security=MagicMock(return_value=security),
+            establish_session=AsyncMock(return_value=True),
+            scan_wifi_APs=AsyncMock(return_value=[{'ssid':'中文'.encode().decode('latin-1'), 'rssi':-40}]),
+            send_wifi_config=AsyncMock(return_value=True), apply_wifi_config=AsyncMock(return_value=True),
+            get_wifi_config=AsyncMock(side_effect=['failed','connected']))
+        session = BleProvisioning(DEVICE, esp)
+        await session.open()
+        try:
+            self.assertEqual((await session.scan())[0]['ssid'], '中文')
+            self.assertTrue((await session.pair(credential))['paired'])
+            with self.assertRaises(ServiceError):
+                await session.wifi('中文', 'example-only')
+            self.assertEqual(await session.wifi('中文', 'example-only'), {'wifi':'online'})
+            self.assertEqual(control_commands, [1,2,2,3,3])
+            esp.get_transport.assert_awaited_once()
+            link.disconnect.assert_not_awaited()
+        finally:
+            await session.close()
+        link.disconnect.assert_awaited_once()
+        self.assertEqual(control_commands[-1], 4)
+
+    async def test_usb_scan_parses_ssid_metadata_and_keeps_connection(self):
+        session = UsbProvisioning(DEVICE)
+        session.link = MagicMock()
+        with patch('airdap_service_devices.shell.run_command', side_effect=[
+                b'wifi-scan=2\n', b'ap=41,001122334455,6,-70,0\n',
+                b'ap=e4b8ade69687,112233445566,11,-40,3\n']):
+            found = await session.scan()
+            self.assertEqual(found[0], {'ssid':'中文', 'bssid':'112233445566', 'channel':11,
+                                       'rssi':-40, 'auth':'WPA2_PSK'})
+            self.assertEqual(found[1]['auth'], 'Open')
+            self.assertIsNotNone(session.link)
+
     async def test_explicit_idf_path_is_visible_to_upstream_proto_loader(self):
         from airdap_service_devices import pair
         observed = []

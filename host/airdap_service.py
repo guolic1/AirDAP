@@ -151,6 +151,12 @@ class Service:
         self.bridge_error = None
         self.closing = False
         self.retry_at = 0
+        self.provision_session = None
+        self.provisioning = {'active': False, 'networks': None}
+
+    def no_provisioning(self):
+        if self.provision_session:
+            raise ServiceError('请先在配网窗口点击“取消配网”，再进行此操作。')
 
     def idle(self):
         if self.closing or (self.job_task and not self.job_task.done()):
@@ -177,15 +183,19 @@ class Service:
 
     async def state(self):
         credential_present = bool(self.store.profile and self.store.credential_path().exists())
+        session_error = getattr(self.provision_session, 'error', None)
+        self.provisioning['error'] = session_error if isinstance(session_error, str) else None
         return {'profile': self.store.profile.copy(), 'credential_present': credential_present,
                 'bridge': {'listening': self.listener is not None,
                            'imported': bool(self.bridge and self.bridge.imported),
                            'port': self.usbip_port, 'mount_port': self.mount.number,
                            'error': self.bridge_error}, 'job': self.job.copy(),
                 'info': self.info, 'discovered': self.discovered, 'image': self.image_meta,
+                'provisioning': self.provisioning.copy(),
                 'usbip_available': self.mount.executable is not None}
 
     async def start_bridge(self):
+        self.no_provisioning()
         if self.listener:
             return
         credential = self.store.credential()
@@ -241,6 +251,8 @@ class Service:
         self.idle()
         if not isinstance(data, dict):
             raise ServiceError('请求必须是 JSON 对象。')
+        if action in ('profile', 'start', 'discover', 'info', 'wifi', 'pair', 'ota'):
+            self.no_provisioning()
         if action == 'profile':
             self.stopped()
             profile = valid_profile(data)
@@ -278,6 +290,9 @@ class Service:
             raise ServiceError('设备选择已变化，请先保存所选设备，再重新操作。')
         host = self.store.profile['host']
         transport = data.get('transport')
+        if action.startswith('provision-'):
+            self.stopped()
+            return await self.provision_command(action, serial, transport, data)
         if action == 'info':
             if transport not in ('network', 'usb'):
                 raise ServiceError('请选择网络或 USB 信息查询。')
@@ -322,9 +337,57 @@ class Service:
             raise ServiceError('未知操作。')
         return {'accepted': True}
 
+    async def provision_command(self, action, serial, transport, data):
+        if action == 'provision-start':
+            self.no_provisioning()
+            if transport not in ('usb', 'ble'):
+                raise ServiceError('配网仅支持 USB 或蓝牙。')
+            self.provisioning = {'active':False, 'device_id':serial,
+                                 'transport':transport, 'networks':None}
+            async def connect():
+                self.provision_session = await self.devices.open_provisioning(serial, transport)
+                self.provisioning['active'] = True
+                return {'connected':True}
+            self.start_job('连接配网设备', connect)
+            return {'accepted':True}
+        session = self.provision_session
+        if not session or serial != self.provisioning['device_id'] or transport != self.provisioning['transport']:
+            raise ServiceError('配网会话不存在或设备、通道已变化，请重新开始配网。')
+        if action == 'provision-cancel':
+            async def cancel():
+                try:
+                    await session.close()
+                finally:
+                    self.provision_session = None
+                    self.provisioning = {'active':False, 'networks':None}
+                return {'cancelled':True}
+            self.start_job('取消配网', cancel)
+        elif action == 'provision-scan':
+            self.provisioning['networks'] = None
+            async def scan():
+                self.provisioning['networks'] = await session.scan()
+                return {'count':len(self.provisioning['networks'])}
+            self.start_job('扫描 Wi-Fi', scan)
+        elif action in ('provision-pair', 'provision-wifi'):
+            if data.get('confirm') is not True:
+                raise ServiceError('请确认要写入的凭据或 Wi-Fi 配置。')
+            if action == 'provision-pair':
+                credential = load_or_create_credential(self.store.credential_path(), serial)
+                self.start_job('建立网络连接凭据', lambda: session.pair(credential))
+            else:
+                ssid, password = data.get('ssid'), data.get('password')
+                wifi_fields(ssid, password, transport)
+                if not any(ap['ssid'] == ssid for ap in self.provisioning.get('networks') or []):
+                    raise ServiceError('请先扫描并选择 Wi-Fi。')
+                self.start_job('连接 Wi-Fi', lambda: session.wifi(ssid, password))
+        else:
+            raise ServiceError('未知配网操作。')
+        return {'accepted':True}
+
     async def stage_image(self, image):
         self.idle()
         self.stopped()
+        self.no_provisioning()
         if not 80 <= len(image) <= MAX_IMAGE:
             raise ServiceError('应用镜像大小无效。')
         try:
@@ -341,6 +404,11 @@ class Service:
         self.closing = True
         if self.job_task:
             await self.job_task  # Do not cancel an in-flight flash/configuration write.
+        if self.provision_session:
+            try:
+                await self.provision_session.close()
+            finally:
+                self.provision_session = None
         await self.stop_bridge()
 
 

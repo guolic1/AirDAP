@@ -121,6 +121,190 @@ def usb_wifi(transport, ssid, password, *, timeout=40):
     raise ServiceError('Wi-Fi 配置已保存，但未在时限内取得 IP；请检查 SSID、密码和路由器。')
 
 
+AUTH_MODES = ['Open', 'WEP', 'WPA_PSK', 'WPA2_PSK', 'WPA_WPA2_PSK',
+              'WPA2_ENTERPRISE', 'WPA3_PSK', 'WPA2_WPA3_PSK']
+
+
+class UsbProvisioning:
+    def __init__(self, serial):
+        self.serial, self.context, self.link = serial, None, None
+
+    async def open(self):
+        self.context = usb_transport(self.serial, debug=True)
+        self.link = await asyncio.to_thread(self.context.__enter__)
+        response = await asyncio.to_thread(shell.run_command, self.link, 'wifi capabilities', 5)
+        if b'wifi-provision=1' not in response:
+            raise ServiceError('当前固件不支持 USB 配网会话，请升级包含 Wi-Fi 扫描和凭据接口的固件。')
+
+    async def close(self):
+        if self.link is not None:
+            try:
+                await asyncio.to_thread(self.context.__exit__, None, None, None)
+            finally:
+                self.link = None
+
+    async def scan(self):
+        response = await asyncio.to_thread(shell.run_command, self.link, 'wifi scan', 25)
+        match = re.search(rb'(?m)^wifi-scan=(\d+)\r?$', response)
+        if not match:
+            raise ServiceError('设备扫描 Wi-Fi 失败；请确认无线电已开启且未处于蓝牙配网或连接重试中，再重试。')
+        count = int(match[1])
+        if count > 1024:
+            raise ServiceError('设备返回的 Wi-Fi 数量无效。')
+        found = []
+        for index in range(count):
+            response = await asyncio.to_thread(shell.run_command, self.link, f'wifi ap {index}', 5)
+            match = re.search(rb'(?m)^ap=([0-9a-f]*),([0-9a-f]{12}),(\d+),(-?\d+),(\d+)\r?$', response)
+            if not match:
+                raise ServiceError('Wi-Fi 扫描结果读取失败，请重新扫描。')
+            raw, bssid, channel, rssi, auth = match.groups()
+            ssid = bytes.fromhex(raw.decode()).decode('utf-8', 'replace')
+            mode = int(auth)
+            found.append({'ssid':ssid, 'bssid':bssid.decode(), 'channel':int(channel),
+                          'rssi':int(rssi), 'auth':AUTH_MODES[mode] if mode < len(AUTH_MODES) else f'模式 {mode}'})
+        return sorted(found, key=lambda ap: ap['rssi'], reverse=True)
+
+    async def pair(self, credential):
+        def commit():
+            self.link.write(b'wifi pair\n')
+            try:
+                shell.read_until(self.link, b'Network key: ', 5, 'network credential prompt')
+                self.link.write(credential.psk.hex().encode() + b'\n')
+                response = shell.read_until_prompt(self.link, 10)
+                match = re.search(rb'(?m)^fingerprint=([0-9a-f]{64})\r?$', response)
+                if not match or not secrets.compare_digest(bytes.fromhex(match[1].decode()), credential.fingerprint):
+                    raise ServiceError('设备未确认网络凭据；本机凭据已保留，可在此窗口重试。')
+                return {'paired':True, 'device_id':self.serial}
+            except BaseException:
+                self.link.write(b'\x03')
+                raise
+        return await asyncio.to_thread(commit)
+
+    async def wifi(self, ssid, password):
+        return await asyncio.to_thread(usb_wifi, self.link, ssid, password)
+
+
+class BleProvisioning:
+    def __init__(self, serial, esp):
+        self.serial, self.esp = serial, esp
+        self.link = self.security = self.heartbeat = None
+        self.managed = False
+        self.error = None
+        self.lock = asyncio.Lock()
+        self.stopping = asyncio.Event()
+
+    async def control(self, command):
+        """Version 2 controls share the Security 2 protected pairing endpoint."""
+        for attempt in range(50):
+            payload = bytes((2, command if attempt == 0 else 0))
+            encrypted = self.security.encrypt_data(payload).decode('latin-1')
+            reply = await self.link.send_data(pair.PAIRING_ENDPOINT, encrypted)
+            result = self.security.decrypt_data(pair._latin1_bytes(reply))
+            if len(result) != 4 or result[0] != 2:
+                raise ServiceError('固件不支持持续蓝牙配网，请升级固件后重试。')
+            if command == 4:  # The accepted stop runs on the device event loop.
+                if result[2] != command or (not result[1] and not result[3]):
+                    raise ServiceError('设备未确认退出配网；连接释放后会由设备超时清理。')
+                return
+            if result[1] == 0:
+                if result[2] != command or result[3] != 1:
+                    raise ServiceError('设备未接受配网会话操作，请取消后重新开启设备配网窗口。')
+                return
+            await asyncio.sleep(.1)
+        raise ServiceError('设备配网会话响应超时。')
+
+    async def open(self):
+        async with asyncio.timeout(70):
+            self.link = await self.esp.get_transport('ble', self.serial)
+            if self.link is None:
+                raise ServiceError('未连接到设备，请先开启设备蓝牙配网模式。')
+            patch = await self.esp.get_sec_patch_ver(self.link)
+            self.security = self.esp.get_security(2, patch, pair.PUBLIC_SEC2_USERNAME, pair.PUBLIC_SEC2_POP)
+            if not self.security or not await self.esp.establish_session(self.link, self.security):
+                raise ServiceError('蓝牙 Security 2 握手失败。')
+            try:
+                await self.control(1)
+            except ServiceError:
+                raise
+            except Exception as error:
+                raise ServiceError(f'蓝牙配网会话通信失败（{type(error).__name__}），请重新开启设备配网模式后重试。') from None
+            self.managed = True
+        self.heartbeat = asyncio.create_task(self.keepalive())
+
+    async def keepalive(self):
+        while True:
+            try:
+                await asyncio.wait_for(self.stopping.wait(), 25)
+                return
+            except TimeoutError:
+                pass
+            try:
+                async with self.lock, asyncio.timeout(10):
+                    await self.control(2)
+            except Exception:
+                self.error = '蓝牙配网连接已中断，请取消配网后重新连接；已保存的配置不会撤销。'
+                return
+
+    def check(self):
+        if self.error:
+            raise ServiceError(self.error)
+
+    async def close(self):
+        if self.heartbeat:
+            self.stopping.set()
+            await asyncio.gather(self.heartbeat, return_exceptions=True)
+            self.heartbeat = None
+        if self.link:
+            try:
+                if self.managed:
+                    async with asyncio.timeout(5):
+                        await self.control(4)
+            finally:
+                await self.link.disconnect()
+                self.link = None
+                self.managed = False
+
+    async def scan(self):
+        async with self.lock, asyncio.timeout(40):
+            self.check()
+            await self.control(2)
+            records = await self.esp.scan_wifi_APs('ble', self.link, self.security)
+            if records is None:
+                raise ServiceError('Wi-Fi 扫描失败，请重试。')
+            # Espressif exposes raw SSID bytes as latin-1 strings.
+            return sorted([ap | {'ssid':ap['ssid'].encode('latin-1').decode('utf-8', 'replace')}
+                           for ap in records], key=lambda ap: ap['rssi'], reverse=True)
+
+    async def pair(self, credential):
+        async with self.lock, asyncio.timeout(20):
+            self.check()
+            await self.control(2)
+            encrypted = self.security.encrypt_data(b'\x01' + credential.psk).decode('latin-1')
+            reply = await self.link.send_data(pair.PAIRING_ENDPOINT, encrypted)
+            fingerprint = self.security.decrypt_data(pair._latin1_bytes(reply))
+            if not secrets.compare_digest(fingerprint, credential.fingerprint):
+                raise ServiceError('设备未确认网络凭据；本机凭据已保留，可重试。')
+            return {'paired':True, 'device_id':self.serial}
+
+    async def wifi(self, ssid, password):
+        wifi_fields(ssid, password, 'ble')
+        async with self.lock, asyncio.timeout(65):
+            self.check()
+            await self.control(3)  # Reset only the provisioning RAM state before retry/reconfigure.
+            if not await self.esp.send_wifi_config(self.link, self.security, ssid, password):
+                raise ServiceError('设备未接受 Wi-Fi 配置，可在此窗口重试。')
+            if not await self.esp.apply_wifi_config(self.link, self.security):
+                raise ServiceError('Wi-Fi 配置可能已提交，但设备未确认应用。')
+            for _ in range(40):
+                status = await self.esp.get_wifi_config(self.link, self.security)
+                if status == 'connected':
+                    return {'wifi':'online'}
+                if status not in ('connecting', 'disconnected'):
+                    raise ServiceError('Wi-Fi 连接失败，请检查密码后重试。')
+                await asyncio.sleep(1)
+            raise ServiceError('设备未在时限内取得 IP，请检查 Wi-Fi 后重试。')
+
+
 class Devices:
     def __init__(self, *, idf_path=None, provisioning_dir=None):
         self.idf_path = idf_path
@@ -159,6 +343,16 @@ class Devices:
         from bleak import BleakScanner
         found = await provision.discover_airdap_devices(BleakScanner, timeout=8)
         return [{'device_id': d.name, 'address': d.address, 'transport': 'ble'} for d in found]
+
+    async def open_provisioning(self, serial, transport):
+        device_id(serial)
+        session = UsbProvisioning(serial) if transport == 'usb' else BleProvisioning(serial, self.ble_client())
+        try:
+            await session.open()
+        except BaseException:
+            await session.close()
+            raise
+        return session
 
     async def wifi(self, serial, transport, ssid, password, credential=None):
         device_id(serial)

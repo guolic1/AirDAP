@@ -21,10 +21,19 @@
 <div id="deviceInfo" class="information"><div class="empty">◈<p>还没有设备信息</p><small>选择设备后，通过 USB 或加密网络读取。</small></div></div>
 <div class="callout">USB 配网和详细诊断需要固件启用独立 debug shell 接口。管理页只提供固定操作，不开放网络 shell。</div></article></div></section>
 <section id="network" class="panel"><div class="panel-title"><div><div class="eyebrow">02 / NETWORK</div><h2>Wi-Fi 与蓝牙配对</h2></div><span class="badge neutral">停止桥接后操作</span></div>
-<div class="grid"><form id="wifiForm"><label>配网方式<select id="wifiTransport"><option value="ble">蓝牙 · Security 2</option><option value="usb">USB · 物理连接</option></select></label>
-<label>Wi-Fi 名称<input id="ssid" required autocomplete="off" placeholder="输入 SSID"></label><label>Wi-Fi 密码<input id="password" type="password" autocomplete="new-password" placeholder="开放网络留空"></label>
-<p class="hint">密码仅用于本次操作，不存入主机配置或日志。仅在设备取得 IP 后报告联网成功。</p><button type="submit">应用 Wi-Fi 配置</button></form>
-<div class="pairing"><h3>建立网络连接凭据</h3><p>首次使用网络功能时，先在设备上开启蓝牙配网窗口，再点击配对。服务会生成并保存本机凭据；重复配对复用同一份凭据。</p><button id="pairBle" class="secondary">通过蓝牙配对</button><p class="hint">配对会替换设备当前网络凭据，其他主机的旧凭据将失效。已配对的设备可在上方直接导入已有凭据。</p><p class="hint">USB 配网只更新 Wi-Fi，不生成网络凭据。中文 SSID 请使用蓝牙；当前 USB shell 输入仅支持 ASCII。</p></div></div></section>
+<label>配网方式<select id="wifiTransport"><option value="ble">蓝牙</option><option value="usb">USB</option></select></label>
+<p class="hint">先保存上方设备信息。蓝牙方式需在设备上开启配网模式；USB 方式需连接物理设备。</p>
+<button id="beginProvision">开始配网</button></section>
+<dialog id="provisionDialog" aria-labelledby="provisionTitle">
+<div class="panel-title"><div><div class="eyebrow">NETWORK SETUP</div><h2 id="provisionTitle">设备配网</h2></div><span id="provisionBadge" class="badge neutral">连接中</span></div>
+<p id="provisionDevice"></p><p id="provisionMessage" role="status" aria-live="polite"></p>
+<div id="provisionError" class="notice" role="alert" hidden></div>
+<div id="provisionActions" hidden><div class="row"><button id="sessionPair" class="secondary">建立网络连接凭据</button><button id="sessionScan">连接 Wi-Fi</button></div>
+<p class="hint">网络凭据生成后保存在本机；重复操作复用同一份凭据。写入不同凭据会使其他主机的旧凭据失效。</p>
+<div id="wifiNetworks" hidden><div class="panel-title"><h3>选择 Wi-Fi</h3><button id="rescanWifi" class="secondary">重新扫描</button></div><p id="scanSummary"></p><div id="wifiList" class="wifi-list"></div></div>
+<form id="sessionWifiForm" hidden><label>已选择 Wi-Fi<input id="sessionSsid" readonly></label><label>Wi-Fi 密码<input id="sessionPassword" type="password" autocomplete="new-password" placeholder="开放网络留空"></label><button type="submit">连接所选 Wi-Fi</button><p class="hint">密码仅用于本次连接，不写入主机配置或日志。设备取得 IP 后才报告成功。</p></form></div>
+<div class="dialog-footer"><p class="hint">操作完成后窗口保持打开。取消配网会断开配网连接，已保存的配置仍然有效。</p><button id="cancelProvision" class="secondary">取消配网</button></div>
+</dialog>
 <section id="firmware" class="panel"><div class="panel-title"><div><div class="eyebrow">03 / FIRMWARE</div><h2>OTA 固件升级</h2></div><span class="badge neutral">应用镜像 · ESP32-S3</span></div>
 <div class="grid"><div><label>传输方式<select id="otaTransport"><option value="network">加密网络 · TCP 3260</option><option value="usb">USB · CMSIS-DAP</option></select></label><label class="upload">选择应用镜像<input id="imageFile" type="file" accept=".bin,application/octet-stream"><small>airdap.bin · 上传后先核对信息，不会立即烧录</small></label><button id="stageImage" class="secondary">上传并检查镜像</button></div>
 <div><dl id="imageInfo"><dt>待升级镜像</dt><dd>尚未上传</dd></dl><button id="runOta" disabled>确认设备并升级</button><p class="hint">只写入非活动 OTA 分区，设备验证镜像后重启。网络升级核对槽位、版本及启动确认；USB 升级核对重连版本。请关闭烧录器和串口工具。</p></div></div></section>

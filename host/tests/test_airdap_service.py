@@ -43,6 +43,48 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 await self.service.command('profile', {'device_id': value, 'host': 'localhost'})
         self.assertEqual(self.store.profile, before)
 
+    async def test_provisioning_keeps_one_session_until_explicit_cancel(self):
+        await self.service.command('profile', {'device_id': DEVICE, 'host': 'localhost'})
+        session = MagicMock()
+        session.scan = AsyncMock(return_value=[{'ssid':'Example', 'rssi':-42}])
+        session.pair = AsyncMock(return_value={'paired':True})
+        session.wifi = AsyncMock(return_value={'wifi':'online'})
+        session.close = AsyncMock()
+        self.service.devices.open_provisioning = AsyncMock(return_value=session)
+        data = {'device_id':DEVICE, 'transport':'usb'}
+        await self.service.command('provision-start', data)
+        await self.service.job_task
+        for action, extra in [('provision-pair', {'confirm':True}),
+                              ('provision-scan', {}),
+                              ('provision-wifi', {'ssid':'Example', 'password':'example-only', 'confirm':True})]:
+            await self.service.command(action, data | extra)
+            await self.service.job_task
+            self.assertEqual(self.service.job['state'], 'succeeded')
+            self.assertTrue((await self.service.state())['provisioning']['active'])
+            session.close.assert_not_awaited()
+        self.assertTrue(self.store.credential_path().exists())
+        self.assertNotIn('example-only', json.dumps(await self.service.state()))
+        with self.assertRaises(ServiceError):
+            await self.service.command('profile', {'device_id':DEVICE, 'host':'other.local'})
+        await self.service.command('provision-cancel', data)
+        await self.service.job_task
+        session.close.assert_awaited_once()
+        self.assertFalse((await self.service.state())['provisioning']['active'])
+
+    async def test_provision_failure_preserves_window_and_allows_retry(self):
+        await self.service.command('profile', {'device_id':DEVICE, 'host':'localhost'})
+        session = MagicMock(scan=AsyncMock(side_effect=[ServiceError('扫描失败'), []]), close=AsyncMock())
+        self.service.devices.open_provisioning = AsyncMock(return_value=session)
+        data = {'device_id':DEVICE, 'transport':'ble'}
+        await self.service.command('provision-start', data)
+        await self.service.job_task
+        for expected in ('failed', 'succeeded'):
+            await self.service.command('provision-scan', data)
+            await self.service.job_task
+            self.assertEqual(self.service.job['state'], expected)
+            self.assertTrue((await self.service.state())['provisioning']['active'])
+        self.assertEqual(self.service.devices.open_provisioning.await_count, 1)
+
     async def test_job_excludes_other_mutations_and_hides_exception_contents(self):
         release = asyncio.Event()
         async def fail():
