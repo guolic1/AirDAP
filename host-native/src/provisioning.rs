@@ -285,6 +285,62 @@ pub struct BleSession {
     cipher: Option<SessionCipher>,
     valid: bool,
     managed: bool,
+    #[cfg(windows)]
+    windows_lease: Option<WindowsGattLease>,
+}
+// WinRT does not expose connect/disconnect in the same way as BlueZ. Keep an
+// explicit GATT session, including on a cold cache after a firmware reboot.
+#[cfg(windows)]
+struct WindowsGattLease {
+    device: windows::Devices::Bluetooth::BluetoothLEDevice,
+    session: Option<windows::Devices::Bluetooth::GenericAttributeProfile::GattSession>,
+}
+#[cfg(windows)]
+impl WindowsGattLease {
+    async fn open(peripheral: &Peripheral) -> Result<Self> {
+        use windows::Devices::Bluetooth::{
+            BluetoothLEDevice, GenericAttributeProfile::GattSession,
+        };
+        let address = u64::from_str_radix(&peripheral.address().to_string().replace(':', ""), 16)?;
+        let device = BluetoothLEDevice::FromBluetoothAddressAsync(address)?.await?;
+        let mut lease = Self {
+            device,
+            session: None,
+        };
+        let session = GattSession::FromDeviceIdAsync(&lease.device.BluetoothDeviceId()?)?.await?;
+        lease.session = Some(session);
+        let session = lease.session.as_ref().unwrap();
+        ensure!(
+            session.CanMaintainConnection()?,
+            "Windows 不支持保持此设备的 GATT 会话"
+        );
+        session.SetMaintainConnection(true)?;
+        // Establish the link before btleplug requests uncached service discovery.
+        // On Windows an uncached request alone may fail after the ESP32 restarts,
+        // while the normal GATT discovery path establishes the connection first.
+        let services = lease.device.GetGattServicesAsync()?.await?;
+        ensure!(services.Status()? == windows::Devices::Bluetooth::GenericAttributeProfile::GattCommunicationStatus::Success,
+            "Windows GATT 服务连接失败，状态 {}", services.Status()?.0);
+        for service in services.Services()? {
+            service.Close()?;
+        }
+        while session.SessionStatus()?
+            != windows::Devices::Bluetooth::GenericAttributeProfile::GattSessionStatus::Active
+        {
+            sleep(Duration::from_millis(50)).await;
+        }
+        Ok(lease)
+    }
+}
+#[cfg(windows)]
+impl Drop for WindowsGattLease {
+    fn drop(&mut self) {
+        if let Some(session) = self.session.take() {
+            let _ = session.SetMaintainConnection(false);
+            let _ = session.Close();
+        }
+        let _ = self.device.Close();
+    }
 }
 impl BleSession {
     pub async fn open(id: &str) -> Result<Self> {
@@ -306,6 +362,8 @@ impl BleSession {
             cipher: None,
             valid: true,
             managed: false,
+            #[cfg(windows)]
+            windows_lease: None,
         };
         let result = timeout(Duration::from_secs(60), session.initialize()).await;
         match result {
@@ -320,6 +378,14 @@ impl BleSession {
         }
     }
     async fn initialize(&mut self) -> Result<()> {
+        #[cfg(windows)]
+        {
+            self.windows_lease = Some(
+                WindowsGattLease::open(&self.peripheral)
+                    .await
+                    .context("Windows GATT 会话建立失败")?,
+            );
+        }
         self.peripheral.connect().await.context("蓝牙连接失败")?;
         self.peripheral.discover_services().await?;
         for characteristic in self.peripheral.characteristics() {
@@ -585,6 +651,10 @@ impl BleSession {
         self.managed = false;
         self.valid = false;
         self.cipher = None;
+        #[cfg(windows)]
+        {
+            self.windows_lease = None;
+        }
         result?;
         disconnected?;
         Ok(())
