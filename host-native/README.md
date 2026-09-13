@@ -114,9 +114,22 @@ python3 tests/service_ota.py -v
 OTA 模拟器占用本机 3260，运行前确保空闲；WSL 镜像网络可能与 Windows 测试产生端口冲突，
 可使用 Linux 独立网络命名空间测试。Windows 的强制终止不能模拟 SCM 停止，SIGTERM 排空用例仅在 Linux 执行。
 
-本次验证覆盖 Windows/Linux 原生构建、协议、Web、持久化、模拟 DAP/UART/OTA，以及实物设备只读 TLS HELLO。
-尚未执行 Windows SCM / Linux systemd 实际安装、真实 VHCI 导入、实物 BLE/USB 配网和固件升级。
-成功构建及模拟测试不代表这些硬件场景已经验证。
+2026-09-14 实机验证：Windows VHCI 成功枚举 CMSIS-DAP 与 COM，DAP_Info 读取通过，
+COM 打开/关闭及 57600→115200 波特率配置通过；蓝牙与 USB 的配网握手、热点扫描、
+凭据指纹确认和取消会话通过。蓝牙闲置 144 秒后仍可扫描和写入凭据，设备再次重启后的
+首次连接也通过。Linux 原生服务通过真实 TLS-PSK 与设备通信，经 USB/IP 客户端读取 DAP_Info 成功。
+网络 OTA 确认切换到原非活动槽且已确认启动；USB OTA 确认
+断开、重新枚举和版本，随后用物理 USB 诊断核对镜像状态为 valid。使用同一份已验证固件测试，
+没有改变固件版本。设备重启约 2.16 秒后旧 USB/IP 会话断开、约 2.37 秒开始重挂载，之后 DAP 可读；
+这不是物理断电到 PnP 删除的精确时延测量。
+
+实机发现并修复 Windows 驱动自动移除与显式卸载的竞态、USB OTA 重新枚举期间临时通信错误，
+以及 Windows 蓝牙首次连接的 GATT 会话建立顺序。失败的卸载仅在确认本服务导出已消失后视为完成；
+USB 枚举错误不视为断开证明，也不自动重放 OTA；Windows 使用显式 GATT 会话保持连接，取消时释放。
+
+尚未执行 Windows SCM / Linux systemd 实际安装、Linux VHCI 导入、实物 Wi-Fi 密码写入、
+目标芯片烧录或 UART 线缆回环；也未做破坏性回滚故障注入。
+这些场景不能由成功构建、模拟测试、DAP 信息读取或 COM 打开代替证明。
 
 ## 本次资源测量
 
