@@ -80,6 +80,8 @@ static airdap_dap_service_result_t dap_open_result;
 static airdap_dap_service_result_t dap_submit_result;
 static airdap_mode_dap_result_t admission_result;
 static bool deliver_dap_response;
+static bool network_data_enabled = true;
+bool airdap_mode_state_network_data_enabled(void) { return network_data_enabled; }
 static uint32_t revoke_session_id_at_end;
 static bool revoke_during_submit;
 static bool timeout_at_end_of_input;
@@ -96,6 +98,7 @@ static unsigned int shutdown_calls;
 static unsigned int socket_close_calls;
 static unsigned int task_create_calls;
 static unsigned int listener_bind_calls;
+static unsigned int listener_close_calls;
 static unsigned int queue_timeout_count;
 static airdap_network_auth_revoke_fn revoke_handler;
 static void *revoke_context;
@@ -808,6 +811,8 @@ int close(int socket_fd)
     assert(socket_fd == TEST_CLIENT_FD || socket_fd == TEST_LISTENER_FD);
     if (socket_fd == TEST_CLIENT_FD) {
         ++socket_close_calls;
+    } else {
+        ++listener_close_calls;
     }
     return 0;
 }
@@ -1618,8 +1623,93 @@ static void test_failed_ota_reboot_ack_does_not_restart(void)
     assert(ota_disconnect_calls == 1 && auth_close_calls == 1 && now_us >= 5000000);
 }
 
+static void *handle_uart_worker(void *argument)
+{
+    airdap_network_uart_handle_socket(*(int *) argument);
+    return NULL;
+}
+
+static void test_mode_switch_closes_pending_and_authenticated_uart(void)
+{
+    for (unsigned authenticated = 0; authenticated < 2; ++authenticated) {
+        reset_connection_fakes();
+        network_data_enabled = true;
+        airdap_network_dap_reconcile_mode();
+        uart_handshake();
+        pause_tls_accept = authenticated == 0;
+        pause_after_tls_write_call = authenticated ? 2U : 0U;
+        int fd = TEST_CLIENT_FD;
+        pthread_t thread;
+        assert(pthread_create(&thread, NULL, handle_uart_worker, &fd) == 0);
+        wait_for_pause(authenticated ? &tls_write_paused : &tls_accept_paused);
+        assert(uart_live == (authenticated != 0));
+        const unsigned closes = uart_close_calls;
+        network_data_enabled = false;
+        airdap_network_dap_reconcile_mode();
+        assert(socket_shutdown && !uart_live);
+        assert(uart_close_calls == closes + authenticated);
+        release_pause(authenticated ? &allow_tls_write : &allow_tls_accept);
+        assert(pthread_join(thread, NULL) == 0);
+        assert(auth_close_calls == 1U);
+    }
+    network_data_enabled = true;
+    airdap_network_dap_reconcile_mode();
+}
+
+static void test_usb_mode_blocks_all_network_dap_commands(void)
+{
+    reset_connection_fakes();
+    network_data_enabled = false;
+    append_request(AIRDAP_FRAME_TYPE_HELLO, 77U, 1U, NULL, 0U);
+    append_request(AIRDAP_FRAME_TYPE_AUTH, 77U, 2U, NULL, 0U);
+    const uint8_t info[] = {0x00U, 0x01U};
+    append_request(AIRDAP_FRAME_TYPE_DAP_REQUEST, 77U, 3U, info, sizeof(info));
+    airdap_network_dap_handle_socket(TEST_CLIENT_FD);
+    assert(auth_bind_calls == 1U && dap_submit_calls == 0U);
+    size_t offset = 0U;
+    const uint8_t *payload;
+    (void) next_response(&offset, &payload);
+    (void) next_response(&offset, &payload);
+    assert(next_response(&offset, &payload).type == AIRDAP_FRAME_TYPE_ERROR);
+    assert_error_payload(payload, 2U, AIRDAP_FRAME_ERROR_BUSY);
+    reset_connection_fakes();
+    airdap_network_uart_handle_socket(TEST_CLIENT_FD);
+    assert(uart_open_calls == 0U && uart_write_calls == 0U);
+    assert(socket_close_calls == 1U);
+    const unsigned int bound = listener_bind_calls;
+    const unsigned int closed = listener_close_calls;
+    airdap_network_dap_reconcile_mode();
+    assert(listener_close_calls == closed + 1U);
+    airdap_network_dap_reconcile_mode();
+    assert(listener_close_calls == closed + 1U);
+    /* Management remains usable on the shared 3260 socket in USB mode. */
+    test_control_wire_golden_and_replay();
+    reset_connection_fakes();
+    const uint8_t query[] = {AIRDAP_CONTROL_OTA_QUERY};
+    append_request(AIRDAP_FRAME_TYPE_HELLO, 77U, 1U, NULL, 0U);
+    append_request(AIRDAP_FRAME_TYPE_AUTH, 77U, 2U, NULL, 0U);
+    append_request(AIRDAP_FRAME_TYPE_CONTROL_REQUEST, 77U, 3U, query, sizeof(query));
+    airdap_network_dap_handle_socket(TEST_CLIENT_FD);
+    assert(ota_dispatch_calls == 1U);
+    network_data_enabled = true;
+    airdap_network_dap_reconcile_mode();
+    assert(listener_bind_calls == bound + 1U);
+    airdap_network_dap_reconcile_mode();
+    assert(listener_bind_calls == bound + 1U);
+}
+
 int main(int argument_count, char **arguments)
 {
+    if (argument_count == 2 && strcmp(arguments[1], "--usb-startup") == 0) {
+        network_data_enabled = false;
+        assert(airdap_network_dap_start() == ESP_OK);
+        assert(listener_bind_calls == 1U);
+        network_data_enabled = true;
+        airdap_network_dap_reconcile_mode();
+        assert(listener_bind_calls == 2U);
+        return 0;
+    }
+
     if (argument_count == 2 &&
         strcmp(arguments[1], "--uninitialized-status") == 0) {
         test_uninitialized_status_is_empty();
@@ -1654,6 +1744,8 @@ int main(int argument_count, char **arguments)
     test_ota_routes_auth_port_disconnect_and_reboot_ack();
     test_failed_ota_reboot_ack_does_not_restart();
     assert_network_dap_status(true, 0U, 0U, 0U, 0U);
+    test_mode_switch_closes_pending_and_authenticated_uart();
+    test_usb_mode_blocks_all_network_dap_commands();
     puts("Network DAP transport tests passed");
     return 0;
 }

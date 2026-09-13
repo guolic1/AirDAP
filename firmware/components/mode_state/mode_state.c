@@ -399,6 +399,23 @@ airdap_dap_route_t airdap_mode_state_get_dap_route(void)
         atomic_load(&mode_control), MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT);
 }
 
+bool airdap_mode_state_usb_data_enabled(void)
+{
+    const unsigned int control = atomic_load(&mode_control);
+    return (control & MODE_INITIALIZED) != 0U &&
+        field_value(control, MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT) !=
+            AIRDAP_DAP_ROUTE_NETWORK;
+}
+
+bool airdap_mode_state_network_data_enabled(void)
+{
+    const unsigned int control = atomic_load(&mode_control);
+    const unsigned int route = field_value(control, MODE_DAP_ROUTE_MASK, MODE_DAP_ROUTE_SHIFT);
+    return (control & MODE_INITIALIZED) != 0U &&
+        (route == AIRDAP_DAP_ROUTE_NETWORK ||
+         (route == AIRDAP_DAP_ROUTE_AUTO && (control & MODE_USB_PRESENT) == 0U));
+}
+
 airdap_mode_dap_result_t airdap_mode_state_set_dap_route(airdap_dap_route_t route)
 {
     if (route < AIRDAP_DAP_ROUTE_AUTO || route > AIRDAP_DAP_ROUTE_TOGGLE) {

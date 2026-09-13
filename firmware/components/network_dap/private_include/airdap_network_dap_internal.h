@@ -7,3 +7,6 @@ void airdap_network_uart_handle_socket(int socket_fd);
  * paths. Production callers use only airdap_network_dap_start(). */
 void airdap_network_dap_handle_socket(int socket_fd);
 void airdap_network_dap_process_revocations(void);
+
+/* Listener-task-only reconciliation of the mode-dependent UART port. */
+void airdap_network_dap_reconcile_mode(void);

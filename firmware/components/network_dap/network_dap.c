@@ -445,6 +445,7 @@ static bool send_error(
 
 static network_connection_t *allocate_connection(int socket_fd, bool uart)
 {
+    if (uart && !airdap_mode_state_network_data_enabled()) return NULL;
     QueueHandle_t response_queue = uart ? NULL : xQueueCreate(1U, sizeof(dap_response_item_t));
     if ((!uart && response_queue == NULL) || !registry_lock()) {
         if (response_queue != NULL) {
@@ -784,6 +785,10 @@ static bool bind_session(
     }
 
     if (connection->uart) {
+        if (!airdap_mode_state_network_data_enabled()) {
+            clear_bytes(&session_info, sizeof(session_info));
+            return false;
+        }
         uint32_t uart_session = 0U;
         const airdap_target_uart_result_t result = airdap_target_uart_session_open(
             AIRDAP_TARGET_UART_TRANSPORT_NETWORK, true, &uart_session);
@@ -852,7 +857,8 @@ static bool bind_session(
 static bool validate_bound_session(network_connection_t *connection)
 {
     const uint32_t session_id = atomic_load(&connection->auth_session_id);
-    return session_id != 0U &&
+    return (!connection->uart || airdap_mode_state_network_data_enabled()) &&
+        session_id != 0U &&
         airdap_network_auth_session_validate(
             connection->auth_connection,
             session_id) == AIRDAP_NETWORK_AUTH_OK;
@@ -863,6 +869,9 @@ static bool send_dap_response(
     const airdap_frame_header_t *request,
     const uint8_t *payload)
 {
+    if (!airdap_mode_state_network_data_enabled()) {
+        return send_error(connection, request, AIRDAP_FRAME_ERROR_BUSY);
+    }
     if (request->payload_length == 0U) {
         return send_error(connection, request, AIRDAP_FRAME_ERROR_TRUNCATED);
     }
@@ -945,6 +954,9 @@ static bool send_dap_response(
             AIRDAP_FRAME_ERROR_UNAUTHENTICATED);
         return false;
     }
+    if (!airdap_mode_state_network_data_enabled()) {
+        return send_error(connection, request, AIRDAP_FRAME_ERROR_BUSY);
+    }
     return send_frame(
         connection,
         request,
@@ -955,6 +967,7 @@ static bool send_dap_response(
 
 static void run_connection(network_connection_t *connection)
 {
+    if (connection->uart && !airdap_mode_state_network_data_enabled()) return;
     if (!make_nonblocking(connection->socket_fd)) {
         return;
     }
@@ -995,6 +1008,7 @@ static void run_connection(network_connection_t *connection)
                 AIRDAP_FRAME_ERROR_PAYLOAD_TOO_LARGE);
             return;
         }
+        if (connection->uart && !airdap_mode_state_network_data_enabled()) return;
         if (read_result != FRAME_READ_OK) {
             return;
         }
@@ -1187,6 +1201,7 @@ static void listener_task(void *argument)
     (void) argument;
     for (;;) {
         airdap_network_dap_process_revocations();
+        airdap_network_dap_reconcile_mode();
         struct pollfd descriptors[2] = {
             {.fd = listener_socket, .events = POLLIN},
             {.fd = uart_listener_socket, .events = POLLIN},
@@ -1250,6 +1265,37 @@ static int create_listener(uint16_t port)
     return fd;
 }
 
+void airdap_network_dap_reconcile_mode(void)
+{
+    if (airdap_mode_state_network_data_enabled()) {
+        if (uart_listener_socket < 0) {
+            uart_listener_socket = create_listener(AIRDAP_NETWORK_UART_PORT);
+            if (uart_listener_socket < 0) ESP_LOGE(TAG, "Unable to open UART TCP listener");
+        }
+        return;
+    }
+    if (uart_listener_socket >= 0) {
+        (void) close(uart_listener_socket);
+        uart_listener_socket = -1;
+    }
+    uint32_t sessions[AIRDAP_NETWORK_DAP_MAX_CONNECTIONS] = {0};
+    if (!registry_lock()) return;
+    for (size_t index = 0; index < AIRDAP_NETWORK_DAP_MAX_CONNECTIONS; ++index) {
+        network_connection_t *connection = &connections[index];
+        if (!connection->allocated || !connection->registered || !connection->uart) continue;
+        /* Include sockets still handshaking; otherwise they could bind after
+         * the data port was disabled. The connection task owns final close. */
+        (void) shutdown(connection->socket_fd, SHUT_RDWR);
+        sessions[index] = atomic_load(&connection->uart_session);
+    }
+    registry_unlock();
+    for (size_t index = 0; index < AIRDAP_NETWORK_DAP_MAX_CONNECTIONS; ++index) {
+        if (sessions[index] != 0U) {
+            (void) airdap_target_uart_session_close(AIRDAP_TARGET_UART_TRANSPORT_NETWORK, sessions[index]);
+        }
+    }
+}
+
 esp_err_t airdap_network_dap_start(void)
 {
     if (atomic_exchange(&initialization_started, true)) {
@@ -1270,8 +1316,9 @@ esp_err_t airdap_network_dap_start(void)
 
     listener_socket = create_listener(AIRDAP_NETWORK_DAP_PORT);
     if (listener_socket < 0) return ESP_FAIL;
-    uart_listener_socket = create_listener(AIRDAP_NETWORK_UART_PORT);
-    if (uart_listener_socket < 0) {
+    const bool enable_uart = airdap_mode_state_network_data_enabled();
+    uart_listener_socket = enable_uart ? create_listener(AIRDAP_NETWORK_UART_PORT) : -1;
+    if (enable_uart && uart_listener_socket < 0) {
         (void) close(listener_socket);
         listener_socket = -1;
         return ESP_FAIL;
@@ -1282,7 +1329,7 @@ esp_err_t airdap_network_dap_start(void)
     if (revoke_error != ESP_OK) {
         (void) close(listener_socket);
         listener_socket = -1;
-        (void) close(uart_listener_socket);
+        if (uart_listener_socket >= 0) (void) close(uart_listener_socket);
         uart_listener_socket = -1;
         return revoke_error;
     }
@@ -1295,12 +1342,12 @@ esp_err_t airdap_network_dap_start(void)
             NULL) != pdPASS) {
         (void) close(listener_socket);
         listener_socket = -1;
-        (void) close(uart_listener_socket);
+        if (uart_listener_socket >= 0) (void) close(uart_listener_socket);
         uart_listener_socket = -1;
         return ESP_ERR_NO_MEM;
     }
     atomic_store(&listener_ready, true);
-    ESP_LOGI(TAG, "Authenticated DAP/UART TCP listeners started on ports %u/3261",
+    ESP_LOGI(TAG, "Authenticated management/DAP listener started on %u; UART follows mode policy",
         AIRDAP_NETWORK_DAP_PORT);
     return ESP_OK;
 }

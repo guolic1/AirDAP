@@ -571,6 +571,27 @@ static void test_manual_route_selection(void)
     assert(!select_network_during_revoke && airdap_mode_state_get_dap_route() == AIRDAP_DAP_ROUTE_AUTO);
 }
 
+static void test_data_transport_policy(void)
+{
+    airdap_mode_state_init();
+    current_owner = AIRDAP_DAP_OWNER_NONE;
+    assert(airdap_mode_state_usb_data_enabled());
+    assert(airdap_mode_state_network_data_enabled());
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_ATTACHED) == AIRDAP_MODE_STATE_OK);
+    assert(airdap_mode_state_usb_data_enabled());
+    assert(!airdap_mode_state_network_data_enabled());
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_NETWORK) == AIRDAP_MODE_DAP_ALLOWED);
+    assert(!airdap_mode_state_usb_data_enabled());
+    assert(airdap_mode_state_network_data_enabled());
+    assert(airdap_mode_state_transition(AIRDAP_MODE_EVENT_USB_DETACHED) == AIRDAP_MODE_STATE_OK);
+    assert(!airdap_mode_state_usb_data_enabled());
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_USB) == AIRDAP_MODE_DAP_ALLOWED);
+    assert(airdap_mode_state_usb_data_enabled());
+    assert(!airdap_mode_state_network_data_enabled());
+    assert(airdap_mode_state_set_dap_route(AIRDAP_DAP_ROUTE_AUTO) == AIRDAP_MODE_DAP_ALLOWED);
+    assert(airdap_mode_state_network_data_enabled());
+}
+
 int main(void)
 {
     test_initial_state_and_authentication_boundary();
@@ -585,6 +606,7 @@ int main(void)
     test_control_reservation_rechecks_mode_stamp();
     test_control_allows_idle_usb_and_tracks_shell_sessions();
     test_manual_route_selection();
+    test_data_transport_policy();
     puts("Mode state tests passed");
     return 0;
 }

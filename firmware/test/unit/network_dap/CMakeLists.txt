@@ -43,3 +43,5 @@ add_test(
     NAME network_dap_uninitialized_status
     COMMAND network_dap_test --uninitialized-status
 )
+
+add_test(NAME network_dap_usb_startup COMMAND network_dap_test --usb-startup)

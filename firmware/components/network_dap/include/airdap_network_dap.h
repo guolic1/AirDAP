@@ -24,10 +24,11 @@ typedef struct {
     unsigned int dap_sessions;
 } airdap_network_dap_status_t;
 
-/* Starts both bounded TLS listeners (DAP 3260, UART 3261) with one registry
+/* Starts the bounded management/DAP listener (3260) and mode-dependent UART
+ * listener (3261) with one registry
  * and auth revoke handler. device_identity, network_auth, mode_state,
  * target_uart and dap_service must already be initialized. Discovery may start
- * only after both listeners are ready. */
+ * after the listener manager is ready. */
 esp_err_t airdap_network_dap_start(void);
 
 /* Copies the bounded listener registry state during one registry-lock

@@ -79,10 +79,15 @@ typedef enum {
     AIRDAP_DAP_ROUTE_TOGGLE,
 } airdap_dap_route_t;
 
-/* Volatile selection; AUTO uses USB when attached, NETWORK otherwise.
+/* Volatile DAP/UART selection; AUTO uses USB when attached, NETWORK otherwise.
  * Selection requires an idle owner and no OTA. Physical USB state is preserved. */
 airdap_mode_dap_result_t airdap_mode_state_set_dap_route(airdap_dap_route_t route);
 airdap_dap_route_t airdap_mode_state_get_dap_route(void);
+
+/* Transport policy only: USB remains available for enumeration in AUTO.
+ * Network management/OTA and the independent debug shell are not data ports. */
+bool airdap_mode_state_usb_data_enabled(void);
+bool airdap_mode_state_network_data_enabled(void);
 
 void airdap_mode_state_init(void);
 
