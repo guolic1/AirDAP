@@ -1,0 +1,17 @@
+[Unit]
+Description=AirDAP local CMSIS-DAP and UART USB/IP bridge
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/airdap/usbip.env
+# Set these absolute paths in usbip.env. This is a systemd --user unit.
+ExecStart=/usr/bin/env "${AIRDAP_PYTHON}" "${AIRDAP_SCRIPT}" "${AIRDAP_HOST}" --credential "${AIRDAP_CREDENTIAL}"
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target
