@@ -248,3 +248,24 @@ testing. Use the dedicated test AP for disconnect/reconnect checks.
 Restore bindings, route, AP availability, and Wi-Fi settings. Record visual
 observations and measured timings separately from host-test results; this
 procedure does not establish target UART loopback or DAP electrical timing.
+
+## 11. Host service provisioning sessions
+
+Obtain authorization for the exact physical device, test AP and network-key
+replacement before these checks. Stop the USB/IP bridge and target tools.
+
+For both BLE and USB, select the transport in the host page and start
+provisioning. Confirm the session stays open after generating a local credential,
+after scanning APs, after a wrong Wi-Fi password, and after a successful DHCP
+connection. Check RSSI, channel, BSSID and authentication against the test AP.
+Select another SSID and connect again without leaving the window. Refresh the
+page and confirm the same session is restored; Escape must not close it.
+Cancel explicitly, then verify that Wi-Fi and the saved network credential still
+work. USB requires the new `wifi capabilities`, `scan`, `ap` and hidden `pair`
+interfaces. Inspect command history and logs for absence of passwords and PSKs.
+
+For BLE, keep the page open beyond two minutes and repeat an operation. Stop the
+host process or remove the BLE connection and confirm the device closes the
+window within the 120-second lease. Confirm a legacy client still receives its
+successful Wi-Fi status before the 30-second compatibility cleanup. Repeat with
+a failed connection to verify cancel restores the last committed configuration.

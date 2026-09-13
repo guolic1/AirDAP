@@ -81,3 +81,6 @@ esp_err_t network_prov_mgr_endpoint_register(
     protocomm_req_handler_t handler,
     void *user_context);
 void network_prov_mgr_endpoint_unregister(const char *endpoint_name);
+
+esp_err_t network_prov_mgr_disable_auto_stop(uint32_t cleanup_delay);
+esp_err_t network_prov_mgr_reset_wifi_sm_state_for_reprovision(void);

@@ -60,7 +60,7 @@ static esp_err_t clear_result = ESP_OK;
 static esp_err_t led_result = ESP_OK;
 static esp_err_t event_post_result = ESP_OK;
 static bool prepared_after_manager_init;
-static airdap_mode_event_t mode_events[32];
+static airdap_mode_event_t mode_events[64];
 static size_t mode_event_count;
 static airdap_wifi_credentials_t staged_credentials;
 static uint8_t captured_salt[AIRDAP_SEC2_SALT_SIZE];
@@ -189,6 +189,15 @@ esp_err_t airdap_wifi_manager_clear_network_configuration(void)
     ++clear_count;
     return clear_result;
 }
+
+esp_err_t network_prov_mgr_disable_auto_stop(uint32_t delay)
+{
+    assert(delay == 1000);
+    return ESP_OK;
+}
+esp_err_t network_prov_mgr_reset_wifi_sm_state_for_reprovision(void) { return ESP_OK; }
+esp_err_t esp_wifi_set_storage(int storage) { assert(storage == 0); return ESP_OK; }
+static esp_event_handler_t captured_internal_handler;
 
 esp_err_t network_prov_mgr_init(network_prov_mgr_config_t config)
 {
@@ -321,7 +330,7 @@ esp_err_t esp_event_handler_instance_register(
 {
     (void) event_base;
     (void) event_id;
-    (void) event_handler;
+    if (event_base == AIRDAP_PROVISIONING_INTERNAL_EVENT) captured_internal_handler = event_handler;
     (void) event_handler_arg;
     assert(instance != NULL);
     *instance = instance;
@@ -359,7 +368,8 @@ esp_err_t esp_event_post(
         if (event_id == AIRDAP_PROVISIONING_BUTTON_CLEAR) assert(command == AIRDAP_BUTTON_COMMAND_CLEAR_NETWORK_RESTART);
         ++button_action_counts[event_id];
     }
-    (void) event_data;
+    if (event_id == 101 && event_post_result == ESP_OK)
+        captured_internal_handler(NULL, event_base, event_id, (void *) event_data);
     (void) event_data_size;
     (void) ticks_to_wait;
     return event_post_result;
@@ -524,6 +534,51 @@ static void test_device_bindings(void)
     assert(airdap_button_config_defaults() == ESP_OK);
 }
 
+static void control(uint8_t command)
+{
+    const uint8_t request[] = {2, command};
+    uint8_t *response = NULL; ssize_t size = 0;
+    assert(pairing_handler(7, request, sizeof(request), &response, &size, NULL) == ESP_OK);
+    assert(size == 4 && response[0] == 2 && response[1] == 0 && response[2] == command && response[3] == 1);
+    free(response);
+}
+
+static void test_managed_session_retains_wifi_and_retries_until_cancel(void)
+{
+    assert(airdap_ble_provisioning_test_button_action(AIRDAP_PROVISIONING_BUTTON_TOGGLE) == ESP_OK);
+    control(1);
+    const uint8_t request[] = {2, 4};
+    uint8_t *response = NULL; ssize_t size = 0;
+    assert(pairing_handler(8, request, sizeof(request), &response, &size, NULL) == ESP_ERR_INVALID_STATE);
+    assert(response == NULL);
+    const unsigned stops = manager_stop_count, accepts = accept_count;
+    for (unsigned i = 0; i < 2; ++i) {
+        control(3);
+        wifi_sta_config_t station = make_station("Example", "example-only");
+        airdap_ble_provisioning_test_network_event(NETWORK_PROV_WIFI_CRED_RECV, &station);
+        airdap_ble_provisioning_test_network_event(NETWORK_PROV_WIFI_CRED_SUCCESS, NULL);
+        assert(accept_count == accepts + i + 1);
+        assert(timer.active && timer.timeout_us == 120000000U);
+        assert(pairing_window_active && manager_stop_count == stops);
+        control(2);
+    }
+    control(4);
+    assert(manager_stop_count == stops + 1 && !pairing_window_active);
+    assert(mode_events[mode_event_count - 1] == AIRDAP_MODE_EVENT_PROVISIONING_SUCCEEDED);
+    finish_window();
+    assert(airdap_ble_provisioning_test_button_action(AIRDAP_PROVISIONING_BUTTON_TOGGLE) == ESP_OK);
+    control(1);
+    control(3);
+    wifi_sta_config_t station = make_station("Bad password", "example-only");
+    airdap_ble_provisioning_test_network_event(NETWORK_PROV_WIFI_CRED_RECV, &station);
+    airdap_ble_provisioning_test_network_event(NETWORK_PROV_WIFI_CRED_FAIL, NULL);
+    control(3);
+    assert(manager_stop_count == stops + 1);
+    airdap_ble_provisioning_test_timeout();
+    assert(manager_stop_count == stops + 2 && !pairing_window_active);
+    finish_window();
+}
+
 int main(void)
 {
     assert(airdap_ble_provisioning_start() == ESP_OK);
@@ -608,7 +663,7 @@ int main(void)
         NETWORK_PROV_WIFI_CRED_SUCCESS,
         NULL);
     assert(accept_count == 1U && manager_stop_count == 0U);
-    assert(!timer.active);
+    assert(timer.active && timer.timeout_us == 30000000U);
     assert(mode_events[mode_event_count - 1U] ==
         AIRDAP_MODE_EVENT_PROVISIONING_SUCCEEDED);
     finish_window();
@@ -721,7 +776,7 @@ int main(void)
         NULL);
     const unsigned stops_after_success = manager_stop_count;
     airdap_ble_provisioning_test_timeout();
-    assert(manager_stop_count == stops_after_success);
+    assert(manager_stop_count == stops_after_success + 1U);
     assert(airdap_ble_provisioning_test_window_active());
     assert(mode_events[mode_event_count - 1U] ==
         AIRDAP_MODE_EVENT_PROVISIONING_SUCCEEDED);
@@ -798,6 +853,7 @@ int main(void)
     task_scenario = 8;
     task_tick = 0;
     if (setjmp(task_done) == 0) button_task_function(NULL);
+    test_managed_session_retains_wifi_and_retries_until_cancel();
     puts("BLE provisioning adapter tests passed");
     return 0;
 }

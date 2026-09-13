@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +25,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "network_provisioning/manager.h"
@@ -38,6 +40,8 @@ enum {
     BUTTON_TASK_PRIORITY = 4,
     PROVISIONING_WIFI_ATTEMPTS = 3,
     INTERNAL_EVENT_TIMEOUT = 100,
+    INTERNAL_EVENT_SESSION = 101,
+    LEGACY_SUCCESS_CLEANUP_US = 30000000,
     TIMEOUT_RETRY_US = 100000,
 };
 
@@ -67,6 +71,12 @@ static bool stop_requested;
 static bool pending_wifi_credentials_valid;
 static bool restart_pending;
 static window_outcome_t window_outcome;
+static atomic_bool managed_session;
+static atomic_uint managed_owner;
+/* Packed command, result and pending flag form one coherent GATT response. */
+static atomic_uint session_control_status;
+typedef struct { uint32_t owner; uint8_t command; } session_control_t;
+
 
 static void clear_bytes(void *data, size_t size)
 {
@@ -102,6 +112,40 @@ static esp_err_t set_pairing_window_active(bool active)
     return error;
 }
 
+static esp_err_t session_endpoint(uint32_t owner, const uint8_t *input,
+    uint8_t **output, ssize_t *output_length)
+{
+    const uint8_t command = input[1];
+    if (command > 4 || (atomic_load(&managed_session) && atomic_load(&managed_owner) != owner))
+        return ESP_ERR_INVALID_STATE;
+    uint8_t *response = malloc(4);
+    if (response == NULL) return ESP_ERR_NO_MEM;
+    unsigned status = atomic_load(&session_control_status);
+    if (command != 0) {
+        if ((status & 0x10000U) != 0 ||
+            !atomic_compare_exchange_strong(&session_control_status, &status, 0x10000U | command)) {
+            free(response);
+            return ESP_ERR_INVALID_STATE;
+        }
+        const session_control_t request = {.owner = owner, .command = command};
+        const esp_err_t error = esp_event_post(AIRDAP_PROVISIONING_INTERNAL_EVENT,
+            INTERNAL_EVENT_SESSION, &request, sizeof(request), 0);
+        if (error != ESP_OK) {
+            atomic_store(&session_control_status, command);
+            free(response);
+            return error;
+        }
+        status = atomic_load(&session_control_status);
+    }
+    response[0] = 2;
+    response[1] = (status & 0x10000U) != 0;
+    response[2] = (uint8_t) status;
+    response[3] = (status & 0x100U) != 0;
+    *output = response;
+    *output_length = 4;
+    return ESP_OK;
+}
+
 static esp_err_t pairing_endpoint_handler(
     uint32_t session_id,
     const uint8_t *input,
@@ -117,6 +161,8 @@ static esp_err_t pairing_endpoint_handler(
     }
     *output = NULL;
     *output_length = 0;
+    if (input != NULL && input_length == 2 && input[0] == 2)
+        return session_endpoint(session_id, input, output, output_length);
     if (input == NULL || input_length !=
         AIRDAP_NETWORK_AUTH_PAIR_REQUEST_SIZE) {
         return ESP_ERR_INVALID_ARG;
@@ -193,10 +239,11 @@ static void request_window_stop(window_outcome_t outcome)
     if (!window_active) {
         return;
     }
-    if (window_outcome == WINDOW_OUTCOME_SUCCESS &&
-        outcome == WINDOW_OUTCOME_RESTORE) {
-        return;
-    }
+    if (window_outcome == WINDOW_OUTCOME_SUCCESS && outcome == WINDOW_OUTCOME_RESTORE)
+        outcome = WINDOW_OUTCOME_SUCCESS;
+    if (atomic_load(&managed_session) && outcome == WINDOW_OUTCOME_SUCCESS)
+        publish_mode(AIRDAP_MODE_EVENT_PROVISIONING_SUCCEEDED);
+    atomic_store(&managed_session, false);
     (void) set_pairing_window_active(false);
     if (stop_requested) {
         if (outcome == WINDOW_OUTCOME_CLEAR &&
@@ -272,6 +319,13 @@ static esp_err_t start_window(void)
         return error;
     }
     manager_initialized = true;
+    error = network_prov_mgr_disable_auto_stop(1000);
+    if (error != ESP_OK) {
+        cleanup_failed_window_start();
+        return error;
+    }
+    atomic_store(&managed_session, false);
+    atomic_store(&session_control_status, 0);
 
     error = network_prov_mgr_endpoint_create(PAIRING_ENDPOINT);
     if (error != ESP_OK) {
@@ -368,6 +422,7 @@ static esp_err_t capture_candidate_credentials(const wifi_sta_config_t *station)
 
 static void handle_window_end(void)
 {
+    atomic_store(&managed_session, false);
     stop_window_timer();
     (void) set_pairing_window_active(false);
     if (manager_initialized) {
@@ -434,8 +489,12 @@ static void handle_network_event(int32_t event_id, void *event_data)
             break;
         }
         window_outcome = WINDOW_OUTCOME_SUCCESS;
-        publish_mode(AIRDAP_MODE_EVENT_PROVISIONING_SUCCEEDED);
-        stop_window_timer();
+        if (!atomic_load(&managed_session)) {
+            publish_mode(AIRDAP_MODE_EVENT_PROVISIONING_SUCCEEDED);
+            stop_window_timer();
+            if (esp_timer_start_once(window_timer, LEGACY_SUCCESS_CLEANUP_US) != ESP_OK)
+                request_window_stop(WINDOW_OUTCOME_SUCCESS);
+        }
         break;
     }
     case NETWORK_PROV_END:
@@ -526,6 +585,42 @@ static int gesture_for_action(airdap_provisioning_button_action_t action)
     }
 }
 
+static void handle_session_control(const session_control_t *request)
+{
+    esp_err_t result = ESP_ERR_INVALID_STATE;
+    if (window_active && !stop_requested &&
+        (!atomic_load(&managed_session) || atomic_load(&managed_owner) == request->owner)) {
+        const uint8_t command = request->command;
+        if (command == 1 && window_outcome == WINDOW_OUTCOME_NONE) {
+            atomic_store(&managed_owner, request->owner);
+            atomic_store(&managed_session, true);
+            result = ESP_OK;
+        } else if (atomic_load(&managed_session)) {
+            if (command == 2) result = ESP_OK;
+            else if (command == 3) {
+                /* Upstream resets RAM state but restores WIFI_STORAGE_FLASH;
+                 * restore RAM before any client can submit its next config. */
+                result = network_prov_mgr_reset_wifi_sm_state_for_reprovision();
+                const esp_err_t storage = esp_wifi_set_storage(WIFI_STORAGE_RAM);
+                if (result == ESP_OK) result = storage;
+                if (result == ESP_OK) {
+                    window_outcome = WINDOW_OUTCOME_NONE;
+                    clear_pending_credentials();
+                }
+            } else if (command == 4) {
+                request_window_stop(WINDOW_OUTCOME_RESTORE);
+                result = ESP_OK;
+            }
+        }
+        if (result == ESP_OK && command != 4) {
+            stop_window_timer();
+            result = esp_timer_start_once(window_timer, PROVISIONING_WINDOW_US);
+            if (result != ESP_OK) request_window_stop(WINDOW_OUTCOME_RESTORE);
+        }
+    }
+    atomic_store(&session_control_status, request->command | (result == ESP_OK ? 0x100U : 0));
+}
+
 static void provisioning_event_handler(
     void *argument,
     esp_event_base_t event_base,
@@ -536,7 +631,9 @@ static void provisioning_event_handler(
     if (event_base == NETWORK_PROV_EVENT) {
         handle_network_event(event_id, event_data);
     } else if (event_base == AIRDAP_PROVISIONING_INTERNAL_EVENT) {
-        if (event_id == INTERNAL_EVENT_TIMEOUT) {
+        if (event_id == INTERNAL_EVENT_SESSION && event_data != NULL) {
+            handle_session_control(event_data);
+        } else if (event_id == INTERNAL_EVENT_TIMEOUT) {
             request_window_stop(WINDOW_OUTCOME_RESTORE);
         } else {
             const int gesture = gesture_for_action((airdap_provisioning_button_action_t) event_id);

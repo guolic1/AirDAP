@@ -534,7 +534,17 @@ the attempt. The BLE service name is the shared
 `ADP-<12 uppercase MAC digits>` device ID. A successful Wi-Fi/DHCP check
 atomically commits the new credentials and marks the device provisioned.
 The service remains available long enough for the client to query that success,
-then the upstream 30-second auto-stop ends BLE and releases its resources.
+then a 30-second compatibility cleanup timer ends BLE and releases its resources.
+The host service can explicitly retain a Security 2 session using version 2
+controls on `airdap-pair`: request bytes `2,command`, where command 0 queries
+status, 1 begins, 2 renews the 120-second lease, 3 resets provisioning RAM state
+for another Wi-Fi attempt, and 4 ends the session. Replies are four bytes:
+`2,pending,last-command,succeeded`. Controls execute on the default event loop,
+and an active session is bound to the initiating protocomm session ID.
+Wi-Fi success commits configuration without closing a retained session. Only
+cancel, the physical button, or lease expiry ends it; already committed
+configuration is preserved. The public development Security 2 credential and
+physical button gate remain unchanged.
 Failure leaves the window open for another client attempt; cancel and timeout
 stop BLE and restore the previously committed Wi-Fi configuration.
 
