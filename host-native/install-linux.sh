@@ -3,10 +3,21 @@
 set -eu
 action=${1:-status}
 source_binary=${2:-./target/release/airdap-service}
+http_port=${3:-8080}
+usbip_port=${4:-3242}
 unit=/etc/systemd/system/airdap-native.service
 target=/opt/airdap-native
 marker='# Installed by AirDAP native installer v1'
-case "$action" in install|start|stop|status|remove) ;; *) echo 'Usage: install-linux.sh install [binary] | start | stop | status | remove' >&2; exit 2;; esac
+case "$action" in install|start|stop|status|remove) ;; *) echo 'Usage: install-linux.sh install [binary [http-port [usbip-port]]] | start | stop | status | remove' >&2; exit 2;; esac
+if [ "$action" = install ]; then
+    for port in "$http_port" "$usbip_port"; do
+        case "$port" in ''|*[!0-9]*|0*) echo 'Ports must be decimal integers from 1 to 65535' >&2; exit 2;; esac
+        if [ "${#port}" -gt 5 ] || [ "$port" -gt 65535 ]; then
+            echo 'Ports must be decimal integers from 1 to 65535' >&2; exit 2
+        fi
+    done
+    if [ "$http_port" = "$usbip_port" ]; then echo 'HTTP and USB/IP ports must differ' >&2; exit 2; fi
+fi
 if [ "$action" != status ] && [ "$(id -u)" != 0 ]; then echo 'Run with sudo/root' >&2; exit 1; fi
 if [ -e "$unit" ] && ! grep -Fxq "$marker" "$unit"; then echo 'Refusing to change an unrecognized service unit' >&2; exit 1; fi
 if [ "$action" != install ]; then
@@ -27,7 +38,7 @@ modprobe vhci_hcd
 install -d -o root -g root -m 755 "$target"
 install -o root -g root -m 755 "$source_binary" "$target/airdap-service"
 install -d -o root -g root -m 700 /var/lib/airdap-native
-cat > "$unit" <<'UNIT'
+cat > "$unit" <<UNIT
 # Installed by AirDAP native installer v1
 [Unit]
 Description=AirDAP native local USB/IP and device management service
@@ -37,7 +48,7 @@ Wants=network-online.target bluetooth.service
 [Service]
 Type=simple
 ExecStartPre=/sbin/modprobe vhci_hcd
-ExecStart=/opt/airdap-native/airdap-service --data-dir /var/lib/airdap-native --http-port 8080 --usbip-port 3242
+ExecStart=/opt/airdap-native/airdap-service --data-dir /var/lib/airdap-native --http-port $http_port --usbip-port $usbip_port
 Restart=on-failure
 RestartSec=3
 # A stop drains the current device write; never SIGKILL an OTA operation.
@@ -54,4 +65,4 @@ UNIT
 chmod 644 "$unit"
 systemctl daemon-reload
 systemctl enable --now airdap-native.service
-echo 'AirDAP native enabled: http://127.0.0.1:8080'
+echo "AirDAP native enabled: http://airdap.localhost:$http_port"

@@ -42,7 +42,11 @@ CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc \
   cargo build --release --locked --target x86_64-pc-windows-gnu
 ```
 
-打开 <http://127.0.0.1:8080>。`--no-http` 关闭 Web；`--usbip-executable` 指定系统 USB/IP 客户端。
+打开 <http://airdap.localhost:8080>。用 `--http-port 18080` 选择其他端口后，访问
+`http://airdap.localhost:18080`。现代浏览器将 `.localhost` 解析到本机，无需修改 hosts 或公网 DNS；
+服务仍只监听 `127.0.0.1`，原有 `127.0.0.1` / `localhost` 地址继续可用。
+如果客户端不支持 `.localhost` 解析，可使用相同端口的 `127.0.0.1` 地址。
+`--no-http` 关闭 Web；`--usbip-executable` 指定系统 USB/IP 客户端。
 前台默认数据目录：Windows `%LOCALAPPDATA%\AirDAP\service`，Linux `$XDG_DATA_HOME/AirDAP/service`
 或 `~/.local/share/AirDAP/service`。`service.log` 记录操作结果，轮转为 2 MiB × 3，不记录请求内容或凭据。
 Linux 发布版使用构建机器的 glibc 基线，分发到较旧发行版时应在最旧目标环境重新构建。
@@ -62,6 +66,13 @@ Linux 发布版使用构建机器的 glibc 基线，分发到较旧发行版时�
 
 交叉编译时将 `-Binary` 指向 `target/x86_64-pc-windows-gnu/release/airdap-service.exe`。
 可设置 `-HttpPort`、`-UsbipPort` 和 `-NoHttp`。
+例如安装到 Web 端口 18080：
+
+```powershell
+./install-windows.ps1 -Action install -Binary ./target/release/airdap-service.exe -HttpPort 18080
+```
+
+安装后访问 `http://airdap.localhost:18080`。端口范围为 1–65535，请选择未被占用且与 USB/IP 不同的端口。
 服务名为 `AirDAPNative`，以 LocalSystem 运行，程序放入 `%ProgramFiles%\AirDAPNative`，
 数据放入 `%ProgramData%\AirDAPNative`，ACL 仅授权 SYSTEM 与 Administrators。
 安装器拒绝覆盖已有服务、程序或数据目录；删除服务只注销服务并保留程序及凭据。
@@ -78,6 +89,10 @@ sudo sh install-linux.sh stop
 sudo sh install-linux.sh start
 sudo sh install-linux.sh remove
 ```
+
+安装时可依次指定 Web 和 USB/IP 端口，例如
+`sudo sh install-linux.sh install ./airdap-service 18080 3242`，之后访问
+`http://airdap.localhost:18080`。省略端口时仍使用 8080 / 3242。
 
 注册 `airdap-native.service`，程序 `/opt/airdap-native/airdap-service`，数据 `/var/lib/airdap-native`。
 使用 root 是为了访问 VHCI、USB 和系统蓝牙。systemd 限制系统文件写入；管理接口仅监听回环地址。

@@ -32,6 +32,7 @@ if ($Action -ne 'install') {
     }
     return
 }
+if (-not $NoHttp -and $HttpPort -eq $UsbipPort) { throw 'HTTP and USB/IP ports must differ.' }
 if ($existing -or (Test-Path -LiteralPath $program) -or (Test-Path -LiteralPath $data)) { throw 'Existing native installation or data found; inspect it before replacing files.' }
 $source = (Resolve-Path -LiteralPath $Binary).Path
 & $source --version
@@ -50,4 +51,4 @@ New-Service -Name $serviceName -DisplayName 'AirDAP Native' -BinaryPathName $arg
 & sc.exe failure $serviceName reset= 86400 actions= restart/5000/restart/15000/restart/60000
 if ($LASTEXITCODE -ne 0) { throw 'Service recovery configuration failed.' }
 Start-Service -Name $serviceName
-Write-Output "AirDAP native enabled: http://127.0.0.1:$HttpPort"
+if (-not $NoHttp) { Write-Output "AirDAP native enabled: http://airdap.localhost:$HttpPort" }
