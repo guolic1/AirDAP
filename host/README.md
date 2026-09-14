@@ -53,6 +53,34 @@ Linux 发布版使用构建机器的 glibc 基线，分发到较旧发行版时�
 
 ## Windows 服务安装
 
+推荐下载单文件 `AirDAP-Manager.exe`，双击并确认 Windows 管理员权限提示。
+管理器内嵌本版本的 Rust 服务，使用 Windows 自带的 .NET Framework 图形界面，运行时不需要
+Python、PowerShell 脚本或单独解压服务程序。管理器仅在打开窗口时运行，关闭后不影响后台服务。
+
+| 管理器操作 | 行为 |
+| --- | --- |
+| 安装服务 | 选择 Web / USB/IP 端口、是否开启 Web、是否开机自启；校验端口后安装并启动 |
+| 更新服务 | 使用当前管理器内嵌的服务程序，保留原端口、自启设置、运行/停止状态和设备数据 |
+| 应用设置 | 修改端口、Web 开关与开机自启；正在运行时停止并重新启动，失败时尝试恢复原设置 |
+| 启动 / 停止 / 重启 | 操作 Windows SCM；停止等待当前设备任务结束，不强制终止 OTA |
+| 卸载服务 | 注销服务并删除服务 EXE，保留配置、凭据、日志和不认识的文件 |
+| 打开管理页面 | 打开已安装服务的 `http://airdap.localhost:所选端口` |
+
+更新已运行的服务若启动失败，会尝试恢复旧程序并重新启动；恢复失败会显示错误并保留可用的诊断信息。
+系统命令超时导致结果不确定时，保留程序/备份并要求检查状态，不报告成功或自动重复操作。
+已停止的服务更新后仍保持停止，其新版本的启动情况需在点击“启动”后确认。
+更新通过下载新版管理器并点击“更新服务”完成，当前不联网自动下载更新。
+管理器是便携工具，不会将自身注册为后台进程或添加到“已安装的应用”；卸载通过管理器完成。
+
+旧 `AirDAPNative` 服务可用“更新服务”迁移为 `AirDAP`。迁移保留原 `AirDAPNative` 程序/数据目录，
+不复制或重新生成凭据；新安装使用 `AirDAP` 目录。同名 Python 服务、自定义启动参数或同时存在两份
+服务时会拒绝修改，须先核对旧安装。图形管理器与下述旧脚本不同，允许在卸载后复用权限正确的保留数据目录。
+
+USB/IP 驱动不捆绑在管理器内；界面显示客户端/驱动检测结果，并提供官方签名驱动下载入口。
+本次生成的管理器尚未进行代码签名。
+
+命令行安装方式仍可使用：
+
 先安装签名的 usbip-win2 导入驱动和客户端；usbipd-win 不能替代导入客户端。
 停止占用相同端口的旧实例。在**管理员 PowerShell** 中执行：
 
@@ -75,8 +103,36 @@ Linux 发布版使用构建机器的 glibc 基线，分发到较旧发行版时�
 安装后访问 `http://airdap.localhost:18080`。端口范围为 1–65535，请选择未被占用且与 USB/IP 不同的端口。
 服务名为 `AirDAP`，以 LocalSystem 运行，程序放入 `%ProgramFiles%\AirDAP`，
 数据放入 `%ProgramData%\AirDAP`，ACL 仅授权 SYSTEM 与 Administrators。
-安装器拒绝覆盖已有服务、程序或数据目录；删除服务只注销服务并保留程序及凭据。
+命令行安装脚本拒绝覆盖已有服务、程序或数据目录；其 `remove` 只注销服务并保留程序及凭据。
 Windows 服务账户下的蓝牙访问取决于适配器和权限，须在目标机器验证。
+
+### 构建和验证 Windows 管理器
+
+先构建 Windows 服务，再在 `host/` 中执行：
+
+```powershell
+.\manager\build.ps1 -ServiceBinary .\target\release\airdap-service.exe
+```
+
+默认输出到仓库 `build/releases/windows-x64/AirDAP-Manager.exe`。Windows x64 的 .NET Framework
+`csc.exe` 直接编译，未添加 NuGet 或其他第三方生产依赖。
+
+不修改系统的测试（参数保护、真实进程参数传递、内嵌程序、图形窗口和只读服务状态）：
+
+```powershell
+.\manager\build.ps1 -ServiceBinary .\target\release\airdap-service.exe -OutputDirectory ..\build\manager-check -Test
+```
+
+**仅在没有 AirDAP 服务及安装/数据目录的干净 Windows 测试环境中，以管理员权限执行：**
+
+```powershell
+..\build\manager-check\AirDAP-Manager.Tests.exe --system-test
+```
+
+该测试会实际安装和卸载服务，验证 Web 就绪、端口/自启修改、更新、旧名称迁移和数据保留，
+并注入不能启动的测试程序验证更新/迁移回退。发现已有安装或数据会拒绝运行；失败时保留现场。
+测试创建的服务不会配置设备或启用 USB 桥接。`*Tests.exe`、`AirDAP-Failure*.exe` 和预览图仅用于测试，
+不得加入面向用户的发行包。
 
 ## Linux 服务安装
 
@@ -146,7 +202,9 @@ COM 打开/关闭及 57600→115200 波特率配置通过；蓝牙与 USB 的配
 以及 Windows 蓝牙首次连接的 GATT 会话建立顺序。失败的卸载仅在确认本服务导出已消失后视为完成；
 USB 枚举错误不视为断开证明，也不自动重放 OTA；Windows 使用显式 GATT 会话保持连接，取消时释放。
 
-尚未执行 Windows SCM / Linux systemd 实际安装、Linux VHCI 导入、实物 Wi-Fi 密码写入、
+管理器已通过 Windows 编译、参数/归属校验、真实进程参数传递、内嵌服务和图形界面只读验证。
+当前会话没有管理员权限，尚未执行管理器 `--system-test`；真实 SCM 安装、更新回退、名称迁移和卸载
+仍需管理员环境验收。尚未执行 Linux systemd 实际安装、Linux VHCI 导入、实物 Wi-Fi 密码写入、
 目标芯片烧录或 UART 线缆回环；也未做破坏性回滚故障注入。
 这些场景不能由成功构建、模拟测试、DAP 信息读取或 COM 打开代替证明。
 
