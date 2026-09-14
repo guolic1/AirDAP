@@ -1,7 +1,7 @@
 use airdap_service::usbip::{Descriptors, Urb};
 
 #[test]
-fn enumeration_matches_the_python_bridge_byte_for_byte() {
+fn enumeration_matches_reference_descriptors_byte_for_byte() {
     let expected: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/usb-descriptors.json")).unwrap();
     let descriptors = Descriptors::new("ADP-001122334455").unwrap();

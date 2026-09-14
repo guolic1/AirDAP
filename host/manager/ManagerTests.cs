@@ -44,7 +44,7 @@ namespace AirDAP.Manager
                 string command = Manager.Command(exe, data, "AirDAP", settings);
                 var parsed = Manager.ParseCommand(command, exe, data, "AirDAP");
                 Check(parsed.HttpPort == 18080 && parsed.UsbipPort == 3243 && parsed.Url == "http://airdap.localhost:18080", "Selected port lost");
-                foreach (string bad in new[] { command + " --extra", command.Replace("airdap-service.exe", "python.exe"),
+                foreach (string bad in new[] { command + " --extra", command.Replace("airdap-service.exe", "unrelated-service.exe"),
                     command.Replace("--http-port 18080", "--http-port 0"), command.Replace(data, data + "-other"),
                     command.Replace("--service-name AirDAP", "--service-name Foreign") })
                     Reject(() => Manager.ParseCommand(bad, exe, data, "AirDAP"));

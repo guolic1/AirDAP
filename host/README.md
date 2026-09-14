@@ -1,8 +1,8 @@
 # AirDAP 原生主机服务
 
 Rust 实现的 Windows / Linux 服务。发布程序内嵌 Web 页面、BLE Security 2、USB 与网络协议；
-运行时不需要 Python、ESP-IDF、`IDF_PATH` 或额外的 OpenSSL DLL。
-`host/` 统一存放服务、Web 资源和安装工具，旧 Python 服务实现已移除。
+运行时不需要 ESP-IDF 或额外的 OpenSSL DLL。
+`host/` 统一存放服务、Web 资源和安装工具。
 
 ## 功能
 
@@ -55,7 +55,7 @@ Linux 发布版使用构建机器的 glibc 基线，分发到较旧发行版时�
 
 推荐下载单文件 `AirDAP-Manager.exe`，双击并确认 Windows 管理员权限提示。
 管理器内嵌本版本的 Rust 服务，使用 Windows 自带的 .NET Framework 图形界面，运行时不需要
-Python、PowerShell 脚本或单独解压服务程序。管理器仅在打开窗口时运行，关闭后不影响后台服务。
+PowerShell 脚本或单独解压服务程序。管理器仅在打开窗口时运行，关闭后不影响后台服务。
 
 | 管理器操作 | 行为 |
 | --- | --- |
@@ -73,7 +73,7 @@ Python、PowerShell 脚本或单独解压服务程序。管理器仅在打开窗
 管理器是便携工具，不会将自身注册为后台进程或添加到“已安装的应用”；卸载通过管理器完成。
 
 旧 `AirDAPNative` 服务可用“更新服务”迁移为 `AirDAP`。迁移保留原 `AirDAPNative` 程序/数据目录，
-不复制或重新生成凭据；新安装使用 `AirDAP` 目录。同名 Python 服务、自定义启动参数或同时存在两份
+不复制或重新生成凭据；新安装使用 `AirDAP` 目录。同名的其他程序、自定义启动参数或同时存在两份
 服务时会拒绝修改，须先核对旧安装。图形管理器与下述旧脚本不同，允许在卸载后复用权限正确的保留数据目录。
 
 USB/IP 驱动不捆绑在管理器内；界面显示客户端/驱动检测结果，并提供官方签名驱动下载入口。
@@ -155,21 +155,21 @@ sudo sh install-linux.sh remove
 用 `systemctl edit airdap.service` 设置端口：先用空 `ExecStart=` 清除原值，再填写完整命令。
 卸载保留数据和程序。更新现有安装时，先停止服务，再由管理员替换精确的可执行文件并启动。
 
-## 从 Python 迁移
+## 旧版数据迁移
 
 1. 停止旧桥接和服务，保留原数据目录作为备份。
-2. 启动原生服务时直接使用原 `--data-dir`，或在两边均已停止时复制 `config.json` 与 `credentials/`。
+2. 启动服务时直接使用原 `--data-dir`，或在两边均已停止时复制 `config.json` 与 `credentials/`。
    Linux 凭据文件必须为 0600、目录为 0700；Windows 服务数据须保留安装器设置的 ACL。
-3. 使用原端口运行原生服务。已有 `bridge_enabled=true` 会恢复桥接；首次试运行可先改为 false。
-4. 读取设备信息并核对后启用桥接。如需回退，使用旧版本发行包及备份配置；当前仓库不再包含 Python 服务。
+3. 使用原端口运行服务。已有 `bridge_enabled=true` 会恢复桥接；首次试运行可先改为 false。
+4. 读取设备信息并核对后启用桥接。如需回退，使用旧版本发行包及备份配置。
 
-两种实现使用兼容的 `service.lock` 进程锁，同一数据目录不能同时运行。
-正式服务名统一为 `AirDAP` / `airdap.service`。安装器不会覆盖同名 Python 服务或不认识的安装；
-迁移前先停止并使用旧版工具注销旧 Python 服务，保留数据备份。
+同一数据目录不能同时运行多个服务实例，`service.lock` 进程锁用于阻止重复启动。
+正式服务名统一为 `AirDAP` / `airdap.service`。安装器不会覆盖同名的其他程序或不认识的安装；
+迁移前先停止并使用旧版工具注销旧服务，保留数据备份。
 Linux 若存在 `airdap-native.service`，先停用旧单元并备份旧数据；新安装器会拒绝并存安装。
 旧单元可留作备份文件（移出 `/etc/systemd/system/`），执行 `systemctl daemon-reload` 后安装新服务，
 停止新服务再按上述权限约定将配置和凭据迁入 `/var/lib/airdap`，确认新服务正常后再清理旧程序。
-Web 页面、JSON API 和凭据格式保持兼容；旧 CLI 的 `--idf-path` 与 `--provisioning-dir` 已不需要。
+Web 页面、JSON API 和凭据格式保持兼容。
 
 ## 验证
 
@@ -178,16 +178,11 @@ cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
 cargo build --locked --bins --examples
-python3 tests/network_usbip.py -v
-python3 tests/service_http.py -v
-python3 tests/service_ota.py -v
 ```
 
-进程测试需要 Python 3.13+ TLS-PSK，仅用于验证，不是服务依赖。
-默认运行 `target/debug/airdap-service` 和 `target/debug/examples/bridge`（Windows 自动添加 `.exe`）。
-自定义构建目录时设置 `AIRDAP_NATIVE_SERVICE` / `AIRDAP_NATIVE_BRIDGE` 指向对应构建产物。
-OTA 模拟器占用本机 3260，运行前确保空闲；WSL 镜像网络可能与 Windows 测试产生端口冲突，
-可使用 Linux 独立网络命名空间测试。Windows 的强制终止不能模拟 SCM 停止，SIGTERM 排空用例仅在 Linux 执行。
+上述命令覆盖 Rust 单元和协议测试；管理器验证见上方 Windows 管理器章节。
+当前不再提供独立的 HTTP、TLS-PSK/USB-IP 和 OTA 进程模拟测试脚本；
+进程间交互和设备写入仍需结合实际服务与硬件验收，不能由这些单元测试代替。
 
 2026-09-14 实机验证：Windows VHCI 成功枚举 CMSIS-DAP 与 COM，DAP_Info 读取通过，
 COM 打开/关闭及 57600→115200 波特率配置通过；蓝牙与 USB 的配网握手、热点扫描、
@@ -210,14 +205,14 @@ USB 枚举错误不视为断开证明，也不自动重放 OTA；Windows 使用�
 
 ## 本次资源测量
 
-Windows 本机，两个实现分别读取同一设备的 HELLO 后，Web 开启、桥接未挂载、无浏览器轮询；
-测量 20.01 秒，Python 包含启动器及实际服务进程，Rust 为 release 构建：
+Windows 本机，Rust release 服务读取设备 HELLO 后，Web 开启、桥接未挂载、无浏览器轮询；
+测量时长为 20.01 秒：
 
-| 指标 | Rust | Python |
-| --- | ---: | ---: |
-| 工作集 RSS | 13.34 MiB | 40.82 MiB |
-| 私有内存 | 2.53 MiB | 22.82 MiB |
-| 线程数 | 4 | 8 |
-| 单核 CPU 均值 | 计时精度内 0% | 0.078% |
+| 指标 | 测量结果 |
+| --- | ---: |
+| 工作集 RSS | 13.34 MiB |
+| 私有内存 | 2.53 MiB |
+| 线程数 | 4 |
+| 单核 CPU 均值 | 计时精度内 0% |
 
-此场景 RSS 约减少 67%。短时 CPU 采样的 0% 不表示完全没有开销；未测量实物烧录、持续串口或 BLE 扫描峰值。
+短时 CPU 采样的 0% 不表示完全没有开销；未测量实物烧录、持续串口或 BLE 扫描峰值。

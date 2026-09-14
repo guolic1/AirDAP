@@ -117,7 +117,7 @@ namespace AirDAP.Manager
                 result.Settings.Automatic = result.StartMode == "Auto";
                 return result;
             }
-            throw new InvalidOperationException("同名服务不是此管理器支持的 Rust 服务（可能是旧 Python 服务或自定义安装）。请先用原安装工具迁移或移除它。");
+            throw new InvalidOperationException("同名服务不是此管理器支持的 Rust 服务（可能是其他程序或自定义安装）。请先用原安装工具迁移或移除它。");
         }
 
         internal static string Hash(Stream source)
