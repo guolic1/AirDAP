@@ -73,8 +73,8 @@ Linux 发布版使用构建机器的 glibc 基线，分发到较旧发行版时�
 ```
 
 安装后访问 `http://airdap.localhost:18080`。端口范围为 1–65535，请选择未被占用且与 USB/IP 不同的端口。
-服务名为 `AirDAPNative`，以 LocalSystem 运行，程序放入 `%ProgramFiles%\AirDAPNative`，
-数据放入 `%ProgramData%\AirDAPNative`，ACL 仅授权 SYSTEM 与 Administrators。
+服务名为 `AirDAP`，以 LocalSystem 运行，程序放入 `%ProgramFiles%\AirDAP`，
+数据放入 `%ProgramData%\AirDAP`，ACL 仅授权 SYSTEM 与 Administrators。
 安装器拒绝覆盖已有服务、程序或数据目录；删除服务只注销服务并保留程序及凭据。
 Windows 服务账户下的蓝牙访问取决于适配器和权限，须在目标机器验证。
 
@@ -94,9 +94,9 @@ sudo sh install-linux.sh remove
 `sudo sh install-linux.sh install ./airdap-service 18080 3242`，之后访问
 `http://airdap.localhost:18080`。省略端口时仍使用 8080 / 3242。
 
-注册 `airdap-native.service`，程序 `/opt/airdap-native/airdap-service`，数据 `/var/lib/airdap-native`。
+注册 `airdap.service`，程序 `/opt/airdap/airdap-service`，数据 `/var/lib/airdap`。
 使用 root 是为了访问 VHCI、USB 和系统蓝牙。systemd 限制系统文件写入；管理接口仅监听回环地址。
-用 `systemctl edit airdap-native.service` 设置端口：先用空 `ExecStart=` 清除原值，再填写完整命令。
+用 `systemctl edit airdap.service` 设置端口：先用空 `ExecStart=` 清除原值，再填写完整命令。
 卸载保留数据和程序。更新现有安装时，先停止服务，再由管理员替换精确的可执行文件并启动。
 
 ## 从 Python 迁移
@@ -108,7 +108,11 @@ sudo sh install-linux.sh remove
 4. 读取设备信息并核对后启用桥接。如需回退，使用旧版本发行包及备份配置；当前仓库不再包含 Python 服务。
 
 两种实现使用兼容的 `service.lock` 进程锁，同一数据目录不能同时运行。
-系统服务安装使用独立名称，不会覆盖原 `AirDAP` / `airdap.service`；仍需避免端口和设备所有权冲突。
+正式服务名统一为 `AirDAP` / `airdap.service`。安装器不会覆盖同名 Python 服务或不认识的安装；
+迁移前先停止并使用旧版工具注销旧 Python 服务，保留数据备份。
+Linux 若存在 `airdap-native.service`，先停用旧单元并备份旧数据；新安装器会拒绝并存安装。
+旧单元可留作备份文件（移出 `/etc/systemd/system/`），执行 `systemctl daemon-reload` 后安装新服务，
+停止新服务再按上述权限约定将配置和凭据迁入 `/var/lib/airdap`，确认新服务正常后再清理旧程序。
 Web 页面、JSON API 和凭据格式保持兼容；旧 CLI 的 `--idf-path` 与 `--provisioning-dir` 已不需要。
 
 ## 验证

@@ -19,7 +19,7 @@ struct Args {
     usbip_executable: Option<PathBuf>,
     #[arg(long)]
     windows_service: bool,
-    #[arg(long, default_value = "AirDAPNative")]
+    #[arg(long, default_value = "AirDAP")]
     service_name: String,
 }
 fn main() -> Result<()> {

@@ -9,16 +9,17 @@ param(
     [switch]$NoHttp
 )
 $ErrorActionPreference = 'Stop'
-$serviceName = 'AirDAPNative'
-$program = Join-Path $env:ProgramFiles 'AirDAPNative'
-$data = Join-Path $env:ProgramData 'AirDAPNative'
+$serviceName = 'AirDAP'
+$program = Join-Path $env:ProgramFiles 'AirDAP'
+$data = Join-Path $env:ProgramData 'AirDAP'
+if ($Action -eq 'install' -and (Get-CimInstance Win32_Service -Filter "Name='AirDAPNative'")) { throw 'Use AirDAP-Manager.exe to migrate the existing AirDAPNative installation.' }
 $exe = Join-Path $program 'airdap-service.exe'
 $existing = Get-CimInstance Win32_Service -Filter "Name='$serviceName'"
 if ($existing -and -not $existing.PathName.StartsWith('"' + $exe + '" --windows-service ', [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Existing service does not belong to this installer.'
 }
 if ($Action -ne 'install') {
-    if (-not $existing) { throw 'Native service is not installed.' }
+    if (-not $existing) { throw 'AirDAP service is not installed.' }
     switch ($Action) {
         'start' { Start-Service -Name $serviceName }
         'stop' { Stop-Service -Name $serviceName }
@@ -33,7 +34,7 @@ if ($Action -ne 'install') {
     return
 }
 if (-not $NoHttp -and $HttpPort -eq $UsbipPort) { throw 'HTTP and USB/IP ports must differ.' }
-if ($existing -or (Test-Path -LiteralPath $program) -or (Test-Path -LiteralPath $data)) { throw 'Existing native installation or data found; inspect it before replacing files.' }
+if ($existing -or (Test-Path -LiteralPath $program) -or (Test-Path -LiteralPath $data)) { throw 'Existing AirDAP installation or data found; use AirDAP-Manager.exe to manage it.' }
 $source = (Resolve-Path -LiteralPath $Binary).Path
 & $source --version
 if ($LASTEXITCODE -ne 0) { throw 'Executable validation failed.' }
@@ -47,8 +48,8 @@ foreach ($path in @($program,$data)) {
 Copy-Item -LiteralPath $source -Destination $exe
 $arguments = '"' + $exe + '" --windows-service --service-name ' + $serviceName + ' --data-dir "' + $data + '" --http-port ' + $HttpPort + ' --usbip-port ' + $UsbipPort
 if ($NoHttp) { $arguments += ' --no-http' }
-New-Service -Name $serviceName -DisplayName 'AirDAP Native' -BinaryPathName $arguments -StartupType Automatic -Description 'AirDAP native USB/IP and local device management'
+New-Service -Name $serviceName -DisplayName 'AirDAP' -BinaryPathName $arguments -StartupType Automatic -Description 'AirDAP USB/IP and local device management'
 & sc.exe failure $serviceName reset= 86400 actions= restart/5000/restart/15000/restart/60000
 if ($LASTEXITCODE -ne 0) { throw 'Service recovery configuration failed.' }
 Start-Service -Name $serviceName
-if (-not $NoHttp) { Write-Output "AirDAP native enabled: http://airdap.localhost:$HttpPort" }
+if (-not $NoHttp) { Write-Output "AirDAP enabled: http://airdap.localhost:$HttpPort" }
