@@ -50,7 +50,8 @@ async fn handle(State(web): State<Web>, request: Request) -> Response {
     let host = header("host");
     let allowed_host = host == format!("127.0.0.1:{}", web.port)
         || host == format!("localhost:{}", web.port)
-        || (web.port == 80 && matches!(host, "127.0.0.1" | "localhost"));
+        || host == format!("airdap.localhost:{}", web.port)
+        || (web.port == 80 && matches!(host, "127.0.0.1" | "localhost" | "airdap.localhost"));
     let api = path.starts_with("/api/") || method != Method::GET;
     if !allowed_host
         || headers.get_all("host").iter().count() != 1

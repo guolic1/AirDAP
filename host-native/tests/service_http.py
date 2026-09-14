@@ -96,6 +96,28 @@ class NativeService(unittest.TestCase):
         self.assertEqual(self.request('POST','/api/profile',b'{',headers={'Content-Type':'application/json'})[0],400)
         self.assertEqual(self.state()['profile'],{})
 
+    def test_airdap_localhost_with_selected_port(self):
+        host = f'airdap.localhost:{self.port}'
+        headers = {'Host': host, 'Origin': f'http://{host}', 'Sec-Fetch-Site': 'same-origin'}
+        status, page = self.request('GET', '/', token=False, headers={'Host': host})
+        self.assertEqual(status, 200)
+        self.assertIn(self.token.encode(), page)
+        self.assertEqual(self.request('GET', '/api/state', headers=headers)[0], 200)
+        self.assertEqual(self.request('POST', '/api/profile', {
+            'device_id': DEVICE, 'host': '127.0.0.1', 'auto_attach': False,
+        }, headers=headers)[0], 200)
+        self.assertEqual(self.state()['profile']['device_id'], DEVICE)
+        self.assertEqual(self.request('GET', '/api/state', token=False, headers=headers)[0], 403)
+        for rejected in (f'evil.airdap.localhost:{self.port}',
+                         f'airdap.localhost.evil.example:{self.port}',
+                         f'airdap.localhost:{self.port % 65535 + 1}', 'airdap.localhost'):
+            with self.subTest(host=rejected):
+                self.assertEqual(self.request('GET', '/', token=False, headers={'Host': rejected})[0], 403)
+        for origin in (f'http://localhost:{self.port}', f'http://airdap.localhost:{self.port % 65535 + 1}',
+                       f'https://{host}', 'http://evil.example'):
+            with self.subTest(origin=origin):
+                self.assertEqual(self.request('GET', '/api/state', headers=headers | {'Origin': origin})[0], 403)
+
     def test_profile_credentials_and_singleton_survive_restart(self):
         self.profile()
         self.assertTrue(self.state()['credential_present'])

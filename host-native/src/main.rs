@@ -85,7 +85,7 @@ async fn run(
     } else {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", args.http_port)).await?;
         let router = web::router(service.clone(), args.http_port)?;
-        eprintln!("AirDAP Web: http://127.0.0.1:{}", args.http_port);
+        eprintln!("AirDAP Web: http://airdap.localhost:{}", args.http_port);
         Some(tokio::spawn(async move {
             let mut rx = http_rx;
             axum::serve(listener, router)
