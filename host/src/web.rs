@@ -71,17 +71,17 @@ async fn handle(State(web): State<Web>, request: Request) -> Response {
             "/api/state" => json_reply(200, web.service.snapshot()),
             "/" => reply(
                 200,
-                include_str!("../../host/web/index.html").replace("__AIRDAP_TOKEN__", &web.token),
+                include_str!("../web/index.html").replace("__AIRDAP_TOKEN__", &web.token),
                 "text/html; charset=utf-8",
             ),
             "/app.js" => reply(
                 200,
-                include_str!("../../host/web/app.js").into(),
+                include_str!("../web/app.js").into(),
                 "text/javascript; charset=utf-8",
             ),
             "/style.css" => reply(
                 200,
-                include_str!("../../host/web/style.css").into(),
+                include_str!("../web/style.css").into(),
                 "text/css; charset=utf-8",
             ),
             _ => error(404, "未找到页面"),

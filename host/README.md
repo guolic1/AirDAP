@@ -1,159 +1,161 @@
-# AirDAP 主机服务
+# AirDAP 原生主机服务
 
-Windows / Linux 后台服务、本机 Web 管理页，以及网络 CMSIS-DAP + CDC USB/IP 桥接。
-本目录集中存放主机服务文件，复用 `firmware/tools/` 已有的配网、凭据、USB/IP 和 OTA 协议实现。
-不需要新增 Python 生产依赖。Python 需为支持 TLS-PSK 的 3.13 或更新版本。
+Rust 实现的 Windows / Linux 服务。发布程序内嵌 Web 页面、BLE Security 2、USB 与网络协议；
+运行时不需要 Python、ESP-IDF、`IDF_PATH` 或额外的 OpenSSL DLL。
+`host/` 统一存放服务、Web 资源和安装工具，旧 Python 服务实现已移除。
 
 ## 功能
 
-| 功能 | 入口与限制 |
+| 功能 | 行为 |
 | --- | --- |
-| USB/IP 桥接 | 网络 DAP TCP 3260 + 目标 UART TCP 3261；本机虚拟 CMSIS-DAP 和 COM / ttyACM |
-| 自动恢复 | 保存已启用状态，服务重启后恢复监听；挂载失败后等待 1 秒重试，旧 DAP/UART 请求不重放 |
-| 设备发现 | USB 枚举和 BLE 配网广播；过滤虚拟 `-NET` 设备，必须明确选择物理设备编号 |
-| 设备信息 | 网络 TLS-PSK HELLO 读取版本、UUID、能力；USB 读取固件、网络、UART、OTA 诊断 |
-| Wi-Fi 配置 | BLE Security 2 或 USB debug shell；只有 DHCP 联网确认后报告成功 |
-| 网络凭据 | 导入现有 JSON，或在 BLE / USB 配网会话中生成、保存并写入设备；重复操作复用本机凭据 |
-| OTA | 网络 CONTROL 或物理 USB；上传、显示版本/大小/SHA-256、确认后写非活动槽并重启 |
-| 系统服务 | Windows SCM 自动启动及失败恢复；Linux systemd enable、Restart=on-failure |
+| USB/IP | TCP 3260/3261 的 TLS-PSK DAP 与 UART 映射为 CMSIS-DAP 和 CDC COM/ttyACM |
+| 自动恢复 | 保存桥接启用状态；进程重启恢复，挂载失败 1 秒后重试；断线不重放旧请求 |
+| Web | 固定监听本机 `127.0.0.1`，同源校验和每次启动生成的 API token |
+| 配网 | USB / 蓝牙选择、持续会话、设备扫描 Wi-Fi、SSID/RSSI/信道/加密/BSSID、选择热点连接 |
+| 网络凭据 | 兼容原有 JSON；先私密保存再写设备，失败重试使用相同凭据，检查返回指纹 |
+| 设备信息 | 网络 HELLO 查询版本/UUID/能力；物理 USB 固定诊断命令 |
+| OTA | 上传检查版本/大小/SHA-256，确认后写非活动槽；网络重启后核对槽位、版本和启动确认 |
+| 服务 | Windows SCM / Linux systemd，开机自启、异常退出重启，停止时等待当前设备操作完成 |
 
-不提供目标芯片的浏览器烧录界面；目标烧录仍由 Keil、OpenOCD、pyOCD 等通过虚拟 CMSIS-DAP 完成。
-不开放网络 debug shell，也不提供任意命令执行接口。
+配网成功或失败后窗口都保持打开，直到“取消配网”。蓝牙每 25 秒续期，设备租期为 120 秒。
+USB 配网仍遵循固件限制：需要独立 debug shell，SSID/密码仅支持可打印 ASCII。
+USB OTA 可验证重新枚举和版本，但该 USB QUERY 没有网络 QUERY 的槽位确认字段。
+BLE 使用固件既有的公开开发配网口令；本次迁移没有改变固件的安全边界。
+没有新增网络 debug shell 端口。
 
-## 前台运行
+## 构建与前台运行
 
-从仓库根目录执行：
-
-```powershell
-uv sync --locked
-uv run --locked python host/airdap-service.py --http-port 8080 --usbip-port 3242
-```
-
-打开 [本机管理页](http://127.0.0.1:8080)。HTTP 和 USB/IP 均固定监听 `127.0.0.1`。
-`--no-http` 关闭管理页，使用先前保存的设备配置恢复桥接。
-`--data-dir` 指定状态目录；前台默认 Windows `%LOCALAPPDATA%\AirDAP\service`，
-Linux `~/.local/share/AirDAP/service`。同一数据目录有进程锁，不允许同时运行两个实例。
-
-设备首次使用：
-
-1. 查找 USB 设备或扫描已开启配网广播的 BLE 设备，选择设备，保存其编号和 IP/mDNS 主机名。
-2. 选择蓝牙或 USB，点击“开始配网”。蓝牙需先在设备上开启配网模式，USB 需连接物理设备。
-3. 连接后，可分别点击“建立网络连接凭据”和“连接 Wi-Fi”。前者生成并保存本机凭据，再校验设备返回的指纹；后者让设备扫描 Wi-Fi，显示 SSID、RSSI、信道、加密方式和 BSSID，点击热点后输入密码。USB 需要独立 debug shell，目前仍仅支持 ASCII SSID/密码。
-   配置完成或失败都保留窗口，可以重试、扫描或继续配对；只有“取消配网”结束会话，已保存配置不撤销。正在执行的写入须完成后才能取消。
-4. 确认设备 IP。mDNS 无法解析时填写实际 IP。点击网络读取验证，再启动桥接。
-5. 虚拟 USB 序列号为 `ADP-xxxxxxxxxxxx-NET`；目标 COM 编号由系统分配。配置、配对、升级前先停止桥接。
-
-配网会话需要本次新增固件接口；旧固件会明确报不支持，不会伪造已连接。
-蓝牙每 25 秒续期 120 秒的设备会话；服务退出或链路丢失后设备超时清理，网页保持窗口并提示错误。
-服务运行期间刷新页面会恢复当前会话。服务重启不自动恢复配网或重放凭据/Wi-Fi 写入。
-网络凭据生成后先私密保存，再发送给设备；设备确认失败时保留同一份凭据供重试，成功状态以指纹匹配为准。
-烧录器同时占用物理 USB DAP 时，网络路由可能被固件优先级拒绝；按设备既有配置切换到网络 DAP 模式。
-
-BLE 复用 ESP-IDF 和下载的 Espressif `network_provisioning` 客户端，默认寻找仓库配置。
-隔离 worktree 可指定已有组件位置，不必复制或重新下载固件构建目录：
-
-```powershell
-uv run --locked python host/airdap-service.py `
-  --idf-path C:/path/to/esp-idf `
-  --provisioning-dir C:/path/to/network_provisioning/tool/esp_prov
-```
-
-## Windows Service
-
-先安装项目依赖及签名的 `usbip-win2` VHCI 驱动/客户端。
-已有 `usbipd-win` 不等于导入客户端；其 3240 端口无需停止。
-
-在**管理员 PowerShell** 中，从仓库根目录执行：
-
-```powershell
-./host/install-windows.ps1 -Action Install -HttpPort 8080 -UsbipPort 3242
-./host/install-windows.ps1 -Action Status
-./host/install-windows.ps1 -Action Stop
-./host/install-windows.ps1 -Action Start
-./host/install-windows.ps1 -Action Remove
-```
-
-安装程序将服务代码、现有 Python 解释器与环境依赖复制到 `%ProgramFiles%\AirDAP`，
-以 LocalSystem 注册原生服务 `AirDAP`，自动启动，并设置异常退出恢复。
-解释器来自 `uv run --locked python`；也可用 `-PythonPath` 指定已装好仓库依赖的环境。
-代码和数据目录 ACL 仅授予 SYSTEM 与 Administrators，避免特权服务执行普通用户可修改的代码。
-服务数据位于 `%ProgramData%\AirDAP`，日志 `service.log` 轮转为 2 MiB × 3。
-`-NoHttp` 可安装不启用 Web 的服务。
-
-`-IdfPath` / `-ProvisioningDirectory` 可指定 BLE 组件来源。安装时复制需要的客户端及
-protocomm Python 文件，运行服务无需访问用户 ESP-IDF 工作目录。
-缺少组件时安装仍可运行 USB 配网、桥接与 OTA，但 BLE 配网会明确报告未就绪。
-Windows 服务账户下的蓝牙可用性受适配器及 Windows 权限影响，须在目标机器确认。
-
-安装前停止占用同一 HTTP / USB/IP 端口的前台实例。可使用 `-HttpPort` / `-UsbipPort`
-或 `-InstallDirectory` / `-DataDirectory` 自定义 Program Files / ProgramData 下的专用子目录。
-已有服务和安装目录不会静默覆盖，已有数据目录必须具有本安装器的 AirDAP 标记。
-升级服务程序时停止并移除旧服务注册，再安装到新的专用目录，并保留同一数据目录。
-移除操作只删除服务注册，保留程序、配置和凭据。
-
-## Linux systemd
-
-需要 systemd、系统 Python 3.13+、`uv`、`usbip` 客户端与 `vhci_hcd` 内核模块。
-BLE 还需要工作的 BlueZ 服务/适配器。安装脚本使用已锁定的项目依赖，不修改系统 pip 环境。
+在完整仓库的 `host/` 内使用 Rust 1.93 或更新版本，依赖由 `Cargo.lock` 锁定：
 
 ```sh
-sudo env PATH="$PATH" python3 host/install-linux.py install --python /usr/bin/python3.14
-sudo python3 host/install-linux.py status
-sudo python3 host/install-linux.py stop
-sudo python3 host/install-linux.py start
-sudo python3 host/install-linux.py remove
+cargo build --release --locked
+./target/release/airdap-service --data-dir ./local-data --http-port 8080 --usbip-port 3242
 ```
 
-程序安装到 `/opt/airdap`，数据保存在 `/var/lib/airdap`，服务为 `airdap.service`。
-安装完成执行 `systemctl enable --now`，开机加载 VHCI 并启动。
-为访问 USB/IP 的 sysfs、物理 USB 和蓝牙，服务以 root 运行；使用私有数据权限及只读系统目录限制。
-`--http-port` / `--usbip-port` / `--no-http` 同样可用于安装。
-卸载仅移除服务注册；更换程序版本前需人工检查并保留旧安装目录，脚本不会覆盖它。
+Windows 运行 `target\release\airdap-service.exe`，其余参数相同。
+构建需要 C 编译工具、Perl 和 make（vendored OpenSSL/libusb）；Linux 还需系统的蓝牙服务 BlueZ。
+Windows 可用 MSVC 构建环境，或在 Linux 中用 `x86_64-pc-windows-gnu` + MinGW 交叉编译：
 
 ```sh
-systemctl is-enabled airdap.service
-journalctl -u airdap.service
-sudo tail -n 80 /var/lib/airdap/service.log
+rustup target add x86_64-pc-windows-gnu
+CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc \
+  cargo build --release --locked --target x86_64-pc-windows-gnu
 ```
 
-## OTA 与失败处理
+打开 <http://airdap.localhost:8080>。用 `--http-port 18080` 选择其他端口后，访问
+`http://airdap.localhost:18080`。现代浏览器将 `.localhost` 解析到本机，无需修改 hosts 或公网 DNS；
+服务仍只监听 `127.0.0.1`，原有 `127.0.0.1` / `localhost` 地址继续可用。
+如果客户端不支持 `.localhost` 解析，可使用相同端口的 `127.0.0.1` 地址。
+`--no-http` 关闭 Web；`--usbip-executable` 指定系统 USB/IP 客户端。
+前台默认数据目录：Windows `%LOCALAPPDATA%\AirDAP\service`，Linux `$XDG_DATA_HOME/AirDAP/service`
+或 `~/.local/share/AirDAP/service`。`service.log` 记录操作结果，轮转为 2 MiB × 3，不记录请求内容或凭据。
+Linux 发布版使用构建机器的 glibc 基线，分发到较旧发行版时应在最旧目标环境重新构建。
 
-选择文件后点击“上传并检查镜像”。上传只在内存暂存一份镜像，不写设备，USB 桥接监听期间也可以上传。
-真正点击“确认设备并升级”前，需要停止 USB 桥接并关闭烧录器和串口工具。
-页面显示 ESP32-S3 应用描述符版本、大小和 SHA-256；
-执行时再次核对设备编号、镜像摘要和确认字段。实际容量和完整镜像合法性仍由设备 OTA 管理器验证。
-网络 OTA 使用既有 `airdap-network-update.py` 的容量、偏移、提交及槽位/版本/启动确认检查。
-USB OTA 使用既有 `airdap-update.py`，重启后检查同一物理序列号和目标版本。
-USB QUERY 不提供槽位/启动确认字段，所以 USB 结果不会冒充网络 OTA 的完整启动确认。
-这是固件开发接口，不提供新增签名、加密镜像或防降级保障。
+## Windows 服务安装
 
-每次只执行一个设备操作。服务停止会等待已经开始的操作完成；不要强制结束正在升级的进程。
-提交成功但重连失败时显示失败/状态不确定，不自动重新写入。USB/网络 OTA 写入错误由现有客户端
-尝试 ABORT，网络凭据和 Wi-Fi 操作也不会自动重试。
-掉线仅触发虚拟 USB 重新挂载，因此烧录器/COM 程序可能需要重新打开设备。
-空闲通道每 0.5 秒检查心跳，单次心跳超时 1.5 秒；正常 DAP/UART 操作仍使用原来的 5 秒超时。
-后台每 0.25 秒检查挂载状态，失败后等待 1 秒再次尝试。重连还需完成 TCP/TLS 握手与系统 USB 枚举，
-这些耗时不包含在重试间隔中。Wi-Fi 抖动超过心跳期限会触发断开，旧请求不会重放。
-停止只清理指向本服务 `127.0.0.1:端口/1-1` 的挂载，不清理其他 USB/IP 设备。
+先安装签名的 usbip-win2 导入驱动和客户端；usbipd-win 不能替代导入客户端。
+停止占用相同端口的旧实例。在**管理员 PowerShell** 中执行：
 
-Wi-Fi 密码仅保留在本次操作内存中，不进入配置/命令参数/日志。网络 PSK 独立保存在
-`credentials/<device-id>.json`，POSIX 权限 0600；配置使用原子替换。
-浏览器 API 检查 Host、Origin、Fetch Metadata 和本次进程令牌；不启用 CORS。
-这些检查防止跨站页面操作本机服务，不是同机用户之间的认证边界。
+```powershell
+./install-windows.ps1 -Action install -Binary ./target/release/airdap-service.exe
+./install-windows.ps1 -Action status
+./install-windows.ps1 -Action stop
+./install-windows.ps1 -Action start
+./install-windows.ps1 -Action remove
+```
+
+交叉编译时将 `-Binary` 指向 `target/x86_64-pc-windows-gnu/release/airdap-service.exe`。
+可设置 `-HttpPort`、`-UsbipPort` 和 `-NoHttp`。
+例如安装到 Web 端口 18080：
+
+```powershell
+./install-windows.ps1 -Action install -Binary ./target/release/airdap-service.exe -HttpPort 18080
+```
+
+安装后访问 `http://airdap.localhost:18080`。端口范围为 1–65535，请选择未被占用且与 USB/IP 不同的端口。
+服务名为 `AirDAPNative`，以 LocalSystem 运行，程序放入 `%ProgramFiles%\AirDAPNative`，
+数据放入 `%ProgramData%\AirDAPNative`，ACL 仅授权 SYSTEM 与 Administrators。
+安装器拒绝覆盖已有服务、程序或数据目录；删除服务只注销服务并保留程序及凭据。
+Windows 服务账户下的蓝牙访问取决于适配器和权限，须在目标机器验证。
+
+## Linux 服务安装
+
+先安装发行版的 `usbip`、BlueZ，并确认内核支持 `vhci_hcd`。在本目录执行：
+
+```sh
+sudo sh install-linux.sh install ./target/release/airdap-service
+sudo sh install-linux.sh status
+sudo sh install-linux.sh stop
+sudo sh install-linux.sh start
+sudo sh install-linux.sh remove
+```
+
+安装时可依次指定 Web 和 USB/IP 端口，例如
+`sudo sh install-linux.sh install ./airdap-service 18080 3242`，之后访问
+`http://airdap.localhost:18080`。省略端口时仍使用 8080 / 3242。
+
+注册 `airdap-native.service`，程序 `/opt/airdap-native/airdap-service`，数据 `/var/lib/airdap-native`。
+使用 root 是为了访问 VHCI、USB 和系统蓝牙。systemd 限制系统文件写入；管理接口仅监听回环地址。
+用 `systemctl edit airdap-native.service` 设置端口：先用空 `ExecStart=` 清除原值，再填写完整命令。
+卸载保留数据和程序。更新现有安装时，先停止服务，再由管理员替换精确的可执行文件并启动。
+
+## 从 Python 迁移
+
+1. 停止旧桥接和服务，保留原数据目录作为备份。
+2. 启动原生服务时直接使用原 `--data-dir`，或在两边均已停止时复制 `config.json` 与 `credentials/`。
+   Linux 凭据文件必须为 0600、目录为 0700；Windows 服务数据须保留安装器设置的 ACL。
+3. 使用原端口运行原生服务。已有 `bridge_enabled=true` 会恢复桥接；首次试运行可先改为 false。
+4. 读取设备信息并核对后启用桥接。如需回退，使用旧版本发行包及备份配置；当前仓库不再包含 Python 服务。
+
+两种实现使用兼容的 `service.lock` 进程锁，同一数据目录不能同时运行。
+系统服务安装使用独立名称，不会覆盖原 `AirDAP` / `airdap.service`；仍需避免端口和设备所有权冲突。
+Web 页面、JSON API 和凭据格式保持兼容；旧 CLI 的 `--idf-path` 与 `--provisioning-dir` 已不需要。
 
 ## 验证
 
-```powershell
-cmake -S host/tests -B build/host-service-tests -G Ninja
-cmake --build build/host-service-tests
-ctest --test-dir build/host-service-tests --output-on-failure
-```
-
-Linux 另运行真实进程的 SIGTERM / 恢复 / `--no-http` 检查：
-
 ```sh
-python3 host/tests/test_process.py
+cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --all-targets
+cargo build --locked --bins --examples
+python3 tests/network_usbip.py -v
+python3 tests/service_http.py -v
+python3 tests/service_ota.py -v
 ```
 
-测试隔离物理设备与网络上游，不会配网、旋转凭据或烧录。Windows 本机服务注册需要管理员权限；
-USB/BLE 配网持久性、实物 OTA 及开机后蓝牙行为需要在明确选定设备上另做验收。
+进程测试需要 Python 3.13+ TLS-PSK，仅用于验证，不是服务依赖。
+默认运行 `target/debug/airdap-service` 和 `target/debug/examples/bridge`（Windows 自动添加 `.exe`）。
+自定义构建目录时设置 `AIRDAP_NATIVE_SERVICE` / `AIRDAP_NATIVE_BRIDGE` 指向对应构建产物。
+OTA 模拟器占用本机 3260，运行前确保空闲；WSL 镜像网络可能与 Windows 测试产生端口冲突，
+可使用 Linux 独立网络命名空间测试。Windows 的强制终止不能模拟 SCM 停止，SIGTERM 排空用例仅在 Linux 执行。
+
+2026-09-14 实机验证：Windows VHCI 成功枚举 CMSIS-DAP 与 COM，DAP_Info 读取通过，
+COM 打开/关闭及 57600→115200 波特率配置通过；蓝牙与 USB 的配网握手、热点扫描、
+凭据指纹确认和取消会话通过。蓝牙闲置 144 秒后仍可扫描和写入凭据，设备再次重启后的
+首次连接也通过。Linux 原生服务通过真实 TLS-PSK 与设备通信，经 USB/IP 客户端读取 DAP_Info 成功。
+网络 OTA 确认切换到原非活动槽且已确认启动；USB OTA 确认
+断开、重新枚举和版本，随后用物理 USB 诊断核对镜像状态为 valid。使用同一份已验证固件测试，
+没有改变固件版本。设备重启约 2.16 秒后旧 USB/IP 会话断开、约 2.37 秒开始重挂载，之后 DAP 可读；
+这不是物理断电到 PnP 删除的精确时延测量。
+
+实机发现并修复 Windows 驱动自动移除与显式卸载的竞态、USB OTA 重新枚举期间临时通信错误，
+以及 Windows 蓝牙首次连接的 GATT 会话建立顺序。失败的卸载仅在确认本服务导出已消失后视为完成；
+USB 枚举错误不视为断开证明，也不自动重放 OTA；Windows 使用显式 GATT 会话保持连接，取消时释放。
+
+尚未执行 Windows SCM / Linux systemd 实际安装、Linux VHCI 导入、实物 Wi-Fi 密码写入、
+目标芯片烧录或 UART 线缆回环；也未做破坏性回滚故障注入。
+这些场景不能由成功构建、模拟测试、DAP 信息读取或 COM 打开代替证明。
+
+## 本次资源测量
+
+Windows 本机，两个实现分别读取同一设备的 HELLO 后，Web 开启、桥接未挂载、无浏览器轮询；
+测量 20.01 秒，Python 包含启动器及实际服务进程，Rust 为 release 构建：
+
+| 指标 | Rust | Python |
+| --- | ---: | ---: |
+| 工作集 RSS | 13.34 MiB | 40.82 MiB |
+| 私有内存 | 2.53 MiB | 22.82 MiB |
+| 线程数 | 4 | 8 |
+| 单核 CPU 均值 | 计时精度内 0% | 0.078% |
+
+此场景 RSS 约减少 67%。短时 CPU 采样的 0% 不表示完全没有开销；未测量实物烧录、持续串口或 BLE 扫描峰值。
