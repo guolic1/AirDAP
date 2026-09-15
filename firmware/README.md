@@ -989,9 +989,7 @@ With a USB/IP virtual host controller, existing USB debug tools and serial
 applications can use the network device. It listens only on `127.0.0.1:3240`;
 it does not provide a DAPLink drag-and-drop storage volume.
 
-See [the bridge guide](../docs/usbip-bridge.md) for driver prerequisites,
-pairing, attach/detach, the Windows background task, the Linux systemd user
-service, and protocol limitations. For the complete Windows Service/systemd host
+For driver prerequisites and the complete Windows Service/systemd host
 with local Web management, USB/BLE provisioning and OTA, see
 [`host/README.md`](../host/README.md). Actual target programming over the virtual
 USB device still requires hardware acceptance on each OS.
